@@ -166,6 +166,10 @@ function(keels2_provide_source_sdk)
     add_library(keels2_source_sdk STATIC "${_keels2_source_sdk_root}/tier1/convar.cpp")
     add_library(KeelS2::SourceSDK ALIAS keels2_source_sdk)
     set_target_properties(keels2_source_sdk PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(MSVC)
+        set_target_properties(keels2_source_sdk PROPERTIES MSVC_RUNTIME_LIBRARY MultiThreaded)
+        target_link_options(keels2_source_sdk INTERFACE /IGNORE:4099 /INCREMENTAL:NO)
+    endif()
     # ConVar calls cross into a game-owned C++ interface. Integration tests use
     # an ABI-faithful vtable fixture, which intentionally has no compatible RTTI;
     # vptr instrumentation therefore cannot validate this external boundary.
