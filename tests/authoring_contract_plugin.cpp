@@ -56,8 +56,15 @@ public:
     bool Load() override
     {
         ++g_load_count;
-        g_source2_ready = GetSource2Server<void>() &&
-            GetSource2GameClients<void>() && GetCVarSystem<void>();
+        void* server = GetSource2Server<void>();
+        void* game_clients = GetSource2GameClients<void>();
+        void* cvar = GetCVarSystem<void>();
+        void* engine_named = GetEngineInterface<void>("FixtureEngine001");
+        void* server_named = GetServerInterface<void>("FixtureServer001");
+        void* invalid_named = GetEngineInterface<void>("");
+        void* missing_named = GetEngineInterface<void>("MissingFixture001");
+        g_source2_ready = server && game_clients && cvar && engine_named && server_named &&
+            !invalid_named && !missing_named;
         if (CreateCommand(
                 "authoring_wrong_owner",
                 "Must reject a member callback from another plugin type",
@@ -89,7 +96,9 @@ public:
     {
         ++g_unload_count;
         g_unload_source2_null = !GetSource2Server<void>() &&
-            !GetSource2GameClients<void>() && !GetCVarSystem<void>();
+            !GetSource2GameClients<void>() && !GetCVarSystem<void>() &&
+            !GetEngineInterface<void>("FixtureEngine001") &&
+            !GetServerInterface<void>("FixtureServer001");
         if (g_mode == 5)
         {
             throw std::runtime_error("authoring unload test");

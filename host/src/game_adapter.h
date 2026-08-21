@@ -70,6 +70,10 @@ public:
     virtual KeelResult QueryInterface(
         KeelSource2Capability capability,
         KeelSource2InterfaceInfo& info) const noexcept = 0;
+    virtual KeelResult QueryNamedInterface(
+        KeelSource2Factory factory,
+        const char* interface_name,
+        KeelSource2InterfaceInfo& info) = 0;
     virtual KeelResult EnableLifecycleEvent(
         KeelLifecycleEventType event,
         const KeelHookApi& hooks,

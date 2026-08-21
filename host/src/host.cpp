@@ -133,10 +133,16 @@ std::uint32_t Host::Start(const KeelHostStartInfo& info)
             return KEELS2_HOST_START_RETAINED;
         }
 
+        source2_api_v1_ = {
+            sizeof(KeelSource2ApiV1),
+            KEELS2_SOURCE2_API_VERSION_1,
+            &ApiQuerySource2Interface
+        };
         source2_api_ = {
             sizeof(KeelSource2Api),
             KEELS2_SOURCE2_API_VERSION,
-            &ApiQuerySource2Interface
+            &ApiQuerySource2Interface,
+            &ApiQuerySource2NamedInterface
         };
         source2_authoring_api_ = {
             sizeof(KeelSource2AuthoringApi),
@@ -453,6 +459,7 @@ bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
     }
     adapter_.reset();
     WriteShutdownTrace("game adapter released");
+    source2_api_v1_ = {};
     source2_api_ = {};
     source2_authoring_api_ = {};
     api_ = {};
@@ -648,6 +655,27 @@ KeelResult Host::ApiQuerySource2Interface(
     }
 }
 
+KeelResult Host::ApiQuerySource2NamedInterface(
+    KeelPluginHandle plugin,
+    KeelSource2Factory factory,
+    const char* interface_name,
+    KeelSource2InterfaceInfo* info)
+{
+    try
+    {
+        return Instance().QuerySource2NamedInterface(
+            plugin,
+            factory,
+            interface_name,
+            info);
+    }
+    catch (...)
+    {
+        Instance().Write(KEEL_LOG_ERROR, "exception while querying a named Source 2 interface");
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+}
+
 KeelResult Host::QueryService(
     KeelPluginHandle plugin,
     const char* name,
@@ -667,16 +695,25 @@ KeelResult Host::QueryService(
     }
     if (std::strcmp(name, KEELS2_SOURCE2_SERVICE_NAME) == 0)
     {
-        if (version != KEELS2_SOURCE2_API_VERSION)
+        if (version == KEELS2_SOURCE2_API_VERSION_1)
         {
-            return KEEL_RESULT_INCOMPATIBLE;
+            if (!source2_api_v1_.query_interface)
+            {
+                return KEEL_RESULT_NOT_READY;
+            }
+            *service = &source2_api_v1_;
+            return KEEL_RESULT_OK;
         }
-        if (!source2_api_.query_interface)
+        if (version == KEELS2_SOURCE2_API_VERSION)
         {
-            return KEEL_RESULT_NOT_READY;
+            if (!source2_api_.query_interface || !source2_api_.query_named_interface)
+            {
+                return KEEL_RESULT_NOT_READY;
+            }
+            *service = &source2_api_;
+            return KEEL_RESULT_OK;
         }
-        *service = &source2_api_;
-        return KEEL_RESULT_OK;
+        return KEEL_RESULT_INCOMPATIBLE;
     }
     if (std::strcmp(name, KEELS2_SOURCE2_AUTHORING_SERVICE_NAME) == 0)
     {
@@ -809,6 +846,37 @@ KeelResult Host::QuerySource2Interface(
         return KEEL_RESULT_NOT_READY;
     }
     return adapter_->QueryInterface(capability, *info);
+}
+
+KeelResult Host::QuerySource2NamedInterface(
+    KeelPluginHandle plugin,
+    KeelSource2Factory factory,
+    const char* interface_name,
+    KeelSource2InterfaceInfo* info)
+{
+    std::scoped_lock lock(state_mutex_);
+    if (!info || !interface_name)
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    const std::uint32_t size = info->size;
+    *info = {};
+    info->size = size;
+    if (size != sizeof(KeelSource2InterfaceInfo))
+    {
+        return KEEL_RESULT_INCOMPATIBLE;
+    }
+    if ((factory != KEELS2_SOURCE2_FACTORY_ENGINE &&
+            factory != KEELS2_SOURCE2_FACTORY_SERVER) || !interface_name[0])
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    PluginRecord* owner = PluginByHandle(plugin);
+    if (!accepting_resources_ || !owner || !owner->accepting_resources || !adapter_)
+    {
+        return KEEL_RESULT_NOT_READY;
+    }
+    return adapter_->QueryNamedInterface(factory, interface_name, *info);
 }
 
 void Host::DispatchCommand(const GameCommandInvocation& game_invocation, void* user_data)

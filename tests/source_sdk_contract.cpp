@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <type_traits>
+#include <utility>
 
 using ClientConnectSignature = bool (IServerGameClients::*)(
     CPlayerSlot,
@@ -50,12 +51,20 @@ using PluginClientDisconnectingSignature = void (keels2::Plugin::*)(
     const char*);
 using PluginClientSettingsChangedSignature = void (keels2::Plugin::*)(CPlayerSlot);
 
+class Source2AccessProbe : public keels2::Plugin
+{
+public:
+    using keels2::Plugin::GetEngineInterface;
+    using keels2::Plugin::GetServerInterface;
+};
+
 static_assert(SOURCE_ENGINE == 25);
 static_assert(sizeof(void*) == 8);
 static_assert(sizeof(uint64) == 8);
 static_assert(sizeof(CPlayerSlot) == 4);
 static_assert(sizeof(CCommandContext) == 8);
 static_assert(sizeof(ENetworkDisconnectionReason) == 4);
+static_assert(sizeof(NETWORKSERVERSERVICE_INTERFACE_VERSION) == 25);
 static_assert(std::is_same_v<decltype(&IServerGameClients::ClientConnect), ClientConnectSignature>);
 static_assert(std::is_same_v<decltype(&IServerGameClients::ClientActive), ClientActiveSignature>);
 static_assert(std::is_same_v<
@@ -63,6 +72,14 @@ static_assert(std::is_same_v<
     ClientDisconnectSignature>);
 static_assert(std::is_same_v<decltype(&IServerGameClients::ClientCommand), ClientCommandSignature>);
 static_assert(std::is_same_v<decltype(&IServerGameDLL::GameFrame), GameFrameSignature>);
+static_assert(std::is_same_v<
+    decltype(std::declval<Source2AccessProbe&>().GetEngineInterface<INetworkServerService>(
+        NETWORKSERVERSERVICE_INTERFACE_VERSION)),
+    INetworkServerService*>);
+static_assert(std::is_same_v<
+    decltype(std::declval<Source2AccessProbe&>().GetServerInterface<IServerGameDLL>(
+        INTERFACEVERSION_SERVERGAMEDLL)),
+    IServerGameDLL*>);
 static_assert(std::is_same_v<
     decltype(&keels2::Plugin::OnClientConnected),
     PluginClientConnectedSignature>);

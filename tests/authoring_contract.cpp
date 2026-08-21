@@ -45,6 +45,7 @@ std::uint32_t g_unsubscribe_count{};
 std::uint32_t g_unregister_count{};
 std::uint32_t g_lifecycle_queries{};
 std::uint32_t g_source2_queries{};
+std::uint32_t g_source2_named_queries{};
 bool g_wrong_provenance{};
 bool g_dispatch_during_subscribe{};
 bool g_lifecycle_unavailable{};
@@ -53,6 +54,8 @@ KeelLifecycleEventType g_fail_subscription_event{};
 int g_server{};
 int g_game_clients{};
 int g_cvar{};
+int g_engine_named{};
+int g_server_named{};
 
 void ResetHost()
 {
@@ -65,6 +68,7 @@ void ResetHost()
     g_unregister_count = 0;
     g_lifecycle_queries = 0;
     g_source2_queries = 0;
+    g_source2_named_queries = 0;
     g_wrong_provenance = false;
     g_dispatch_during_subscribe = true;
     g_lifecycle_unavailable = false;
@@ -363,12 +367,57 @@ KeelResult QuerySource2(
     return KEEL_RESULT_OK;
 }
 
+KeelResult QueryNamedSource2(
+    KeelPluginHandle plugin,
+    KeelSource2Factory factory,
+    const char* interface_name,
+    KeelSource2InterfaceInfo* info)
+{
+    if (!plugin || !interface_name || !interface_name[0] || !info ||
+        info->size != sizeof(KeelSource2InterfaceInfo) ||
+        (factory != KEELS2_SOURCE2_FACTORY_ENGINE &&
+            factory != KEELS2_SOURCE2_FACTORY_SERVER))
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    ++g_source2_named_queries;
+    void* instance{};
+    const char* module_name{};
+    if (factory == KEELS2_SOURCE2_FACTORY_ENGINE &&
+        std::strcmp(interface_name, "FixtureEngine001") == 0)
+    {
+        instance = &g_engine_named;
+        module_name = "engine";
+    }
+    else if (factory == KEELS2_SOURCE2_FACTORY_SERVER &&
+        std::strcmp(interface_name, "FixtureServer001") == 0)
+    {
+        instance = &g_server_named;
+        module_name = "server";
+    }
+    else
+    {
+        return KEEL_RESULT_NOT_FOUND;
+    }
+    *info = {
+        sizeof(KeelSource2InterfaceInfo), KEELS2_SOURCE2_CAPABILITY_NAMED, factory,
+        KEELS2_SOURCE2_OWNERSHIP_BORROWED, KEELS2_SOURCE2_LIFETIME_HOST, 0,
+        instance, interface_name, module_name, "/fixture/module", "fixture-profile"
+    };
+    return KEEL_RESULT_OK;
+}
+
 const KeelLifecycleApi g_lifecycle_api{
     sizeof(KeelLifecycleApi), KEELS2_LIFECYCLE_API_VERSION, &Subscribe, &Unsubscribe
 };
 
+const KeelSource2ApiV1 g_source2_api_v1{
+    sizeof(KeelSource2ApiV1), KEELS2_SOURCE2_API_VERSION_1, &QuerySource2
+};
+
 const KeelSource2Api g_source2_api{
-    sizeof(KeelSource2Api), KEELS2_SOURCE2_API_VERSION, &QuerySource2
+    sizeof(KeelSource2Api), KEELS2_SOURCE2_API_VERSION, &QuerySource2,
+    &QueryNamedSource2
 };
 
 const KeelSource2AuthoringApi g_source2_authoring_api{
@@ -408,6 +457,11 @@ KeelResult QueryService(
     }
     if (std::strcmp(name, KEELS2_SOURCE2_SERVICE_NAME) == 0)
     {
+        if (version == KEELS2_SOURCE2_API_VERSION_1)
+        {
+            *service = &g_source2_api_v1;
+            return KEEL_RESULT_OK;
+        }
         if (version != KEELS2_SOURCE2_API_VERSION)
         {
             return KEEL_RESULT_INCOMPATIBLE;
@@ -539,7 +593,7 @@ int main(int argument_count, char** arguments)
     ResetHost();
     reset();
     if (load(&api, 1) != KEEL_TRUE || load_count() != 1 || source2_ready() != KEEL_TRUE ||
-        g_source2_queries != 3)
+        g_source2_queries != 3 || g_source2_named_queries != 3)
     {
         return Failure(8, "successful facade load failed");
     }
@@ -684,7 +738,7 @@ int main(int argument_count, char** arguments)
     reset();
     g_wrong_provenance = true;
     if (load(&api, 2) != KEEL_TRUE || source2_ready() != KEEL_FALSE ||
-        g_source2_queries != 3)
+        g_source2_queries != 3 || g_source2_named_queries != 3)
     {
         return Failure(19, "incorrect Source2 provenance was accepted");
     }

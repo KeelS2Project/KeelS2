@@ -5,6 +5,7 @@
 #include <keels2/source2.h>
 
 #include <atomic>
+#include <cstring>
 #include <memory>
 #include <utility>
 
@@ -13,6 +14,7 @@ namespace keels2::source2
 
 enum class Capability : KeelSource2Capability
 {
+    named = KEELS2_SOURCE2_CAPABILITY_NAMED,
     server = KEELS2_SOURCE2_CAPABILITY_SERVER,
     game_clients = KEELS2_SOURCE2_CAPABILITY_GAME_CLIENTS,
     cvar = KEELS2_SOURCE2_CAPABILITY_CVAR
@@ -136,7 +138,8 @@ public:
         }
         const auto* api = static_cast<const KeelSource2Api*>(service);
         if (!api || api->size != sizeof(KeelSource2Api) ||
-            api->api_version != KEELS2_SOURCE2_API_VERSION || !api->query_interface)
+            api->api_version != KEELS2_SOURCE2_API_VERSION || !api->query_interface ||
+            !api->query_named_interface)
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
@@ -169,15 +172,46 @@ public:
         {
             return result;
         }
-        if (info.size != sizeof(info) ||
+        if (!ValidInfo(info) ||
             info.capability != static_cast<KeelSource2Capability>(capability) ||
             (info.factory != KEELS2_SOURCE2_FACTORY_ENGINE &&
-                info.factory != KEELS2_SOURCE2_FACTORY_SERVER) ||
-            info.ownership != KEELS2_SOURCE2_OWNERSHIP_BORROWED ||
-            info.lifetime != KEELS2_SOURCE2_LIFETIME_HOST || info.reserved != 0 ||
-            !info.instance || !ValidText(info.interface_name) ||
-            !ValidText(info.module_name) || !ValidText(info.module_path) ||
-            !ValidText(info.compatibility_profile))
+                info.factory != KEELS2_SOURCE2_FACTORY_SERVER))
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        output.Adopt(context_, info);
+        return KEEL_RESULT_OK;
+    }
+
+    KeelResult Query(
+        Factory factory,
+        const char* interface_name,
+        Interface& output) const noexcept
+    {
+        output.Reset();
+        if (!interface_name || !interface_name[0])
+        {
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+        if (!*this)
+        {
+            return KEEL_RESULT_NOT_READY;
+        }
+        KeelSource2InterfaceInfo info{};
+        info.size = sizeof(info);
+        const KeelResult result = api_->query_named_interface(
+            context_->plugin,
+            static_cast<KeelSource2Factory>(factory),
+            interface_name,
+            &info);
+        if (result != KEEL_RESULT_OK)
+        {
+            return result;
+        }
+        if (!ValidInfo(info) ||
+            info.capability != KEELS2_SOURCE2_CAPABILITY_NAMED ||
+            info.factory != static_cast<KeelSource2Factory>(factory) ||
+            std::strcmp(info.interface_name, interface_name) != 0)
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
@@ -189,6 +223,16 @@ private:
     static bool ValidText(const char* text) noexcept
     {
         return text && text[0];
+    }
+
+    static bool ValidInfo(const KeelSource2InterfaceInfo& info) noexcept
+    {
+        return info.size == sizeof(info) &&
+            info.ownership == KEELS2_SOURCE2_OWNERSHIP_BORROWED &&
+            info.lifetime == KEELS2_SOURCE2_LIFETIME_HOST && info.reserved == 0 &&
+            info.instance && ValidText(info.interface_name) &&
+            ValidText(info.module_name) && ValidText(info.module_path) &&
+            ValidText(info.compatibility_profile);
     }
 
     std::shared_ptr<detail::ContextState> context_;

@@ -202,6 +202,11 @@ private:
         KeelPluginHandle plugin,
         KeelSource2Capability capability,
         KeelSource2InterfaceInfo* info);
+    KeelResult QuerySource2NamedInterface(
+        KeelPluginHandle plugin,
+        KeelSource2Factory factory,
+        const char* interface_name,
+        KeelSource2InterfaceInfo* info);
     bool RegisterCommandRecord(std::unique_ptr<CommandRecord> resource, std::uint64_t flags);
 
     static void ApiLog(KeelPluginHandle plugin, KeelLogLevel level, const char* message);
@@ -243,6 +248,11 @@ private:
     static KeelResult ApiQuerySource2Interface(
         KeelPluginHandle plugin,
         KeelSource2Capability capability,
+        KeelSource2InterfaceInfo* info);
+    static KeelResult ApiQuerySource2NamedInterface(
+        KeelPluginHandle plugin,
+        KeelSource2Factory factory,
+        const char* interface_name,
         KeelSource2InterfaceInfo* info);
     static void DispatchCommand(const GameCommandInvocation& invocation, void* user_data);
     static void CoreCommand(const KeelCommandInvocation* invocation, void* user_data);
@@ -292,6 +302,7 @@ private:
     std::unique_ptr<ConVarService> convars_;
     std::unique_ptr<PluginService> plugin_service_;
     std::unique_ptr<Source2CallbacksService> source2_callbacks_;
+    KeelSource2ApiV1 source2_api_v1_{};
     KeelSource2Api source2_api_{};
     KeelSource2AuthoringApi source2_authoring_api_{};
     KeelHostApi api_{};

@@ -1117,6 +1117,17 @@ std::array<void*, 15> g_engine_service_vtable = [] {
 }();
 RawInterface g_engine_service{g_engine_service_vtable.data()};
 
+void NamedInterfaceFixture(void*)
+{
+}
+
+std::array<void*, 1> g_named_interface_vtable{
+    FunctionAddress(&NamedInterfaceFixture)
+};
+RawInterface g_named_interface{g_named_interface_vtable.data()};
+RawInterface g_null_vtable_interface{};
+std::uint32_t g_transient_interface_queries{};
+
 std::array<void*, 8> g_loop_vtable = [] {
     std::array<void*, 8> table{};
     table[0] = FunctionAddress(&LoopInitFixture);
@@ -1185,6 +1196,7 @@ void UnregisterSource2LoopMode()
 void* EngineFactory(const char* name, int* return_code)
 {
     void* result{};
+    bool inconsistent{};
     if (g_expose_cvar && name && std::strcmp(name, keels2::cs2::kCvarInterfaceVersion) == 0)
     {
         result = g_cvar_override ? g_cvar_override : &g_cvar;
@@ -1193,9 +1205,27 @@ void* EngineFactory(const char* name, int* return_code)
     {
         result = &g_engine_service;
     }
+    else if (name && std::strcmp(name, "NetworkServerService_001") == 0)
+    {
+        result = &g_named_interface;
+    }
+    else if (name && std::strcmp(name, "TransientService001") == 0 &&
+        ++g_transient_interface_queries > 1)
+    {
+        result = &g_named_interface;
+    }
+    else if (name && std::strcmp(name, "InconsistentService001") == 0)
+    {
+        result = &g_named_interface;
+        inconsistent = true;
+    }
+    else if (name && std::strcmp(name, "NullVtableService001") == 0)
+    {
+        result = &g_null_vtable_interface;
+    }
     if (return_code)
     {
-        *return_code = result ? 0 : 1;
+        *return_code = result && !inconsistent ? 0 : 1;
     }
     return result;
 }

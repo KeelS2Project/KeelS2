@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -414,6 +415,8 @@ public:
         }
 
         compatibility_profile_ = compatibility.profile;
+        engine_factory_ = engine_factory;
+        server_factory_ = server_factory;
         server_ = std::move(server);
         game_clients_ = std::move(game_clients);
         cvar_interface_ = std::move(cvar);
@@ -511,6 +514,9 @@ public:
         cvar_ = nullptr;
         game_event_manager_vtable_ = nullptr;
         game_event_module_pin_.Release();
+        named_interfaces_.clear();
+        engine_factory_ = nullptr;
+        server_factory_ = nullptr;
         engine_service_ = {};
         cvar_interface_ = {};
         game_clients_ = {};
@@ -582,20 +588,66 @@ public:
         {
             return KEEL_RESULT_NOT_READY;
         }
-        info = {
-            sizeof(KeelSource2InterfaceInfo),
-            entry->capability,
-            entry->factory,
-            KEELS2_SOURCE2_OWNERSHIP_BORROWED,
-            KEELS2_SOURCE2_LIFETIME_HOST,
-            0,
-            entry->instance,
-            entry->name.c_str(),
-            entry->module.c_str(),
-            entry->module_path.c_str(),
-            compatibility_profile_.c_str()
+        return DescribeInterface(*entry, info);
+    }
+
+    KeelResult QueryNamedInterface(
+        KeelSource2Factory factory,
+        const char* interface_name,
+        KeelSource2InterfaceInfo& info) override
+    {
+        if ((factory != KEELS2_SOURCE2_FACTORY_ENGINE &&
+                factory != KEELS2_SOURCE2_FACTORY_SERVER) ||
+            !ValidInterfaceName(interface_name))
+        {
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+        KeelCreateInterfaceFn interface_factory = factory == KEELS2_SOURCE2_FACTORY_ENGINE
+            ? engine_factory_
+            : server_factory_;
+        if (!interface_factory || compatibility_profile_.empty())
+        {
+            return KEEL_RESULT_NOT_READY;
+        }
+        std::pair<KeelSource2Factory, std::string> key{factory, interface_name};
+        const auto cached = named_interfaces_.find(key);
+        if (cached != named_interfaces_.end())
+        {
+            return DescribeInterface(cached->second, info);
+        }
+
+        int return_code = 1;
+        void* instance = interface_factory(interface_name, &return_code);
+        if (!instance)
+        {
+            return return_code == 0 ? KEEL_RESULT_ENGINE_FAILURE : KEEL_RESULT_NOT_FOUND;
+        }
+        if (return_code != 0)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
+        auto** vtable = *reinterpret_cast<void***>(instance);
+        if (!vtable || !vtable[0])
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        std::filesystem::path module;
+        std::string error;
+        if (!platform::ModulePathFromAddress(vtable[0], module, error) ||
+            module.filename().empty())
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        InterfaceEntry entry{
+            KEELS2_SOURCE2_CAPABILITY_NAMED,
+            factory,
+            instance,
+            interface_name,
+            module.filename().string(),
+            module.string()
         };
-        return KEEL_RESULT_OK;
+        const auto position = named_interfaces_.emplace(std::move(key), std::move(entry)).first;
+        return DescribeInterface(position->second, info);
     }
 
     KeelResult EnableLifecycleEvent(
@@ -2346,6 +2398,31 @@ private:
             compatibility.convar_string_type == static_cast<std::int32_t>(cs2::ConVarType::string);
     }
 
+    KeelResult DescribeInterface(
+        const InterfaceEntry& entry,
+        KeelSource2InterfaceInfo& info) const noexcept
+    {
+        if (!entry.instance || entry.name.empty() || entry.module.empty() ||
+            entry.module_path.empty() || compatibility_profile_.empty())
+        {
+            return KEEL_RESULT_NOT_READY;
+        }
+        info = {
+            sizeof(KeelSource2InterfaceInfo),
+            entry.capability,
+            entry.factory,
+            KEELS2_SOURCE2_OWNERSHIP_BORROWED,
+            KEELS2_SOURCE2_LIFETIME_HOST,
+            0,
+            entry.instance,
+            entry.name.c_str(),
+            entry.module.c_str(),
+            entry.module_path.c_str(),
+            compatibility_profile_.c_str()
+        };
+        return KEEL_RESULT_OK;
+    }
+
     static bool ResolveInterface(
         KeelCreateInterfaceFn factory,
         KeelSource2Capability capability,
@@ -2386,6 +2463,28 @@ private:
         entry.module = expected_module;
         entry.module_path = module.string();
         return true;
+    }
+
+    static bool ValidInterfaceName(const char* interface_name) noexcept
+    {
+        if (!interface_name)
+        {
+            return false;
+        }
+        for (std::size_t index{}; index < 256; ++index)
+        {
+            const unsigned char character =
+                static_cast<unsigned char>(interface_name[index]);
+            if (character == 0)
+            {
+                return index != 0;
+            }
+            if (!std::isalnum(character) && character != '_')
+            {
+                return false;
+            }
+        }
+        return false;
     }
 
     static bool ValidateTarget(
@@ -2643,6 +2742,9 @@ private:
     InterfaceEntry game_clients_;
     InterfaceEntry cvar_interface_;
     InterfaceEntry engine_service_;
+    KeelCreateInterfaceFn engine_factory_{};
+    KeelCreateInterfaceFn server_factory_{};
+    std::map<std::pair<KeelSource2Factory, std::string>, InterfaceEntry> named_interfaces_;
     platform::LoadedModulePin game_event_module_pin_;
     void** game_event_manager_vtable_{};
     std::string compatibility_profile_;

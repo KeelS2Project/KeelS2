@@ -1098,6 +1098,22 @@ protected:
             source2_cvar_);
     }
 
+    template <typename Type>
+    Type* GetEngineInterface(const char* interface_name) noexcept
+    {
+        return Source2Interface<Type>(
+            keels2::source2::Factory::engine,
+            interface_name);
+    }
+
+    template <typename Type>
+    Type* GetServerInterface(const char* interface_name) noexcept
+    {
+        return Source2Interface<Type>(
+            keels2::source2::Factory::server,
+            interface_name);
+    }
+
 private:
     friend class keels2::detail::AuthoringCommandBinding;
     friend class keels2::detail::AuthoringConVarResource;
@@ -1131,6 +1147,33 @@ private:
         if (interface.Type() != capability || interface.Origin() != factory)
         {
             interface.Reset();
+            return nullptr;
+        }
+        return interface.template Get<Type>();
+    }
+
+    template <typename Type>
+    Type* Source2Interface(
+        keels2::source2::Factory factory,
+        const char* interface_name) noexcept
+    {
+        std::scoped_lock lock(source2_mutex_);
+        if (!context_ || !interface_name || !interface_name[0])
+        {
+            return nullptr;
+        }
+        if (!source2_connected_)
+        {
+            if (source2_service_.Connect(context_) != KEEL_RESULT_OK)
+            {
+                return nullptr;
+            }
+            source2_connected_ = true;
+        }
+        keels2::source2::Interface interface;
+        if (source2_service_.Query(factory, interface_name, interface) != KEEL_RESULT_OK ||
+            interface.Origin() != factory)
+        {
             return nullptr;
         }
         return interface.template Get<Type>();
