@@ -18,7 +18,9 @@ function(keels2_add_plugin target)
     )
 
     if(MSVC)
-        set_target_properties(${target} PROPERTIES MSVC_RUNTIME_LIBRARY MultiThreaded)
+        set_target_properties(${target} PROPERTIES
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+        )
         target_compile_options(${target} PRIVATE /W4 /permissive- /EHsc)
         target_link_options(${target} PRIVATE /INCREMENTAL:NO)
     elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")

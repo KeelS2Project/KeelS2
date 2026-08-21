@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 project(KeelS2 VERSION 0.1.0 LANGUAGES C CXX)
 
 if(MSVC)
-    set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
     enable_language(ASM_MASM)
 else()
     enable_language(ASM)
