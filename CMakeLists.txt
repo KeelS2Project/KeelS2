@@ -612,7 +612,7 @@ if(BUILD_TESTING)
             WIN64
         )
         target_compile_options(keels2_plugin_contract PRIVATE /Gy /Gw)
-        target_link_options(keels2_plugin_contract PRIVATE /OPT:REF)
+        target_link_options(keels2_plugin_contract PRIVATE /OPT:REF /INCREMENTAL:NO)
     else()
         target_compile_definitions(keels2_plugin_contract PRIVATE
             COMPILER_GCC
