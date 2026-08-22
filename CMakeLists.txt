@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 project(KeelS2 VERSION 0.1.0 LANGUAGES C CXX)
 
 if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
     enable_language(ASM_MASM)
 else()
     enable_language(ASM)
@@ -120,7 +121,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(keels2_sdk INTERFACE "LINKER:--gc-sections")
 elseif(MSVC)
     target_compile_options(keels2_sdk INTERFACE /Gy /Gw)
-    target_link_options(keels2_sdk INTERFACE /OPT:REF)
+    target_link_options(keels2_sdk INTERFACE /OPT:REF /INCREMENTAL:NO)
 endif()
 include(cmake/KeelS2Plugin.cmake)
 
@@ -611,7 +612,7 @@ if(BUILD_TESTING)
             WIN64
         )
         target_compile_options(keels2_plugin_contract PRIVATE /Gy /Gw)
-        target_link_options(keels2_plugin_contract PRIVATE /OPT:REF)
+        target_link_options(keels2_plugin_contract PRIVATE /OPT:REF /INCREMENTAL:NO)
     else()
         target_compile_definitions(keels2_plugin_contract PRIVATE
             COMPILER_GCC
