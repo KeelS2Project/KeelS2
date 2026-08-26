@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define KEELS2_HOST_ABI_VERSION 10u
+#define KEELS2_HOST_ABI_VERSION 11u
 
 #define KEELS2_HOST_START_FAILED 0u
 #define KEELS2_HOST_START_RUNNING 1u
@@ -82,6 +82,15 @@ typedef struct KeelHostCompatibilityInfo
     uint32_t game_event_add_listener_slot;
     uint32_t client_connect_slot;
     uint32_t client_command_slot;
+    const char* schema_interface;
+    const char* schema_module;
+    const char* schema_server_module;
+    uint32_t schema_validation_slot;
+    const char* game_resource_interface;
+    const char* game_resource_module;
+    const char* entity_system_module;
+    uint32_t game_resource_validation_slot;
+    uint32_t game_entity_system_offset;
 } KeelHostCompatibilityInfo;
 
 typedef struct KeelHostStartInfo

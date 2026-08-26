@@ -27,6 +27,7 @@ class KeelHookService;
 class LifecycleService;
 class ConVarService;
 class PluginService;
+class SchemaEntityService;
 class Source2CallbacksService;
 
 inline constexpr const char* kHostVersion = "0.1.0-dev";
@@ -111,6 +112,7 @@ private:
     friend class LifecycleService;
     friend class ConVarService;
     friend class PluginService;
+    friend class SchemaEntityService;
     friend class Source2CallbacksService;
 
     Host() = default;
@@ -301,6 +303,7 @@ private:
     std::unique_ptr<LifecycleService> lifecycle_;
     std::unique_ptr<ConVarService> convars_;
     std::unique_ptr<PluginService> plugin_service_;
+    std::unique_ptr<SchemaEntityService> schema_entities_;
     std::unique_ptr<Source2CallbacksService> source2_callbacks_;
     KeelSource2ApiV1 source2_api_v1_{};
     KeelSource2Api source2_api_{};

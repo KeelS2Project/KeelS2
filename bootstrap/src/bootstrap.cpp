@@ -639,7 +639,16 @@ private:
             profile_->game_event_load_events_slot,
             profile_->game_event_add_listener_slot,
             profile_->client_connect_slot,
-            profile_->client_command_slot
+            profile_->client_command_slot,
+            profile_->schema_interface,
+            profile_->schema_module,
+            profile_->schema_server_module,
+            profile_->schema_validation_slot,
+            profile_->game_resource_interface,
+            profile_->game_resource_module,
+            profile_->entity_system_module,
+            profile_->game_resource_validation_slot,
+            profile_->game_entity_system_offset
         };
         const KeelHostStartInfo info{
             sizeof(KeelHostStartInfo),

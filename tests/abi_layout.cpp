@@ -30,7 +30,7 @@ struct keels2::kh::AggregateTraits<AbiPair>
 
 static_assert(sizeof(void*) == 8);
 static_assert(KEELHOOK_MAX_AGGREGATE_ALIGNMENT == 16);
-static_assert(sizeof(KeelHostCompatibilityInfo) == 312);
+static_assert(sizeof(KeelHostCompatibilityInfo) == 376);
 static_assert(sizeof(KeelHostStartInfo) == 56);
 static_assert(sizeof(KeelHostQuery) == 32);
 static_assert(sizeof(KeelPluginInfo) == 40);

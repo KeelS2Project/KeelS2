@@ -4,10 +4,14 @@
 #include <keels2/plugin.h>
 
 #include <atomic>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
+#include <string_view>
+#include <system_error>
 #include <type_traits>
 #include <utility>
 
@@ -30,6 +34,20 @@ class Service;
 
 }
 
+namespace schema
+{
+
+class Service;
+
+}
+
+namespace entities
+{
+
+class Service;
+
+}
+
 namespace detail
 {
 
@@ -46,6 +64,183 @@ struct ContextState final
     KeelPluginHandle plugin{};
     std::atomic<bool> accepting_resources{};
 };
+
+template <typename Type>
+inline constexpr bool kUnsupportedLogValue = false;
+
+inline void AppendLogText(
+    std::string& output,
+    const char* text,
+    std::size_t size)
+{
+    std::size_t length{};
+    while (length < size && text[length] != '\0')
+    {
+        ++length;
+    }
+    if (length)
+    {
+        output.append(text, length);
+    }
+}
+
+template <typename Value>
+bool AppendLogNumber(std::string& output, Value value)
+{
+    char buffer[128];
+    const auto [end, error] = std::to_chars(
+        buffer,
+        buffer + sizeof(buffer),
+        value);
+    if (error != std::errc{})
+    {
+        return false;
+    }
+    output.append(buffer, static_cast<std::size_t>(end - buffer));
+    return true;
+}
+
+template <typename Value>
+bool AppendLogValue(std::string& output, Value&& value)
+{
+    using Type = std::remove_cvref_t<Value>;
+    if constexpr (std::is_same_v<Type, std::nullptr_t>)
+    {
+        output.append("(null)");
+        return true;
+    }
+    else if constexpr (
+        std::is_array_v<Type> &&
+        std::is_same_v<std::remove_cv_t<std::remove_extent_t<Type>>, char>)
+    {
+        constexpr std::size_t size = std::extent_v<Type>;
+        if constexpr (size == 0)
+        {
+            output.append(value);
+        }
+        else
+        {
+            AppendLogText(output, value, size);
+        }
+        return true;
+    }
+    else if constexpr (
+        std::is_pointer_v<Type> &&
+        std::is_convertible_v<Value, const char*>)
+    {
+        const char* text = value;
+        output.append(text ? text : "(null)");
+        return true;
+    }
+    else if constexpr (std::is_same_v<Type, std::string>)
+    {
+        AppendLogText(output, value.data(), value.size());
+        return true;
+    }
+    else if constexpr (std::is_same_v<Type, std::string_view>)
+    {
+        AppendLogText(output, value.data(), value.size());
+        return true;
+    }
+    else if constexpr (std::is_same_v<Type, bool>)
+    {
+        output.append(value ? "true" : "false");
+        return true;
+    }
+    else if constexpr (std::is_same_v<Type, char>)
+    {
+        output.push_back(value);
+        return true;
+    }
+    else if constexpr (std::is_integral_v<Type> || std::is_floating_point_v<Type>)
+    {
+        return AppendLogNumber(output, value);
+    }
+    else if constexpr (std::is_enum_v<Type>)
+    {
+        return AppendLogValue(output, static_cast<std::underlying_type_t<Type>>(value));
+    }
+    else if constexpr (requires { std::forward<Value>(value).Get(); })
+    {
+        using Result = decltype(std::forward<Value>(value).Get());
+        static_assert(!std::is_same_v<std::remove_cvref_t<Result>, Type>);
+        return AppendLogValue(output, std::forward<Value>(value).Get());
+    }
+    else
+    {
+        static_assert(
+            kUnsupportedLogValue<Type>,
+            "KeelS2 log arguments must be strings, scalars, enums, or Valve value wrappers");
+    }
+}
+
+inline bool FormatLogMessage(std::string& output, std::string_view format)
+{
+    std::size_t literal{};
+    for (std::size_t index{}; index < format.size();)
+    {
+        const char character = format[index];
+        if (character != '{' && character != '}')
+        {
+            ++index;
+            continue;
+        }
+        output.append(format.data() + literal, index - literal);
+        if (index + 1 >= format.size() || format[index + 1] != character)
+        {
+            return false;
+        }
+        output.push_back(character);
+        index += 2;
+        literal = index;
+    }
+    output.append(format.data() + literal, format.size() - literal);
+    return true;
+}
+
+template <typename First, typename... Rest>
+bool FormatLogMessage(
+    std::string& output,
+    std::string_view format,
+    First&& first,
+    Rest&&... rest)
+{
+    std::size_t literal{};
+    for (std::size_t index{}; index < format.size();)
+    {
+        const char character = format[index];
+        if (character != '{' && character != '}')
+        {
+            ++index;
+            continue;
+        }
+        output.append(format.data() + literal, index - literal);
+        if (index + 1 >= format.size())
+        {
+            return false;
+        }
+        const char next = format[index + 1];
+        if (character == '{' && next == '}')
+        {
+            if (!AppendLogValue(output, std::forward<First>(first)))
+            {
+                return false;
+            }
+            return FormatLogMessage(
+                output,
+                format.substr(index + 2),
+                std::forward<Rest>(rest)...);
+        }
+        if (next != character)
+        {
+            return false;
+        }
+        output.push_back(character);
+        index += 2;
+        literal = index;
+    }
+    return false;
+}
 
 template <typename Type>
 class AbiPluginAdapter;
@@ -205,9 +400,57 @@ public:
 
     void Log(KeelLogLevel level, const char* message) const noexcept
     {
-        if (*this && state_->api->log && message)
+        const std::shared_ptr<detail::ContextState> state = state_;
+        if (!state || !state->api || !state->plugin || !state->api->log || !message)
         {
-            state_->api->log(state_->plugin, level, message);
+            return;
+        }
+        const auto sink = state->api->log;
+        const KeelPluginHandle plugin = state->plugin;
+        try
+        {
+            sink(plugin, level, message);
+        }
+        catch (...)
+        {
+        }
+    }
+
+    template <typename... Arguments>
+        requires (sizeof...(Arguments) > 0)
+    void Log(
+        KeelLogLevel level,
+        const char* format,
+        Arguments&&... arguments) const noexcept
+    {
+        const std::shared_ptr<detail::ContextState> state = state_;
+        if (!state || !state->api || !state->plugin || !state->api->log || !format)
+        {
+            return;
+        }
+        const auto sink = state->api->log;
+        const KeelPluginHandle plugin = state->plugin;
+        try
+        {
+            std::string message;
+            if (detail::FormatLogMessage(
+                    message,
+                    format,
+                    std::forward<Arguments>(arguments)...))
+            {
+                sink(plugin, level, message.c_str());
+                return;
+            }
+        }
+        catch (...)
+        {
+        }
+        try
+        {
+            sink(plugin, level, "[KeelS2] log formatting failed");
+        }
+        catch (...)
+        {
         }
     }
 
@@ -273,6 +516,8 @@ private:
     friend class Plugin;
     friend class kh::Service;
     friend class source2::Service;
+    friend class schema::Service;
+    friend class entities::Service;
     template <typename Type>
     friend class detail::AbiPluginAdapter;
     template <typename Type>

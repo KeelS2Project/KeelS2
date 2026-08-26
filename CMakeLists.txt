@@ -285,7 +285,10 @@ keels2_enable_warnings(keels2_cs2_compatibility)
 add_library(keels2_cs2_native_bridge STATIC
     games/cs2/src/native_bridge.cpp
 )
-target_include_directories(keels2_cs2_native_bridge PUBLIC games/cs2/include)
+target_include_directories(keels2_cs2_native_bridge PUBLIC
+    games/cs2/include
+    sdk/include
+)
 target_link_libraries(keels2_cs2_native_bridge PRIVATE KeelS2::SourceSDK)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     # The native bridge is the other intentional game-owned C++ ABI boundary;
@@ -330,6 +333,7 @@ add_library(keels2_host SHARED
     host/src/lifecycle_service.cpp
     host/src/plugin_service.cpp
     host/src/plugin_manager.cpp
+    host/src/schema_entity_service.cpp
     host/src/source2_callbacks_service.cpp
     games/cs2/src/cs2_adapter.cpp
 )
@@ -370,14 +374,14 @@ add_subdirectory(samples/basic)
 keels2_set_output(keels2_basic "plugins/${KEELS2_PLATFORM_DIR}")
 add_subdirectory(samples/lifecycle)
 keels2_set_output(keels2_lifecycle "plugins/${KEELS2_PLATFORM_DIR}")
-add_subdirectory(samples/convar)
-keels2_set_output(keels2_convar "plugins/${KEELS2_PLATFORM_DIR}")
+add_subdirectory(samples/sample)
+keels2_set_output(keels2_sample "plugins/${KEELS2_PLATFORM_DIR}")
 add_subdirectory(samples/runtime)
 keels2_set_output(keels2_runtime "plugins/${KEELS2_PLATFORM_DIR}")
 add_subdirectory(samples/callbacks)
 keels2_set_output(keels2_callbacks "plugins/${KEELS2_PLATFORM_DIR}")
-add_subdirectory(samples/parity)
-keels2_set_output(keels2_parity "plugins/${KEELS2_PLATFORM_DIR}")
+add_subdirectory(samples/entities)
+keels2_set_output(keels2_entities "plugins/${KEELS2_PLATFORM_DIR}")
 
 if(BUILD_TESTING)
     if(WIN32)
@@ -500,6 +504,11 @@ if(BUILD_TESTING)
     keels2_enable_warnings(keels2_abi_layout)
     add_test(NAME abi_layout COMMAND keels2_abi_layout)
 
+    add_executable(keels2_plugin_logging tests/plugin_logging.cpp)
+    target_include_directories(keels2_plugin_logging PRIVATE sdk/include)
+    keels2_enable_warnings(keels2_plugin_logging)
+    add_test(NAME plugin_logging COMMAND keels2_plugin_logging)
+
     add_executable(keels2_source2_c_abi tests/source2_c_abi.c)
     target_include_directories(keels2_source2_c_abi PRIVATE sdk/include)
     set_target_properties(keels2_source2_c_abi PROPERTIES
@@ -544,6 +553,15 @@ if(BUILD_TESTING)
         C_EXTENSIONS OFF
     )
     add_test(NAME source2_callbacks_c_abi COMMAND keels2_source2_callbacks_c_abi)
+
+    add_executable(keels2_schema_entities_c_abi tests/schema_entities_c_abi.c)
+    target_include_directories(keels2_schema_entities_c_abi PRIVATE sdk/include)
+    set_target_properties(keels2_schema_entities_c_abi PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED YES
+        C_EXTENSIONS OFF
+    )
+    add_test(NAME schema_entities_c_abi COMMAND keels2_schema_entities_c_abi)
 
     add_executable(keels2_compatibility_test tests/compatibility.cpp)
     target_include_directories(keels2_compatibility_test PRIVATE
@@ -808,42 +826,42 @@ if(BUILD_TESTING)
         PROPERTIES DEPENDS sdk_lifecycle_out_of_tree_configure
     )
 
-    set(KEELS2_STANDALONE_CONVAR_BUILD_DIR "${CMAKE_BINARY_DIR}/standalone-convar")
-    set(KEELS2_STANDALONE_CONVAR_CONFIGURE
+    set(KEELS2_STANDALONE_SAMPLE_BUILD_DIR "${CMAKE_BINARY_DIR}/standalone-sample")
+    set(KEELS2_STANDALONE_SAMPLE_CONFIGURE
         ${CMAKE_COMMAND}
         --fresh
-        -S "${CMAKE_CURRENT_SOURCE_DIR}/samples/convar"
-        -B "${KEELS2_STANDALONE_CONVAR_BUILD_DIR}"
+        -S "${CMAKE_CURRENT_SOURCE_DIR}/samples/sample"
+        -B "${KEELS2_STANDALONE_SAMPLE_BUILD_DIR}"
         "-DKeelS2_DIR=${KEELS2_SDK_INSTALL_DIR}/${KEELS2_CMAKE_INSTALL_DIR}"
         "-DKEELS2_SOURCE_SDK_ROOT=${KEELS2_SOURCE_SDK_RESOLVED_ROOT}"
     )
     if(CMAKE_GENERATOR)
-        list(APPEND KEELS2_STANDALONE_CONVAR_CONFIGURE -G "${CMAKE_GENERATOR}")
+        list(APPEND KEELS2_STANDALONE_SAMPLE_CONFIGURE -G "${CMAKE_GENERATOR}")
     endif()
     if(CMAKE_GENERATOR_PLATFORM)
-        list(APPEND KEELS2_STANDALONE_CONVAR_CONFIGURE -A "${CMAKE_GENERATOR_PLATFORM}")
+        list(APPEND KEELS2_STANDALONE_SAMPLE_CONFIGURE -A "${CMAKE_GENERATOR_PLATFORM}")
     endif()
     if(CMAKE_GENERATOR_TOOLSET)
-        list(APPEND KEELS2_STANDALONE_CONVAR_CONFIGURE -T "${CMAKE_GENERATOR_TOOLSET}")
+        list(APPEND KEELS2_STANDALONE_SAMPLE_CONFIGURE -T "${CMAKE_GENERATOR_TOOLSET}")
     endif()
     if(NOT KEELS2_MULTI_CONFIG)
-        list(APPEND KEELS2_STANDALONE_CONVAR_CONFIGURE "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
+        list(APPEND KEELS2_STANDALONE_SAMPLE_CONFIGURE "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
     endif()
     add_test(
-        NAME sdk_convar_out_of_tree_configure
-        COMMAND ${KEELS2_STANDALONE_CONVAR_CONFIGURE}
+        NAME sdk_sample_out_of_tree_configure
+        COMMAND ${KEELS2_STANDALONE_SAMPLE_CONFIGURE}
     )
-    set_tests_properties(sdk_convar_out_of_tree_configure PROPERTIES DEPENDS sdk_install)
+    set_tests_properties(sdk_sample_out_of_tree_configure PROPERTIES DEPENDS sdk_install)
     add_test(
-        NAME sdk_convar_out_of_tree_build
+        NAME sdk_sample_out_of_tree_build
         COMMAND ${CMAKE_COMMAND}
-            --build "${KEELS2_STANDALONE_CONVAR_BUILD_DIR}"
+            --build "${KEELS2_STANDALONE_SAMPLE_BUILD_DIR}"
             --config $<CONFIG>
             --parallel
     )
     set_tests_properties(
-        sdk_convar_out_of_tree_build
-        PROPERTIES DEPENDS sdk_convar_out_of_tree_configure
+        sdk_sample_out_of_tree_build
+        PROPERTIES DEPENDS sdk_sample_out_of_tree_configure
     )
 
     set(KEELS2_STANDALONE_RUNTIME_BUILD_DIR "${CMAKE_BINARY_DIR}/standalone-runtime")
@@ -923,43 +941,43 @@ if(BUILD_TESTING)
         PROPERTIES DEPENDS sdk_callbacks_out_of_tree_configure
     )
 
-    set(KEELS2_STANDALONE_PARITY_BUILD_DIR "${CMAKE_BINARY_DIR}/standalone-parity")
-    set(KEELS2_STANDALONE_PARITY_CONFIGURE
+    set(KEELS2_STANDALONE_ENTITIES_BUILD_DIR "${CMAKE_BINARY_DIR}/standalone-entities")
+    set(KEELS2_STANDALONE_ENTITIES_CONFIGURE
         ${CMAKE_COMMAND}
         --fresh
-        -S "${CMAKE_CURRENT_SOURCE_DIR}/samples/parity"
-        -B "${KEELS2_STANDALONE_PARITY_BUILD_DIR}"
+        -S "${CMAKE_CURRENT_SOURCE_DIR}/samples/entities"
+        -B "${KEELS2_STANDALONE_ENTITIES_BUILD_DIR}"
         "-DKeelS2_DIR=${KEELS2_SDK_INSTALL_DIR}/${KEELS2_CMAKE_INSTALL_DIR}"
         "-DKEELS2_SOURCE_SDK_ROOT=${KEELS2_SOURCE_SDK_RESOLVED_ROOT}"
     )
     if(CMAKE_GENERATOR)
-        list(APPEND KEELS2_STANDALONE_PARITY_CONFIGURE -G "${CMAKE_GENERATOR}")
+        list(APPEND KEELS2_STANDALONE_ENTITIES_CONFIGURE -G "${CMAKE_GENERATOR}")
     endif()
     if(CMAKE_GENERATOR_PLATFORM)
-        list(APPEND KEELS2_STANDALONE_PARITY_CONFIGURE -A "${CMAKE_GENERATOR_PLATFORM}")
+        list(APPEND KEELS2_STANDALONE_ENTITIES_CONFIGURE -A "${CMAKE_GENERATOR_PLATFORM}")
     endif()
     if(CMAKE_GENERATOR_TOOLSET)
-        list(APPEND KEELS2_STANDALONE_PARITY_CONFIGURE -T "${CMAKE_GENERATOR_TOOLSET}")
+        list(APPEND KEELS2_STANDALONE_ENTITIES_CONFIGURE -T "${CMAKE_GENERATOR_TOOLSET}")
     endif()
     if(NOT KEELS2_MULTI_CONFIG)
-        list(APPEND KEELS2_STANDALONE_PARITY_CONFIGURE
+        list(APPEND KEELS2_STANDALONE_ENTITIES_CONFIGURE
             "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
     endif()
     add_test(
-        NAME sdk_parity_out_of_tree_configure
-        COMMAND ${KEELS2_STANDALONE_PARITY_CONFIGURE}
+        NAME sdk_entities_out_of_tree_configure
+        COMMAND ${KEELS2_STANDALONE_ENTITIES_CONFIGURE}
     )
-    set_tests_properties(sdk_parity_out_of_tree_configure PROPERTIES DEPENDS sdk_install)
+    set_tests_properties(sdk_entities_out_of_tree_configure PROPERTIES DEPENDS sdk_install)
     add_test(
-        NAME sdk_parity_out_of_tree_build
+        NAME sdk_entities_out_of_tree_build
         COMMAND ${CMAKE_COMMAND}
-            --build "${KEELS2_STANDALONE_PARITY_BUILD_DIR}"
+            --build "${KEELS2_STANDALONE_ENTITIES_BUILD_DIR}"
             --config $<CONFIG>
             --parallel
     )
     set_tests_properties(
-        sdk_parity_out_of_tree_build
-        PROPERTIES DEPENDS sdk_parity_out_of_tree_configure
+        sdk_entities_out_of_tree_build
+        PROPERTIES DEPENDS sdk_entities_out_of_tree_configure
     )
 
     add_library(keels2_fake_server SHARED tests/fake_server.cpp)
@@ -970,6 +988,37 @@ if(BUILD_TESTING)
         OUTPUT_NAME server
     )
     keels2_enable_warnings(keels2_fake_server)
+
+    add_library(keels2_schema_entity_fixture SHARED tests/schema_entity_fixture.cpp)
+    target_link_libraries(keels2_schema_entity_fixture PRIVATE
+        keels2_fake_tier0
+        KeelS2::SourceSDKHeaders
+    )
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(keels2_schema_entity_fixture PRIVATE -fno-sanitize=vptr)
+    endif()
+    set_target_properties(keels2_schema_entity_fixture PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+        PREFIX ""
+        OUTPUT_NAME keels2_schema_entity_fixture
+    )
+    keels2_enable_warnings(keels2_schema_entity_fixture)
+
+    add_executable(keels2_schema_entity_native_bridge tests/schema_entity_fixture.cpp)
+    target_compile_definitions(keels2_schema_entity_native_bridge PRIVATE
+        KEELS2_SCHEMA_FIXTURE_NATIVE_TEST=1
+    )
+    target_link_libraries(keels2_schema_entity_native_bridge PRIVATE
+        keels2_cs2_native_bridge
+        keels2_fake_tier0
+        KeelS2::SourceSDKHeaders
+    )
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(keels2_schema_entity_native_bridge PRIVATE -fno-sanitize=vptr)
+    endif()
+    keels2_enable_warnings(keels2_schema_entity_native_bridge)
+    add_test(NAME schema_entity_native_bridge COMMAND keels2_schema_entity_native_bridge)
 
     add_library(keels2_invalid_plugin SHARED tests/invalid_plugin.cpp)
     target_include_directories(keels2_invalid_plugin PRIVATE sdk/include)
@@ -1099,6 +1148,42 @@ if(BUILD_TESTING)
     set_target_properties(keels2_source2_live_plugin PROPERTIES
         OUTPUT_NAME 01_source2_live
     )
+
+    add_library(keels2_schema_entity_service_plugin SHARED
+        tests/schema_entity_service_plugin.cpp
+    )
+    target_link_libraries(keels2_schema_entity_service_plugin PRIVATE
+        KeelS2::SDK
+        KeelS2::SourceSDK
+    )
+    target_compile_definitions(keels2_schema_entity_service_plugin PRIVATE
+        KEELS2_PLUGIN_BUILD=1
+    )
+    set_target_properties(keels2_schema_entity_service_plugin PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+        PREFIX ""
+        OUTPUT_NAME keels2_schema_entity_service_plugin
+    )
+    keels2_enable_warnings(keels2_schema_entity_service_plugin)
+
+    add_library(keels2_schema_entity_live_plugin SHARED
+        tests/schema_entity_live_acceptance_plugin.cpp
+    )
+    target_link_libraries(keels2_schema_entity_live_plugin PRIVATE
+        KeelS2::SDK
+        KeelS2::SourceSDK
+    )
+    target_compile_definitions(keels2_schema_entity_live_plugin PRIVATE
+        KEELS2_PLUGIN_BUILD=1
+    )
+    set_target_properties(keels2_schema_entity_live_plugin PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+        PREFIX ""
+        OUTPUT_NAME 01_schema_entity_live
+    )
+    keels2_enable_warnings(keels2_schema_entity_live_plugin)
 
     add_library(keels2_lifecycle_service_plugin SHARED tests/lifecycle_service_plugin.cpp)
     add_library(keels2_lifecycle_live_plugin SHARED tests/lifecycle_service_plugin.cpp)
@@ -1239,6 +1324,24 @@ if(BUILD_TESTING)
     )
     keels2_enable_warnings(keels2_convar_service_plugin)
 
+    add_library(keels2_convar_authoring_plugin SHARED
+        tests/convar_authoring_plugin.cpp
+    )
+    target_include_directories(keels2_convar_authoring_plugin PRIVATE sdk/include)
+    target_link_libraries(keels2_convar_authoring_plugin PRIVATE
+        KeelS2::SDK
+        KeelS2::SourceSDK
+    )
+    target_compile_definitions(
+        keels2_convar_authoring_plugin PRIVATE KEELS2_PLUGIN_BUILD=1)
+    set_target_properties(keels2_convar_authoring_plugin PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+        PREFIX ""
+        OUTPUT_NAME keels2_convar_authoring_plugin
+    )
+    keels2_enable_warnings(keels2_convar_authoring_plugin)
+
     add_library(keels2_plugin_runtime_service_plugin SHARED
         tests/plugin_runtime_service_plugin.cpp
     )
@@ -1364,12 +1467,14 @@ if(BUILD_TESTING)
         command_removal
         plugin_index_compaction
         source2_service
+        schema_entity_service
         lifecycle_service
         source2_callbacks
         authoring_concurrency
         convar_service
         convar_failed_load
         convar_facade
+        convar_authoring
         plugin_runtime_service
         plugin_runtime_concurrency
         plugin_transition_shutdown_retry
@@ -1411,7 +1516,7 @@ if(BUILD_TESTING)
                 $<TARGET_FILE:keels2_lifecycle_service_plugin>
                 $<TARGET_FILE:keels2_authoring_concurrency_plugin>
                 $<TARGET_FILE:keels2_convar_service_plugin>
-                $<TARGET_FILE:keels2_convar>
+                $<TARGET_FILE:keels2_sample>
                 $<TARGET_FILE:keels2_plugin_runtime_service_plugin>
                 $<TARGET_FILE:keels2_dependency_core>
                 $<TARGET_FILE:keels2_dependency_middle>
@@ -1425,6 +1530,9 @@ if(BUILD_TESTING)
                 $<TARGET_FILE:keels2_source2_callbacks_first_plugin>
                 $<TARGET_FILE:keels2_source2_callbacks_second_plugin>
                 $<TARGET_FILE:keels2_source2_callbacks_peer_plugin>
+                $<TARGET_FILE:keels2_schema_entity_service_plugin>
+                $<TARGET_FILE:keels2_schema_entity_fixture>
+                $<TARGET_FILE:keels2_convar_authoring_plugin>
                 ${CMAKE_BINARY_DIR}/integration-fixture
         )
     endforeach()

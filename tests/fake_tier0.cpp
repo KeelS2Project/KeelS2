@@ -319,6 +319,17 @@ extern "C" KEELS2_FAKE_TIER0_EXPORT int V_tier0_strlen(const char* value)
     return value ? static_cast<int>(std::strlen(value)) : 0;
 }
 
+extern "C" KEELS2_FAKE_TIER0_EXPORT int V_tier0_strcmp(
+    const char* left,
+    const char* right)
+{
+    if (!left || !right)
+    {
+        return left ? 1 : (right ? -1 : 0);
+    }
+    return std::strcmp(left, right);
+}
+
 extern "C" KEELS2_FAKE_TIER0_EXPORT int V_stricmp_fast(
     const char* left,
     const char* right)

@@ -21,6 +21,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -198,6 +199,9 @@ public:
         InterfaceEntry game_clients;
         InterfaceEntry cvar;
         InterfaceEntry engine_service;
+        InterfaceEntry schema_system;
+        InterfaceEntry game_resource;
+        const bool schema_entities = compatibility.schema_interface != nullptr;
         if (!ResolveInterface(
                 server_factory,
                 KEELS2_SOURCE2_CAPABILITY_SERVER,
@@ -234,6 +238,28 @@ public:
                 compatibility.engine_service_register_loop_mode_slot,
                 engine_service,
                 error))
+        {
+            return false;
+        }
+        if (schema_entities &&
+            (!ResolveInterface(
+                 engine_factory,
+                 0,
+                 KEELS2_SOURCE2_FACTORY_ENGINE,
+                 compatibility.schema_interface,
+                 compatibility.schema_module,
+                 compatibility.schema_validation_slot,
+                 schema_system,
+                 error) ||
+                !ResolveInterface(
+                    engine_factory,
+                    0,
+                    KEELS2_SOURCE2_FACTORY_ENGINE,
+                    compatibility.game_resource_interface,
+                    compatibility.game_resource_module,
+                    compatibility.game_resource_validation_slot,
+                    game_resource,
+                    error)))
         {
             return false;
         }
@@ -421,6 +447,8 @@ public:
         game_clients_ = std::move(game_clients);
         cvar_interface_ = std::move(cvar);
         engine_service_ = std::move(engine_service);
+        schema_system_ = std::move(schema_system);
+        game_resource_ = std::move(game_resource);
         game_event_module_pin_ = std::move(game_event_module_pin);
         game_event_manager_vtable_ = game_event_manager_vtable;
         cvar_ = static_cast<cs2::CvarInterface*>(cvar_interface_.instance);
@@ -443,6 +471,31 @@ public:
         loop_shutdown_slot_ = compatibility.loop_mode_shutdown_slot;
         game_event_load_events_slot_ = compatibility.game_event_load_events_slot;
         game_event_add_listener_slot_ = compatibility.game_event_add_listener_slot;
+        schema_server_module_ = compatibility.schema_server_module
+            ? compatibility.schema_server_module
+            : "";
+        entity_system_module_ = compatibility.entity_system_module
+            ? compatibility.entity_system_module
+            : "";
+        if (!entity_system_module_.empty())
+        {
+            if (entity_system_module_ == server_.module)
+            {
+                entity_system_module_path_ = server_.module_path;
+            }
+            else if (entity_system_module_ == engine_service_.module)
+            {
+                entity_system_module_path_ = engine_service_.module_path;
+            }
+            else if (entity_system_module_ == game_resource_.module)
+            {
+                entity_system_module_path_ = game_resource_.module_path;
+            }
+        }
+        game_entity_system_offset_ = compatibility.game_entity_system_offset;
+        main_thread_ = std::this_thread::get_id();
+        entity_epoch_ = 1;
+        current_entity_system_ = nullptr;
         error.clear();
         return true;
     }
@@ -518,6 +571,18 @@ public:
         engine_factory_ = nullptr;
         server_factory_ = nullptr;
         engine_service_ = {};
+        {
+            std::scoped_lock lock(schema_entity_mutex_);
+            AdvanceEntityEpochLocked();
+            current_entity_system_ = nullptr;
+            schema_system_ = {};
+            game_resource_ = {};
+            schema_server_module_.clear();
+            entity_system_module_.clear();
+            entity_system_module_path_.clear();
+            game_entity_system_offset_ = 0;
+            main_thread_ = {};
+        }
         cvar_interface_ = {};
         game_clients_ = {};
         server_ = {};
@@ -561,6 +626,11 @@ public:
             platform::AppendShutdownTrace("cs2 lifecycle state reset complete");
             platform::AppendShutdownTrace("cs2 adapter stop complete");
         }
+    }
+
+    bool IsGameThread() const noexcept override
+    {
+        return OnMainThread();
     }
 
     KeelResult QueryInterface(
@@ -1310,6 +1380,16 @@ public:
             cs2::ConVarValue engine_value{};
             PublicToEngine(value, engine_value);
             constexpr std::int32_t engine_global_slot = 0;
+            if (!OnMainThread())
+            {
+                ClampEngineValue(entry->type, *entry->object.data, engine_value);
+                cvar_->QueueThreadSetValue(
+                    &entry->object,
+                    engine_global_slot,
+                    nullptr,
+                    &engine_value);
+                return KEEL_RESULT_OK;
+            }
             if ((entry->object.data->flags & cs2::kPerformingCallbacksFlag) != 0)
             {
                 ClampEngineValue(entry->type, *entry->object.data, engine_value);
@@ -1382,7 +1462,278 @@ public:
         return KEEL_RESULT_OK;
     }
 
+    KeelResult ResolveSchemaField(
+        const KeelSchemaFieldSpec& spec,
+        GameSchemaField& field,
+        std::string& error) override
+    {
+        field = {};
+        if (!OnMainThread())
+        {
+            error = "schema access was requested off the game thread";
+            return KEEL_RESULT_WRONG_THREAD;
+        }
+        std::scoped_lock lock(schema_entity_mutex_);
+        if (!schema_system_.instance || schema_server_module_.empty() ||
+            compatibility_profile_.empty())
+        {
+            error = "the compatibility profile does not admit schema access";
+            return KEEL_RESULT_UNSUPPORTED;
+        }
+        if (spec.module != KEELS2_SCHEMA_MODULE_SERVER)
+        {
+            error = "the requested schema module is unsupported";
+            return KEEL_RESULT_UNSUPPORTED;
+        }
+        KeelCs2SchemaField native{};
+        const KeelResult result = KeelCs2_ResolveSchemaField(
+            schema_system_.instance,
+            schema_server_module_.c_str(),
+            spec.class_name,
+            spec.field_name,
+            spec.value_type,
+            &native);
+        if (result != KEEL_RESULT_OK)
+        {
+            error = result == KEEL_RESULT_NOT_FOUND
+                ? "the schema class or field was not found"
+                : "the schema field is incompatible with the requested type";
+            return result;
+        }
+        field.declaring_class = native.declaring_class;
+        field.offset = native.offset;
+        field.value_size = native.value_size;
+        field.value_alignment = native.value_alignment;
+        field.module = spec.module;
+        field.value_type = native.value_type;
+        field.class_name = spec.class_name;
+        field.field_name = spec.field_name;
+        field.module_name = schema_server_module_;
+        field.compatibility_profile = compatibility_profile_;
+        error.clear();
+        return KEEL_RESULT_OK;
+    }
+
+    KeelResult FindEntityByIndex(
+        std::int32_t index,
+        GameEntityIdentity& entity,
+        std::string& error) override
+    {
+        entity = {};
+        if (!OnMainThread())
+        {
+            error = "entity access was requested off the game thread";
+            return KEEL_RESULT_WRONG_THREAD;
+        }
+        std::scoped_lock lock(schema_entity_mutex_);
+        void* system{};
+        const KeelResult ready = CurrentEntitySystemLocked(system, error);
+        if (ready != KEEL_RESULT_OK)
+        {
+            return ready;
+        }
+        KeelCs2EntityIdentity native{};
+        const KeelResult result = KeelCs2_FindEntityByIndex(system, index, &native);
+        if (result != KEEL_RESULT_OK)
+        {
+            error = result == KEEL_RESULT_NOT_FOUND
+                ? "the entity index is not live"
+                : "the entity index is invalid";
+            return result;
+        }
+        entity = {native.index, native.source2_handle, entity_epoch_};
+        error.clear();
+        return KEEL_RESULT_OK;
+    }
+
+    KeelResult FindEntityBySource2Handle(
+        std::uint32_t source2_handle,
+        GameEntityIdentity& entity,
+        std::string& error) override
+    {
+        entity = {};
+        if (!OnMainThread())
+        {
+            error = "entity access was requested off the game thread";
+            return KEEL_RESULT_WRONG_THREAD;
+        }
+        std::scoped_lock lock(schema_entity_mutex_);
+        void* system{};
+        const KeelResult ready = CurrentEntitySystemLocked(system, error);
+        if (ready != KEEL_RESULT_OK)
+        {
+            return ready;
+        }
+        KeelCs2EntityIdentity native{};
+        const KeelResult result = KeelCs2_FindEntityBySource2Handle(
+            system,
+            source2_handle,
+            &native);
+        if (result != KEEL_RESULT_OK)
+        {
+            error = result == KEEL_RESULT_NOT_FOUND
+                ? "the Source 2 entity handle is stale"
+                : "the Source 2 entity handle is invalid";
+            return result;
+        }
+        entity = {native.index, native.source2_handle, entity_epoch_};
+        error.clear();
+        return KEEL_RESULT_OK;
+    }
+
+    KeelResult ValidateEntity(
+        const GameEntityIdentity& entity,
+        std::string& error) override
+    {
+        if (!OnMainThread())
+        {
+            error = "entity access was requested off the game thread";
+            return KEEL_RESULT_WRONG_THREAD;
+        }
+        std::scoped_lock lock(schema_entity_mutex_);
+        void* system{};
+        const KeelResult ready = CurrentEntitySystemLocked(system, error);
+        if (ready != KEEL_RESULT_OK)
+        {
+            return ready;
+        }
+        if (!entity.epoch || entity.epoch != entity_epoch_)
+        {
+            error = "the entity handle belongs to an expired map epoch";
+            return KEEL_RESULT_NOT_FOUND;
+        }
+        const KeelCs2EntityIdentity native{entity.index, entity.source2_handle};
+        const KeelResult result = KeelCs2_ValidateEntity(system, &native);
+        error = result == KEEL_RESULT_OK ? "" : "the entity handle is stale";
+        return result;
+    }
+
+    KeelResult ReadEntityField(
+        const GameEntityIdentity& entity,
+        const GameSchemaField& field,
+        void* value,
+        std::uint32_t value_size,
+        std::string& error) override
+    {
+        if (!OnMainThread())
+        {
+            error = "entity access was requested off the game thread";
+            return KEEL_RESULT_WRONG_THREAD;
+        }
+        std::scoped_lock lock(schema_entity_mutex_);
+        void* system{};
+        const KeelResult ready = CurrentEntitySystemLocked(system, error);
+        if (ready != KEEL_RESULT_OK)
+        {
+            return ready;
+        }
+        if (!entity.epoch || entity.epoch != entity_epoch_)
+        {
+            error = "the entity handle belongs to an expired map epoch";
+            return KEEL_RESULT_NOT_FOUND;
+        }
+        if (!field.declaring_class || field.module != KEELS2_SCHEMA_MODULE_SERVER ||
+            field.module_name != schema_server_module_ ||
+            field.compatibility_profile != compatibility_profile_)
+        {
+            error = "the schema field belongs to another compatibility profile";
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        const KeelCs2EntityIdentity native_entity{entity.index, entity.source2_handle};
+        const KeelCs2SchemaField native_field{
+            field.declaring_class,
+            field.offset,
+            field.value_size,
+            field.value_alignment,
+            field.value_type
+        };
+        const KeelResult result = KeelCs2_ReadEntityField(
+            system,
+            &native_entity,
+            &native_field,
+            value,
+            value_size);
+        if (result != KEEL_RESULT_OK)
+        {
+            error = result == KEEL_RESULT_NOT_FOUND
+                ? "the entity handle is stale"
+                : "the entity class is incompatible with the schema field";
+            return result;
+        }
+        error.clear();
+        return KEEL_RESULT_OK;
+    }
+
 private:
+    bool OnMainThread() const noexcept
+    {
+        return main_thread_ != std::thread::id{} &&
+            std::this_thread::get_id() == main_thread_;
+    }
+
+    void AdvanceEntityEpochLocked() noexcept
+    {
+        ++entity_epoch_;
+        if (entity_epoch_ == 0)
+        {
+            entity_epoch_ = 1;
+        }
+    }
+
+    void InvalidateEntityEpoch() noexcept
+    {
+        std::scoped_lock lock(schema_entity_mutex_);
+        AdvanceEntityEpochLocked();
+        current_entity_system_ = nullptr;
+    }
+
+    KeelResult CurrentEntitySystemLocked(void*& system, std::string& error)
+    {
+        system = nullptr;
+        if (!game_resource_.instance || game_entity_system_offset_ == 0 ||
+            entity_system_module_.empty() || entity_system_module_path_.empty())
+        {
+            error = "the compatibility profile does not admit entity access";
+            return KEEL_RESULT_UNSUPPORTED;
+        }
+        void* candidate = KeelCs2_ReadGameEntitySystem(
+            game_resource_.instance,
+            game_entity_system_offset_);
+        if (candidate != current_entity_system_)
+        {
+            current_entity_system_ = candidate;
+            AdvanceEntityEpochLocked();
+        }
+        if (!candidate)
+        {
+            error = "the game entity system is not ready";
+            return KEEL_RESULT_NOT_READY;
+        }
+        auto** vtable = *reinterpret_cast<void***>(candidate);
+        if (!vtable || !vtable[0])
+        {
+            error = "the game entity system has a null virtual table";
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        std::filesystem::path module;
+        if (!ValidateTarget(
+                vtable[0],
+                entity_system_module_.c_str(),
+                "CGameEntitySystem",
+                module,
+                error) ||
+            !SameModule(
+                entity_system_module_path_,
+                module,
+                "CGameEntitySystem",
+                error))
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        system = candidate;
+        return KEEL_RESULT_OK;
+    }
+
     static bool ValidPublicType(KeelConVarType type) noexcept
     {
         return type == KEELS2_CONVAR_BOOL || type == KEELS2_CONVAR_INT32 ||
@@ -2179,14 +2530,19 @@ private:
         auto* adapter = static_cast<Cs2Adapter*>(user_data);
         const auto factory = frame.Argument<void*>(0);
         const auto loop = frame.Argument<void*>(1);
+        bool invalidate{};
         if (adapter && factory && loop && *factory && *loop)
         {
             std::scoped_lock lock(adapter->source2_mutex_);
             if (adapter->active_factories_.contains(*factory))
             {
-                adapter->initialized_loops_.erase(*loop);
+                invalidate = adapter->initialized_loops_.erase(*loop) != 0;
                 adapter->active_loops_.erase(*loop);
             }
+        }
+        if (invalidate)
+        {
+            adapter->InvalidateEntityEpoch();
         }
         return KH_ACTION_CONTINUE;
     }
@@ -2208,6 +2564,7 @@ private:
         }
         if (emit)
         {
+            adapter->InvalidateEntityEpoch();
             KeelSource2LevelInit payload{
                 sizeof(KeelSource2LevelInit),
                 0,
@@ -2232,6 +2589,7 @@ private:
         }
         if (emit)
         {
+            adapter->InvalidateEntityEpoch();
             KeelSource2LevelShutdown payload{sizeof(KeelSource2LevelShutdown), 0};
             static_cast<void>(adapter->EmitSource2(KEELS2_SOURCE2_LEVEL_SHUTDOWN, payload));
         }
@@ -2306,13 +2664,19 @@ private:
 #if defined(_WIN32)
         constexpr const char* server_module = "server.dll";
         constexpr const char* engine_module = "engine2.dll";
+        constexpr const char* schema_module = "schemasystem.dll";
         constexpr const char* fixture_engine_module = "keels2_bootstrap_integration.exe";
+        constexpr const char* fixture_schema_module = "keels2_schema_entity_fixture.dll";
+        constexpr std::uint32_t entity_system_offset = 88;
         constexpr std::uint32_t game_event_load_events_slot = 1;
         constexpr std::uint32_t game_event_add_listener_slot = 3;
 #else
         constexpr const char* server_module = "libserver.so";
         constexpr const char* engine_module = "libengine2.so";
+        constexpr const char* schema_module = "libschemasystem.so";
         constexpr const char* fixture_engine_module = "keels2_bootstrap_integration";
+        constexpr const char* fixture_schema_module = "keels2_schema_entity_fixture.so";
+        constexpr std::uint32_t entity_system_offset = 80;
         constexpr std::uint32_t game_event_load_events_slot = 2;
         constexpr std::uint32_t game_event_add_listener_slot = 4;
 #endif
@@ -2322,7 +2686,46 @@ private:
         const char* expected_engine_module = fixture_profile
             ? fixture_engine_module
             : engine_module;
+        const bool any_schema_entity_fact = compatibility.schema_interface ||
+            compatibility.schema_module || compatibility.schema_server_module ||
+            compatibility.schema_validation_slot != 0 ||
+            compatibility.game_resource_interface || compatibility.game_resource_module ||
+            compatibility.entity_system_module ||
+            compatibility.game_resource_validation_slot != 0 ||
+            compatibility.game_entity_system_offset != 0;
+        const char* expected_schema_module = fixture_profile
+            ? fixture_schema_module
+            : schema_module;
+        const char* expected_entity_module = fixture_profile
+            ? fixture_schema_module
+            : server_module;
+        const char* expected_game_resource_module = fixture_profile
+            ? fixture_schema_module
+            : expected_engine_module;
+        const bool schema_entities_valid = !any_schema_entity_fact ||
+            (compatibility.schema_interface &&
+                std::strcmp(compatibility.schema_interface, "SchemaSystem_001") == 0 &&
+                compatibility.schema_module &&
+                std::strcmp(compatibility.schema_module, expected_schema_module) == 0 &&
+                compatibility.schema_server_module &&
+                std::strcmp(compatibility.schema_server_module, server_module) == 0 &&
+                compatibility.schema_validation_slot == 0 &&
+                compatibility.game_resource_interface &&
+                std::strcmp(
+                    compatibility.game_resource_interface,
+                    "GameResourceServiceServerV001") == 0 &&
+                compatibility.game_resource_module &&
+                std::strcmp(
+                    compatibility.game_resource_module,
+                    expected_game_resource_module) == 0 &&
+                compatibility.entity_system_module &&
+                std::strcmp(
+                    compatibility.entity_system_module,
+                    expected_entity_module) == 0 &&
+                compatibility.game_resource_validation_slot == 0 &&
+                compatibility.game_entity_system_offset == entity_system_offset);
         return compatibility.profile && compatibility.profile[0] &&
+            schema_entities_valid &&
             compatibility.server_interface &&
             std::strcmp(compatibility.server_interface, "Source2Server001") == 0 &&
             compatibility.server_module &&
@@ -2742,12 +3145,22 @@ private:
     InterfaceEntry game_clients_;
     InterfaceEntry cvar_interface_;
     InterfaceEntry engine_service_;
+    InterfaceEntry schema_system_;
+    InterfaceEntry game_resource_;
     KeelCreateInterfaceFn engine_factory_{};
     KeelCreateInterfaceFn server_factory_{};
     std::map<std::pair<KeelSource2Factory, std::string>, InterfaceEntry> named_interfaces_;
     platform::LoadedModulePin game_event_module_pin_;
     void** game_event_manager_vtable_{};
     std::string compatibility_profile_;
+    std::string schema_server_module_;
+    std::string entity_system_module_;
+    std::filesystem::path entity_system_module_path_;
+    std::mutex schema_entity_mutex_;
+    std::thread::id main_thread_{};
+    void* current_entity_system_{};
+    std::uint64_t entity_epoch_{1};
+    std::uint32_t game_entity_system_offset_{};
     cs2::CvarInterface* cvar_{};
     MemAllocStringDuplicate string_duplicate_{};
     MemAllocFree memory_free_{};

@@ -42,6 +42,7 @@ typedef uint32_t KeelPluginDependencyRequirement;
 #define KEEL_RESULT_UNSUPPORTED 8u
 #define KEEL_RESULT_AMBIGUOUS 9u
 #define KEEL_RESULT_BUSY 10u
+#define KEEL_RESULT_WRONG_THREAD 11u
 
 #define KEEL_LOG_INFO 0u
 #define KEEL_LOG_WARNING 1u

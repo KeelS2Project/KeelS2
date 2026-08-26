@@ -79,6 +79,15 @@ struct CompatibilityProfile
     std::uint32_t game_event_add_listener_slot;
     std::uint32_t client_connect_slot;
     std::uint32_t client_command_slot;
+    const char* schema_interface;
+    const char* schema_module;
+    const char* schema_server_module;
+    std::uint32_t schema_validation_slot;
+    const char* game_resource_interface;
+    const char* game_resource_module;
+    const char* entity_system_module;
+    std::uint32_t game_resource_validation_slot;
+    std::uint32_t game_entity_system_offset;
 };
 
 const CompatibilityProfile* FindCompatibilityProfile(
