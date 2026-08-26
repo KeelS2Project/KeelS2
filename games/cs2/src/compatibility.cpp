@@ -29,8 +29,12 @@ constexpr CompatibilityProfile Profile(
     platform::FileFingerprint server,
     const char* server_module,
     const char* cvar_module,
-    const char* engine_module)
+    const char* engine_module,
+    bool schema_entities)
 {
+    const char* schema_module = schema_entities
+        ? (platform_name[0] == 'w' ? "schemasystem.dll" : "libschemasystem.so")
+        : nullptr;
     return {
         id,
         game_version,
@@ -100,7 +104,16 @@ constexpr CompatibilityProfile Profile(
         platform_name[0] == 'w' ? 1u : 2u,
         platform_name[0] == 'w' ? 3u : 4u,
         12,
-        17
+        17,
+        schema_entities ? "SchemaSystem_001" : nullptr,
+        schema_module,
+        schema_entities ? server_module : nullptr,
+        0,
+        schema_entities ? "GameResourceServiceServerV001" : nullptr,
+        schema_entities ? engine_module : nullptr,
+        schema_entities ? server_module : nullptr,
+        0,
+        schema_entities ? (platform_name[0] == 'w' ? 88u : 80u) : 0u
     };
 }
 
@@ -112,7 +125,8 @@ constexpr std::array profiles{
         {40344184, 0xd9145056b00162faull},
         "libserver.so",
         "libtier0.so",
-        "libengine2.so"),
+        "libengine2.so",
+        false),
     Profile(
         "cs2-2000884-linuxsteamrt64-60a107b12af1a8d752ec462200852a2e7470913d",
         "2000884",
@@ -120,7 +134,8 @@ constexpr std::array profiles{
         {40352056, 0x023a563a82a10f52ull},
         "libserver.so",
         "libtier0.so",
-        "libengine2.so"),
+        "libengine2.so",
+        false),
     Profile(
         "cs2-2000885-linuxsteamrt64-d05aa2d65efa96e06e3ded6dd2a95b5220a993a8",
         "2000885",
@@ -128,7 +143,17 @@ constexpr std::array profiles{
         {40353400, 0x3aa4e49b8b45ac19ull},
         "libserver.so",
         "libtier0.so",
-        "libengine2.so"),
+        "libengine2.so",
+        true),
+    Profile(
+        "cs2-2000888-linuxsteamrt64-40541272-6311ef1c33faf243",
+        "2000888",
+        "linuxsteamrt64",
+        {40541272, 0x6311ef1c33faf243ull},
+        "libserver.so",
+        "libtier0.so",
+        "libengine2.so",
+        true),
     Profile(
         "cs2-2000879-win64-2369e67d8d0e4475a49dc6f4e8c99d28-51",
         "2000879",
@@ -136,7 +161,8 @@ constexpr std::array profiles{
         {32794264, 0x63eca0729c4fd8a9ull},
         "server.dll",
         "tier0.dll",
-        "engine2.dll"),
+        "engine2.dll",
+        false),
     Profile(
         "cs2-2000880-win64-2369e67d8d0e4475a49dc6f4e8c99d28-52",
         "2000880",
@@ -144,7 +170,8 @@ constexpr std::array profiles{
         {32818840, 0xda8eb43f77d5c62full},
         "server.dll",
         "tier0.dll",
-        "engine2.dll"),
+        "engine2.dll",
+        false),
     Profile(
         "cs2-2000884-win64-2369e67d8d0e4475a49dc6f4e8c99d28-54",
         "2000884",
@@ -152,7 +179,8 @@ constexpr std::array profiles{
         {32824984, 0x286e997327894e53ull},
         "server.dll",
         "tier0.dll",
-        "engine2.dll"),
+        "engine2.dll",
+        false),
     Profile(
         "cs2-2000885-win64-2369e67d8d0e4475a49dc6f4e8c99d28-55",
         "2000885",
@@ -160,7 +188,17 @@ constexpr std::array profiles{
         {32826008, 0xb3f810b3507341c6ull},
         "server.dll",
         "tier0.dll",
-        "engine2.dll")
+        "engine2.dll",
+        true),
+    Profile(
+        "cs2-2000888-win64-33003672-02e0bdaaa3f43453",
+        "2000888",
+        "win64",
+        {33003672, 0x02e0bdaaa3f43453ull},
+        "server.dll",
+        "tier0.dll",
+        "engine2.dll",
+        true)
 };
 
 }
@@ -185,22 +223,36 @@ const CompatibilityProfile* FindCompatibilityProfile(
 
 const CompatibilityProfile& FixtureCompatibilityProfile(const char* platform_name)
 {
-    static const CompatibilityProfile linux_profile = Profile(
-        "test-fixture-linuxsteamrt64",
-        "test",
-        "linuxsteamrt64",
-        {},
-        "libserver.so",
-        "keels2_bootstrap_integration",
-        "keels2_bootstrap_integration");
-    static const CompatibilityProfile windows_profile = Profile(
-        "test-fixture-win64",
-        "test",
-        "win64",
-        {},
-        "server.dll",
-        "keels2_bootstrap_integration.exe",
-        "keels2_bootstrap_integration.exe");
+    static const CompatibilityProfile linux_profile = [] {
+        CompatibilityProfile profile = Profile(
+            "test-fixture-linuxsteamrt64",
+            "test",
+            "linuxsteamrt64",
+            {},
+            "libserver.so",
+            "keels2_bootstrap_integration",
+            "keels2_bootstrap_integration",
+            true);
+        profile.schema_module = "keels2_schema_entity_fixture.so";
+        profile.game_resource_module = "keels2_schema_entity_fixture.so";
+        profile.entity_system_module = "keels2_schema_entity_fixture.so";
+        return profile;
+    }();
+    static const CompatibilityProfile windows_profile = [] {
+        CompatibilityProfile profile = Profile(
+            "test-fixture-win64",
+            "test",
+            "win64",
+            {},
+            "server.dll",
+            "keels2_bootstrap_integration.exe",
+            "keels2_bootstrap_integration.exe",
+            true);
+        profile.schema_module = "keels2_schema_entity_fixture.dll";
+        profile.game_resource_module = "keels2_schema_entity_fixture.dll";
+        profile.entity_system_module = "keels2_schema_entity_fixture.dll";
+        return profile;
+    }();
     return platform_name && std::strcmp(platform_name, "win64") == 0 ? windows_profile : linux_profile;
 }
 

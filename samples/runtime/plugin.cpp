@@ -29,18 +29,18 @@ const char* StatusName(PluginStatus status)
 std::vector<PluginDependency> RuntimePlugin::Dependencies() const
 {
     return {{
-        "KeelS2 ConVar Sample",
-        "0.5.0",
+        "KeelS2 Source 2 Sample",
+        "0.7.0",
         DependencyRequirement::at_least
     }};
 }
 
 bool RuntimePlugin::Load()
 {
-    const auto dependency = FindPlugin("KeelS2 ConVar Sample");
+    const auto dependency = FindPlugin("KeelS2 Source 2 Sample");
     if (!dependency || dependency->status != PluginStatus::running)
     {
-        LogError("required ConVar sample is not running");
+        LogError("required Source 2 sample is not running");
         return false;
     }
     LogMessage("dependency snapshot is running");

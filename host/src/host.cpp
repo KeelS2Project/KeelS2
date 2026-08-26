@@ -3,6 +3,7 @@
 #include "keelhook_service.h"
 #include "lifecycle_service.h"
 #include "plugin_service.h"
+#include "schema_entity_service.h"
 #include "source2_callbacks_service.h"
 
 #include <keels2/platform/console.h>
@@ -338,6 +339,16 @@ bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
     }
     WriteShutdownTrace("ConVar service shutdown complete");
     convar_failure_reported_ = false;
+    WriteShutdownTrace("schema and entity service shutdown begin");
+    const bool schema_entities_stopped =
+        !schema_entities_ || schema_entities_->Shutdown();
+    if (!schema_entities_stopped)
+    {
+        state_lock.lock();
+        WriteShutdownTrace("schema and entity service shutdown failed");
+        return false;
+    }
+    WriteShutdownTrace("schema and entity service shutdown complete");
     WriteShutdownTrace("lifecycle service shutdown begin");
     const bool lifecycle_stopped = !lifecycle_ || lifecycle_->Shutdown();
     if (!lifecycle_stopped)
@@ -447,6 +458,8 @@ bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
     WriteShutdownTrace("Source 2 callback service released");
     convars_.reset();
     WriteShutdownTrace("ConVar service released");
+    schema_entities_.reset();
+    WriteShutdownTrace("schema and entity service released");
     lifecycle_.reset();
     WriteShutdownTrace("lifecycle service released");
     keelhook_.reset();
@@ -801,6 +814,24 @@ KeelResult Host::QueryService(
             plugin_service_ = std::make_unique<PluginService>(*this);
         }
         *service = &plugin_service_->Api();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_SCHEMA_SERVICE_NAME) == 0 ||
+        std::strcmp(name, KEELS2_ENTITIES_SERVICE_NAME) == 0)
+    {
+        const bool schema = std::strcmp(name, KEELS2_SCHEMA_SERVICE_NAME) == 0;
+        if ((schema && version != KEELS2_SCHEMA_API_VERSION) ||
+            (!schema && version != KEELS2_ENTITIES_API_VERSION))
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!schema_entities_)
+        {
+            schema_entities_ = std::make_unique<SchemaEntityService>(*this, *adapter_);
+        }
+        *service = schema
+            ? static_cast<const void*>(&schema_entities_->SchemaApi())
+            : static_cast<const void*>(&schema_entities_->EntitiesApi());
         return KEEL_RESULT_OK;
     }
     if (std::strcmp(name, KEELHOOK_SERVICE_NAME) != 0)

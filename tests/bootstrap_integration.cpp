@@ -22,6 +22,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_set>
 #include <vector>
@@ -571,6 +572,19 @@ public:
         return true;
     }
 
+    bool ReadFloat32(const char* name, float& value) const
+    {
+        std::scoped_lock lock(convar_mutex);
+        const auto entry = ConVarByName(name);
+        if (!entry || entry->type != keels2::cs2::ConVarType::float32)
+        {
+            return false;
+        }
+        const auto current = ReadLiveConVarValue(entry->type, entry->data.values);
+        value = current.float32;
+        return true;
+    }
+
     bool LiveValueTailIntact(const char* name) const
     {
         std::scoped_lock lock(convar_mutex);
@@ -639,6 +653,11 @@ public:
         return std::any_of(entries.begin(), entries.end(), [name](const Entry& entry) {
             return entry.active && entry.name == name;
         });
+    }
+
+    void DrainQueuedConVarValues()
+    {
+        DrainQueuedValues();
     }
 
     void Reset()
@@ -924,9 +943,28 @@ private:
         {
             return {};
         }
-        const auto entry = std::find_if(convars.begin(), convars.end(), [name](const auto& candidate) {
-            return candidate->name == name;
-        });
+        const std::string_view requested{name};
+        const auto entry = std::find_if(
+            convars.begin(),
+            convars.end(),
+            [requested](const auto& candidate) {
+                if (candidate->name.size() != requested.size())
+                {
+                    return false;
+                }
+                return std::equal(
+                    candidate->name.begin(),
+                    candidate->name.end(),
+                    requested.begin(),
+                    [](char left, char right) {
+                        const auto fold = [](char value) {
+                            return value >= 'A' && value <= 'Z'
+                                ? static_cast<char>(value + ('a' - 'A'))
+                                : value;
+                        };
+                        return fold(left) == fold(right);
+                    });
+            });
         return entry == convars.end() ? std::shared_ptr<ConVarEntry>{} : *entry;
     }
 
@@ -1127,6 +1165,8 @@ std::array<void*, 1> g_named_interface_vtable{
 RawInterface g_named_interface{g_named_interface_vtable.data()};
 RawInterface g_null_vtable_interface{};
 std::uint32_t g_transient_interface_queries{};
+void* g_schema_system_interface{};
+void* g_game_resource_interface{};
 
 std::array<void*, 8> g_loop_vtable = [] {
     std::array<void*, 8> table{};
@@ -1204,6 +1244,14 @@ void* EngineFactory(const char* name, int* return_code)
     else if (name && std::strcmp(name, "EngineServiceMgr001") == 0)
     {
         result = &g_engine_service;
+    }
+    else if (name && std::strcmp(name, "SchemaSystem_001") == 0)
+    {
+        result = g_schema_system_interface;
+    }
+    else if (name && std::strcmp(name, "GameResourceServiceServerV001") == 0)
+    {
+        result = g_game_resource_interface;
     }
     else if (name && std::strcmp(name, "NetworkServerService_001") == 0)
     {
@@ -1456,6 +1504,25 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "Source 2 interface gateway runtime validation failed") &&
             !Contains(messages, "Source 2 interface view remained active during unload");
     }
+    if (scenario == "schema_entity_service")
+    {
+        return selected_profile &&
+            Count(messages, "plugin loaded: Schema Entity Test 0.6") == 2 &&
+            Count(messages, "[Schema Entity Test] schema field resolution passed") == 2 &&
+            Count(messages, "[Schema Entity Test] entity lookup and typed read passed") == 2 &&
+            Contains(messages, "[Schema Entity Test] entity destruction invalidation passed") &&
+            Contains(messages, "[Schema Entity Test] entity serial reuse validation passed") &&
+            Contains(messages, "[Schema Entity Test] map epoch invalidation passed") &&
+            Contains(messages, "[Schema Entity Test] wrong-thread access rejected") &&
+            Count(messages, "[Schema Entity Test] schema and entity views invalidated before unload") == 2 &&
+            Count(messages, "plugin unloaded: [01] Schema Entity Test") == 2 &&
+            !Contains(messages, "schema and entity load validation failed") &&
+            !Contains(messages, "entity lookup or typed read failed") &&
+            !Contains(messages, "invalidation failed") &&
+            !Contains(messages, "serial reuse validation failed") &&
+            !Contains(messages, "wrong-thread access was accepted") &&
+            !Contains(messages, "view remained active during unload");
+    }
     if (scenario == "lifecycle_service")
     {
         return selected_profile &&
@@ -1563,25 +1630,59 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
     if (scenario == "convar_facade")
     {
         return selected_profile &&
-            Count(messages, "plugin loaded: KeelS2 ConVar Sample 0.5.0") == 2 &&
-            Contains(messages, "[KeelS2 ConVar Sample] typed values ready: int=7 bool=true float=1.500000 string=keels2") &&
-            Contains(messages, "[KeelS2 ConVar Sample] typed values ready: int=10 bool=true float=1.500000 string=keels2") &&
-            Contains(messages, "[KeelS2 ConVar Sample] keels2_sample_int changed from 7 to 9") &&
-            Contains(messages, "[KeelS2 ConVar Sample] keels2_sample_int changed from 11 to 12") &&
-            Contains(messages, "[KeelS2 ConVar Sample] keels2_sample_int changed from 12 to 10") &&
-            Contains(messages, "[KeelS2 ConVar Sample] current keels2_sample_int=12") &&
-            Contains(messages, "[KeelS2 ConVar Sample] current keels2_sample_int=10") &&
-            Contains(messages, "[KeelS2 ConVar Sample] set keels2_sample_int=12") &&
-            Contains(messages, "[KeelS2 ConVar Sample] set keels2_sample_int=10") &&
-            Count(messages, "plugin paused: [01] KeelS2 ConVar Sample") == 1 &&
-            Count(messages, "plugin resumed: [01] KeelS2 ConVar Sample") == 1 &&
-            Count(messages, "[KeelS2 ConVar Sample] unloaded after brokered ConVar cleanup") == 2 &&
-            Count(messages, "plugin unloaded: [01] KeelS2 ConVar Sample") == 2 &&
+            Count(messages, "plugin loaded: KeelS2 Source 2 Sample 0.7.0") == 2 &&
+            Count(messages, "[KeelS2 Source 2 Sample] ready command=keel_sample") == 2 &&
+            Count(messages, "[KeelS2 Source 2 Sample] LevelInit context=complete") == 2 &&
+            Count(messages, "[KeelS2 Source 2 Sample] LevelShutdown") == 2 &&
+            Count(messages, "[KeelS2 Source 2 Sample] event=round_start") == 2 &&
+            Count(messages, "[KeelS2 Source 2 Sample] GameFrame") == 2 &&
+            Count(messages, "[KeelS2 Source 2 Sample] ClientConnected") == 2 &&
+            Count(messages, "[KeelS2 Source 2 Sample] ClientPutInServer") == 2 &&
+            Count(messages, "[KeelS2 Source 2 Sample] ClientActive") == 2 &&
+            Count(messages, "[KeelS2 Source 2 Sample] ClientFullyConnected") == 2 &&
+            Count(messages, "[KeelS2 Source 2 Sample] ClientDisconnecting") == 2 &&
+            Count(messages, "[KeelS2 Source 2 Sample] ClientSettingsChanged") == 2 &&
+            Count(messages, "[KeelS2 Source 2 Sample] ClientConnect slot=") == 2 &&
+            Count(messages, "[KeelS2 Source 2 Sample] ClientCommand slot=") == 2 &&
+            Count(messages, "[KeelS2 Source 2 Sample] caller=") == 14 &&
+            Count(messages, "[KeelS2 Source 2 Sample] ERROR: usage: keel_sample [bump]") == 1 &&
+            Count(messages, "[KeelS2 Source 2 Sample] keels2_sample_int changed") == 14 &&
+            Contains(messages, "old=42 new=99") &&
+            Contains(messages, "old=99 new=100") &&
+            Contains(messages, "old=50 new=100") &&
+            Contains(messages, "old=100 new=0") &&
+            Contains(messages, "old=9 new=10") &&
+            Contains(messages, "int=9 float=4 mp_limitteams=2") &&
+            Contains(messages, "int=10 float=4 mp_limitteams=2") &&
+            Contains(messages, "GameFrame simulating=true first_tick=false last_tick=true") &&
+            Count(messages, "plugin paused: [01] KeelS2 Source 2 Sample") == 1 &&
+            Count(messages, "plugin resumed: [01] KeelS2 Source 2 Sample") == 1 &&
+            Count(messages, "[KeelS2 Source 2 Sample] unloaded; ordinary resources required no manual cleanup") == 2 &&
+            Count(messages, "plugin unloaded: [01] KeelS2 Source 2 Sample") == 2 &&
             Contains(messages, "host stopped") &&
-            !Contains(messages, "keels2_sample_int changed from 9 to 11") &&
-            !Contains(messages, "set keels2_sample_int=13") &&
-            !Contains(messages, "could not set keels2_sample_int") &&
-            !Contains(messages, "exception escaped a ConVar callback");
+            !Contains(messages, "old=100 new=50") &&
+            !Contains(messages, "registration failed") &&
+            !Contains(messages, "log formatting failed") &&
+            !Contains(messages, "exception escaped a ConVar callback") &&
+            !Contains(messages, "plugin threw during a Source 2 callback");
+    }
+    if (scenario == "convar_authoring")
+    {
+        return selected_profile &&
+            Count(messages, "plugin loaded: ConVar Authoring Contract 0.7.0") == 2 &&
+            Count(
+                messages,
+                "[ConVar Authoring Contract] loaded int=11 float=2.5 bool=true "
+                "string=keels2 limitteams=2") == 2 &&
+            Count(messages, "[ConVar Authoring Contract] unload invalidation=true") == 2 &&
+            Count(messages, "plugin paused: [01] ConVar Authoring Contract") == 1 &&
+            Count(messages, "plugin resumed: [01] ConVar Authoring Contract") == 1 &&
+            Count(messages, "plugin unloaded: [01] ConVar Authoring Contract") == 2 &&
+            Contains(messages, "host stopped") &&
+            !Contains(messages, "unload invalidation=false") &&
+            !Contains(messages, "log formatting failed") &&
+            !Contains(messages, "exception escaped a ConVar callback") &&
+            !Contains(messages, "plugin threw during a ConVar callback");
     }
     if (scenario == "lifecycle_pre_init")
     {
@@ -1778,7 +1879,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
 
 int main(int argument_count, char** arguments)
 {
-    if (argument_count != 35)
+    if (argument_count != 38)
     {
         return 1;
     }
@@ -1816,7 +1917,10 @@ int main(int argument_count, char** arguments)
     const std::filesystem::path source2_callbacks_first_source = arguments[31];
     const std::filesystem::path source2_callbacks_second_source = arguments[32];
     const std::filesystem::path source2_callbacks_peer_source = arguments[33];
-    const std::filesystem::path fixture = std::filesystem::path(arguments[34]) / scenario;
+    const std::filesystem::path schema_entity_service_source = arguments[34];
+    const std::filesystem::path schema_entity_fixture_source = arguments[35];
+    const std::filesystem::path convar_authoring_source = arguments[36];
+    const std::filesystem::path fixture = std::filesystem::path(arguments[37]) / scenario;
     const std::filesystem::path shutdown_trace = fixture / "shutdown.trace";
 
 #if defined(_WIN32)
@@ -1851,12 +1955,14 @@ int main(int argument_count, char** arguments)
     const bool command_removal = scenario == "command_removal";
     const bool plugin_index_compaction = scenario == "plugin_index_compaction";
     const bool source2_service = scenario == "source2_service";
+    const bool schema_entity_service = scenario == "schema_entity_service";
     const bool lifecycle_service = scenario == "lifecycle_service";
     const bool source2_callbacks = scenario == "source2_callbacks";
     const bool authoring_concurrency = scenario == "authoring_concurrency";
     const bool convar_service = scenario == "convar_service";
     const bool convar_failed_load = scenario == "convar_failed_load";
     const bool convar_facade = scenario == "convar_facade";
+    const bool convar_authoring = scenario == "convar_authoring";
     const bool plugin_runtime_service = scenario == "plugin_runtime_service";
     const bool plugin_runtime_concurrency = scenario == "plugin_runtime_concurrency";
     const bool plugin_transition_shutdown_retry =
@@ -1874,9 +1980,11 @@ int main(int argument_count, char** arguments)
         !missing_source2_server && !missing_game_clients && !wrong_cvar_provenance &&
         !duplicate_command && !duplicate_plugin_name && !reserved_command &&
         !core_commands && !plugin_lifecycle && !command_removal &&
-        !plugin_index_compaction && !source2_service && !lifecycle_service &&
+        !plugin_index_compaction && !source2_service && !schema_entity_service &&
+        !lifecycle_service &&
         !source2_callbacks &&
         !authoring_concurrency && !convar_service && !convar_failed_load && !convar_facade &&
+        !convar_authoring &&
         !plugin_runtime_service && !plugin_runtime_concurrency &&
         !plugin_transition_shutdown_retry && !plugin_dependencies &&
         !lifecycle_pre_init && !lifecycle_failed_load && !failed_server_init &&
@@ -1902,12 +2010,53 @@ int main(int argument_count, char** arguments)
     }
     clear_messages();
     g_cvar.Reset();
+    keels2::platform::DynamicLibrary schema_entity_fixture;
+    if (!schema_entity_fixture.Open(schema_entity_fixture_source, loader_error))
+    {
+        return 123;
+    }
+    using InterfaceFunction = void* (*)();
+    using SchemaEntityVoidFunction = void (*)();
+    using SchemaEntityReadyFunction = void (*)(bool);
+    using SchemaEntityCountFunction = std::uint32_t (*)();
+    const auto schema_system = reinterpret_cast<InterfaceFunction>(
+        schema_entity_fixture.Symbol("KeelTest_SchemaSystem"));
+    const auto game_resource = reinterpret_cast<InterfaceFunction>(
+        schema_entity_fixture.Symbol("KeelTest_GameResourceService"));
+    const auto reset_schema_entities = reinterpret_cast<SchemaEntityVoidFunction>(
+        schema_entity_fixture.Symbol("KeelTest_ResetSchemaEntities"));
+    const auto set_entity_system_ready = reinterpret_cast<SchemaEntityReadyFunction>(
+        schema_entity_fixture.Symbol("KeelTest_SetEntitySystemReady"));
+    const auto destroy_entity = reinterpret_cast<SchemaEntityVoidFunction>(
+        schema_entity_fixture.Symbol("KeelTest_DestroyEntity"));
+    const auto reuse_entity = reinterpret_cast<SchemaEntityVoidFunction>(
+        schema_entity_fixture.Symbol("KeelTest_ReuseEntity"));
+    const auto schema_lookup_count = reinterpret_cast<SchemaEntityCountFunction>(
+        schema_entity_fixture.Symbol("KeelTest_SchemaLookupCount"));
+    if (!schema_system || !game_resource || !reset_schema_entities ||
+        !set_entity_system_ready || !destroy_entity || !reuse_entity ||
+        !schema_lookup_count)
+    {
+        return 124;
+    }
+    reset_schema_entities();
+    g_schema_system_interface = schema_system();
+    g_game_resource_interface = game_resource();
+    if (!g_schema_system_interface || !g_game_resource_interface)
+    {
+        return 125;
+    }
     if (!ResetEngineAllocatorDiagnostics())
     {
         return 103;
     }
     if ((convar_service || convar_failed_load) &&
         !g_cvar.SeedInt32("sv_keels2_existing", 42))
+    {
+        return 74;
+    }
+    if ((convar_facade || convar_authoring) &&
+        !g_cvar.SeedInt32("mp_limitteams", 2))
     {
         return 74;
     }
@@ -2021,6 +2170,8 @@ int main(int argument_count, char** arguments)
         plugin_directory / (std::string("01_convar_service") + plugin_extension);
     const auto convar_facade_plugin_path =
         plugin_directory / (std::string("01_convar_facade") + plugin_extension);
+    const auto convar_authoring_plugin_path =
+        plugin_directory / (std::string("01_convar_authoring") + plugin_extension);
     const auto plugin_runtime_service_path =
         plugin_directory / (std::string("01_plugin_runtime") + plugin_extension);
     const auto source2_callbacks_first_path =
@@ -2029,6 +2180,8 @@ int main(int argument_count, char** arguments)
         plugin_directory / (std::string("02_source2_callbacks_second") + plugin_extension);
     const auto source2_callbacks_peer_path =
         plugin_directory / (std::string("03_source2_callbacks_peer") + plugin_extension);
+    const auto schema_entity_service_path =
+        plugin_directory / (std::string("01_schema_entity_service") + plugin_extension);
     const auto real_server_path = fixture / "game" / "csgo" / "bin" / platform / server_name;
     const auto& proxy_source = unknown_build ? production_proxy_source : test_proxy_source;
 
@@ -2108,6 +2261,11 @@ int main(int argument_count, char** arguments)
     {
         return 43;
     }
+    if (schema_entity_service &&
+        !CopyFile(schema_entity_service_source, schema_entity_service_path))
+    {
+        return 126;
+    }
     if ((lifecycle_service || lifecycle_pre_init || lifecycle_failed_load) &&
         !CopyFile(
             lifecycle_service_source,
@@ -2128,6 +2286,11 @@ int main(int argument_count, char** arguments)
     if (convar_facade && !CopyFile(convar_facade_source, convar_facade_plugin_path))
     {
         return 92;
+    }
+    if (convar_authoring &&
+        !CopyFile(convar_authoring_source, convar_authoring_plugin_path))
+    {
+        return 135;
     }
     if ((plugin_runtime_service || plugin_runtime_concurrency ||
             plugin_transition_shutdown_retry) &&
@@ -2291,7 +2454,7 @@ int main(int argument_count, char** arguments)
     Source2CountFunction game_event_remove_count{};
     Source2BoolFunction game_event_listener_active{};
     if (lifecycle_service || lifecycle_failed_load || authoring_concurrency ||
-        source2_callbacks)
+        source2_callbacks || convar_facade)
     {
         if (!lifecycle_fixture.Open(real_server_path, loader_error))
         {
@@ -2308,7 +2471,7 @@ int main(int argument_count, char** arguments)
             return 48;
         }
         reset_lifecycle_calls();
-        if (source2_callbacks)
+        if (source2_callbacks || convar_facade)
         {
             dispatch_client_connect = reinterpret_cast<DispatchClientConnectFunction>(
                 lifecycle_fixture.Symbol("KeelTest_DispatchClientConnect"));
@@ -2337,22 +2500,25 @@ int main(int argument_count, char** arguments)
             {
                 return 109;
             }
-            if (!source2_callbacks_first.Open(source2_callbacks_first_path, loader_error))
+            if (source2_callbacks)
             {
-                return 118;
-            }
-            source2_arm_block = reinterpret_cast<Source2VoidFunction>(
-                source2_callbacks_first.Symbol("KeelTest_Source2ArmBlock"));
-            source2_block_entered = reinterpret_cast<Source2BoolFunction>(
-                source2_callbacks_first.Symbol("KeelTest_Source2BlockEntered"));
-            source2_release_block = reinterpret_cast<Source2VoidFunction>(
-                source2_callbacks_first.Symbol("KeelTest_Source2ReleaseBlock"));
-            source2_unload_count = reinterpret_cast<Source2CountFunction>(
-                source2_callbacks_first.Symbol("KeelTest_Source2UnloadCount"));
-            if (!source2_arm_block || !source2_block_entered || !source2_release_block ||
-                !source2_unload_count)
-            {
-                return 119;
+                if (!source2_callbacks_first.Open(source2_callbacks_first_path, loader_error))
+                {
+                    return 118;
+                }
+                source2_arm_block = reinterpret_cast<Source2VoidFunction>(
+                    source2_callbacks_first.Symbol("KeelTest_Source2ArmBlock"));
+                source2_block_entered = reinterpret_cast<Source2BoolFunction>(
+                    source2_callbacks_first.Symbol("KeelTest_Source2BlockEntered"));
+                source2_release_block = reinterpret_cast<Source2VoidFunction>(
+                    source2_callbacks_first.Symbol("KeelTest_Source2ReleaseBlock"));
+                source2_unload_count = reinterpret_cast<Source2CountFunction>(
+                    source2_callbacks_first.Symbol("KeelTest_Source2UnloadCount"));
+                if (!source2_arm_block || !source2_block_entered ||
+                    !source2_release_block || !source2_unload_count)
+                {
+                    return 119;
+                }
             }
         }
     }
@@ -2365,7 +2531,7 @@ int main(int argument_count, char** arguments)
         expected_registrations = 1;
         expected_active = 1;
         if (success || duplicate_command || duplicate_plugin_name || plugin_lifecycle ||
-            command_removal || source2_service || convar_facade)
+            command_removal || source2_service || schema_entity_service || convar_facade)
         {
             expected_registrations = 2;
             expected_active = 2;
@@ -2530,6 +2696,62 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 44;
         }
+    }
+    if (schema_entity_service)
+    {
+        set_entity_system_ready(true);
+        if (!DispatchSource2LevelInit() ||
+            !g_cvar.Dispatch({"keel_schema_entity_check", "initial"}))
+        {
+            std::fputs(messages(), stderr);
+            return 127;
+        }
+        bool offthread_dispatched{};
+        std::thread offthread([&] {
+            offthread_dispatched =
+                g_cvar.Dispatch({"keel_schema_entity_check", "offthread"});
+        });
+        offthread.join();
+        if (!offthread_dispatched)
+        {
+            return 131;
+        }
+        destroy_entity();
+        if (!g_cvar.Dispatch({"keel_schema_entity_check", "stale"}))
+        {
+            return 128;
+        }
+        reuse_entity();
+        if (!g_cvar.Dispatch({"keel_schema_entity_check", "reuse"}))
+        {
+            return 129;
+        }
+        DispatchSource2LevelShutdown();
+        if (!g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
+            g_cvar.HasActive("keel_schema_entity_check") ||
+            g_cvar.ActiveCount() != 1 || g_cvar.unregister_count != 1)
+        {
+            std::fputs(messages(), stderr);
+            return 130;
+        }
+        if (schema_lookup_count() != 3)
+        {
+            return 134;
+        }
+        reset_schema_entities();
+        if (!g_cvar.Dispatch({"keel", "plugins", "load", "01_schema_entity_service"}))
+        {
+            return 132;
+        }
+        set_entity_system_ready(true);
+        if (!DispatchSource2LevelInit() ||
+            !g_cvar.Dispatch({"keel_schema_entity_check", "initial"}) ||
+            schema_lookup_count() != 2)
+        {
+            std::fputs(messages(), stderr);
+            return 133;
+        }
+        expected_registrations = 3;
     }
     if (source2_callbacks)
     {
@@ -3287,31 +3509,176 @@ int main(int argument_count, char** arguments)
             return 91;
         }
     }
+    if (convar_authoring)
+    {
+        keels2::platform::DynamicLibrary authoring_plugin;
+        if (!authoring_plugin.Open(convar_authoring_plugin_path, loader_error))
+        {
+            return 136;
+        }
+        using ValueFunction = std::uint32_t (*)(std::uint32_t);
+        using SetFunction = int (*)(int);
+        using RemoveFunction = std::uint32_t (*)(std::uint32_t);
+        using StringFunction = std::uint32_t (*)(const char*);
+        const auto value = reinterpret_cast<ValueFunction>(
+            authoring_plugin.Symbol("KeelTest_ConVarAuthoringValue"));
+        const auto set = reinterpret_cast<SetFunction>(
+            authoring_plugin.Symbol("KeelTest_ConVarAuthoringSet"));
+        const auto remove_convar = reinterpret_cast<RemoveFunction>(
+            authoring_plugin.Symbol("KeelTest_ConVarAuthoringRemove"));
+        const auto set_string = reinterpret_cast<StringFunction>(
+            authoring_plugin.Symbol("KeelTest_ConVarAuthoringSetString"));
+        const auto string_equals = reinterpret_cast<StringFunction>(
+            authoring_plugin.Symbol("KeelTest_ConVarAuthoringStringEquals"));
+        std::int32_t integer_value{};
+        float floating_value{};
+        if (!value || !set || !remove_convar || !set_string || !string_equals ||
+            value(0) != 1 || value(1) != 0 ||
+            value(2) != 0 ||
+            value(3) != 0 || value(4) != 0 || value(5) != 1 || value(6) != 11 ||
+            value(7) != 0 || value(8) != 1 || value(9) != 0 || value(10) != 1 ||
+            value(11) != 0 || value(12) != 1 || value(13) != 0 ||
+            g_cvar.convar_register_count != 5 ||
+            g_cvar.convar_unregister_count != 0 ||
+            g_cvar.convar_registration_string_count != 1 ||
+            g_cvar.convar_invalid_registration_string_count != 0 ||
+            g_cvar.convar_registration_reject_count != 0 ||
+            g_cvar.convar_queue_count != 0 || g_cvar.convar_filter_count != 2 ||
+            g_cvar.convar_change_count != 2 || g_cvar.convar_global_change_count != 2 ||
+            g_cvar.ActiveConVarCallbacks("keels2_authoring_int") != 1 ||
+            !g_cvar.HasConVar("keels2_authoring_float") ||
+            !g_cvar.HasConVar("keels2_authoring_bool") ||
+            !g_cvar.HasConVar("keels2_authoring_string") ||
+            !g_cvar.HasConVar("keels2_authoring_unbounded") ||
+            !g_cvar.HasConVar("mp_limitteams") ||
+            !g_cvar.ReadInt32("keels2_authoring_int", integer_value) ||
+            integer_value != 11 ||
+            !g_cvar.ReadFloat32("keels2_authoring_float", floating_value) ||
+            floating_value != 2.5F || !g_cvar.LiveValueTailIntact("keels2_authoring_int") ||
+            !g_cvar.LiveValueTailIntact("keels2_authoring_float") ||
+            EngineInvalidFreeCount() != 0)
+        {
+            std::fputs(messages(), stderr);
+            return 137;
+        }
+
+        if (!g_cvar.Dispatch({"keel", "plugins", "pause", "1"}) ||
+            value(5) != 1 || value(6) != 0 || value(8) != 1 || value(10) != 1 ||
+            value(12) != 1 || set(10) != -1 ||
+            !g_cvar.SetInt32("keels2_authoring_int", 7) || value(2) != 0 ||
+            !g_cvar.ReadInt32("keels2_authoring_int", integer_value) ||
+            integer_value != 7 ||
+            !g_cvar.Dispatch({"keel", "plugins", "resume", "1"}) ||
+            value(5) != 1 || value(6) != 7 || value(8) != 1 || value(10) != 1 ||
+            value(2) != 0 || value(3) != 0 ||
+            g_cvar.ActiveConVarCallbacks("keels2_authoring_int") != 1 ||
+            g_cvar.convar_unregister_count != 0)
+        {
+            std::fputs(messages(), stderr);
+            return 138;
+        }
+
+        if (!g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
+            value(0) != 1 || value(1) != 1 || value(2) != 0 || value(3) != 0 ||
+            value(4) != 1 || value(5) != 0 || value(6) != 0 || value(7) != 0 ||
+            value(8) != 0 || value(10) != 0 || value(11) != 0 || value(12) != 0 ||
+            value(13) != 0 || set(5) != -1 || remove_convar(0) != 0 ||
+            remove_convar(1) != 0 ||
+            g_cvar.ActiveConVarCallbacks("keels2_authoring_int") != 0 ||
+            g_cvar.convar_unregister_count != 5 || g_cvar.ActiveCount() != 1 ||
+            !g_cvar.HasConVar("keels2_authoring_int"))
+        {
+            std::fputs(messages(), stderr);
+            return 139;
+        }
+
+        if (!g_cvar.Dispatch({"keel", "plugins", "load", "01_convar_authoring"}) ||
+            value(0) != 2 || value(1) != 1 || value(2) != 0 || value(3) != 0 ||
+            value(5) != 1 || value(6) != 11 || value(7) != 0 || value(8) != 1 ||
+            value(9) != 0 || value(10) != 1 || value(11) != 0 || value(12) != 1 ||
+            value(13) != 0 ||
+            g_cvar.convar_register_count != 10 ||
+            g_cvar.convar_unregister_count != 5 ||
+            g_cvar.convar_registration_string_count != 2 ||
+            g_cvar.convar_invalid_registration_string_count != 0 ||
+            g_cvar.ActiveConVarCallbacks("keels2_authoring_int") != 1 ||
+            !g_cvar.ReadInt32("keels2_authoring_int", integer_value) ||
+            integer_value != 11 ||
+            !g_cvar.ReadFloat32("keels2_authoring_float", floating_value) ||
+            floating_value != 2.5F || set(-100) != 1 || value(6) != 1 ||
+            value(2) != 1 || value(13) != 1 || set(100) != 11 || value(6) != 11 ||
+            value(2) != 2 || value(13) != 1 ||
+            value(3) != 0 || remove_convar(0) != 1 || value(5) != 0 ||
+            value(6) != 0 || set(10) != -1 ||
+            g_cvar.ActiveConVarCallbacks("keels2_authoring_int") != 0 ||
+            g_cvar.convar_unregister_count != 6 || remove_convar(1) != 1 ||
+            value(8) != 0 || value(10) != 0 ||
+            g_cvar.convar_unregister_count != 6)
+        {
+            std::fputs(messages(), stderr);
+            return 140;
+        }
+
+        std::uint32_t worker_read_before{};
+        std::uint32_t worker_set{};
+        std::uint32_t worker_read_after{};
+        std::thread authoring_worker([&] {
+            worker_read_before = string_equals("keels2");
+            worker_set = set_string("worker");
+            worker_read_after = string_equals("worker");
+        });
+        authoring_worker.join();
+        if (worker_read_before != 0 || worker_set != 1 || worker_read_after != 0 ||
+            g_cvar.convar_queue_count != 1)
+        {
+            std::fputs(messages(), stderr);
+            return 142;
+        }
+        g_cvar.DrainQueuedConVarValues();
+        if (string_equals("worker") != 1 || value(2) != 2 || value(3) != 0 ||
+            EngineInvalidFreeCount() != 0)
+        {
+            std::fputs(messages(), stderr);
+            return 143;
+        }
+
+        if (!g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
+            value(0) != 2 || value(1) != 2 || value(2) != 2 || value(3) != 0 ||
+            value(4) != 1 || value(5) != 0 || value(6) != 0 || value(7) != 0 ||
+            value(8) != 0 || value(10) != 0 || value(11) != 0 || value(12) != 0 ||
+            value(13) != 1 || set(5) != -1 ||
+            g_cvar.ActiveConVarCallbacks("keels2_authoring_int") != 0 ||
+            g_cvar.convar_unregister_count != 10 || g_cvar.ActiveCount() != 1 ||
+            EngineInvalidFreeCount() != 0)
+        {
+            std::fputs(messages(), stderr);
+            return 141;
+        }
+        authoring_plugin.Close();
+    }
     if (convar_facade)
     {
-        std::int32_t commanded_value{};
-        if (g_cvar.convar_register_count != 4 || g_cvar.convar_unregister_count != 0 ||
-            g_cvar.convar_registration_string_count != 1 ||
+        std::int32_t integer_value{};
+        float floating_value{};
+        if (g_cvar.convar_register_count != 2 || g_cvar.convar_unregister_count != 0 ||
+            g_cvar.convar_registration_string_count != 0 ||
             g_cvar.convar_invalid_registration_string_count != 0 ||
             g_cvar.convar_registration_reject_count != 0 ||
             EngineInvalidFreeCount() != 0 ||
             g_cvar.ActiveConVarCallbacks("keels2_sample_int") != 1 ||
             g_cvar.ActiveCount() != 2 ||
-            !g_cvar.SetInt32("keels2_sample_int", 9) ||
-            !g_cvar.Dispatch({"keel_cvar_sample"}) ||
-            !g_cvar.Dispatch({"keel", "plugins", "pause", "1"}) ||
-            !g_cvar.SetInt32("keels2_sample_int", 11) ||
-            !g_cvar.Dispatch({"keel_cvar_sample", "13"}) ||
-            g_cvar.convar_queue_count != 0 ||
-            !g_cvar.Dispatch({"keel", "plugins", "resume", "1"}) ||
-            !g_cvar.SetInt32("keels2_sample_int", 12) ||
-            !g_cvar.Dispatch({"keel_cvar_sample"}))
+            !g_cvar.HasConVar("keels2_sample_float") ||
+            !g_cvar.HasConVar("mp_limitteams") ||
+            game_event_load_count() != 1 || game_event_add_count() != 1 ||
+            !game_event_listener_active() || !DispatchSource2LevelInit() ||
+            g_loop_init_calls != 1 || !dispatch_game_event(&g_game_event_instance) ||
+            !dispatch_client_connect() || rejection_message()[0] != '\0' ||
+            client_connect_original_calls() != 1)
         {
             std::fprintf(
                 stderr,
-                "convar facade precondition failed: registered=%u unregistered=%u strings=%u "
-                "invalid_strings=%u rejects=%u invalid_frees=%u callbacks=%zu active=%zu "
-                "queues=%u\n",
+                "sample precondition failed: registered=%u unregistered=%u strings=%u "
+                "invalid_strings=%u rejects=%u invalid_frees=%u callbacks=%zu active=%zu\n",
                 g_cvar.convar_register_count,
                 g_cvar.convar_unregister_count,
                 g_cvar.convar_registration_string_count,
@@ -3319,8 +3686,43 @@ int main(int argument_count, char** arguments)
                 g_cvar.convar_registration_reject_count,
                 EngineInvalidFreeCount(),
                 g_cvar.ActiveConVarCallbacks("keels2_sample_int"),
-                g_cvar.ActiveCount(),
-                g_cvar.convar_queue_count);
+                g_cvar.ActiveCount());
+            std::fputs(messages(), stderr);
+            return 93;
+        }
+
+        dispatch_client_command();
+        dispatch_lifecycle();
+        for (std::uint32_t event = 1; event <= 7; ++event)
+        {
+            if (lifecycle_call_count(event) != 1)
+            {
+                std::fputs(messages(), stderr);
+                return 93;
+            }
+        }
+
+        if (client_command_original_calls() != 1 ||
+            Count(messages(), "[KeelS2 Source 2 Sample] event=round_start") != 1 ||
+            Count(messages(), "[KeelS2 Source 2 Sample] GameFrame") != 1 ||
+            !g_cvar.SetInt32("keels2_sample_int", 99) ||
+            !g_cvar.Dispatch({"keel_sample", "bump"}) ||
+            !g_cvar.ReadInt32("keels2_sample_int", integer_value) || integer_value != 100 ||
+            !g_cvar.ReadFloat32("keels2_sample_float", floating_value) ||
+            floating_value != 1.5F ||
+            !g_cvar.Dispatch({"keel", "plugins", "pause", "1"}) ||
+            !g_cvar.SetInt32("keels2_sample_int", 50) ||
+            !g_cvar.Dispatch({"keel_sample", "bump"}) ||
+            !dispatch_game_event(&g_game_event_instance) ||
+            !g_cvar.ReadInt32("keels2_sample_int", integer_value) || integer_value != 50 ||
+            !g_cvar.ReadFloat32("keels2_sample_float", floating_value) ||
+            floating_value != 1.5F || g_cvar.convar_queue_count != 0 ||
+            g_cvar.convar_filter_count != 2 ||
+            Count(messages(), "[KeelS2 Source 2 Sample] caller=") != 1 ||
+            Count(messages(), "[KeelS2 Source 2 Sample] event=round_start") != 1 ||
+            !g_cvar.Dispatch({"keel", "plugins", "resume", "1"}) ||
+            !g_cvar.SetInt32("keels2_sample_int", 100))
+        {
             std::fputs(messages(), stderr);
             return 93;
         }
@@ -3328,35 +3730,116 @@ int main(int argument_count, char** arguments)
         const std::uint32_t changes_before_rejection = g_cvar.convar_change_count;
         const std::uint32_t globals_before_rejection = g_cvar.convar_global_change_count;
         g_cvar.RejectNextFilter();
-        if (!g_cvar.Dispatch({"keel_cvar_sample", "10"}) ||
-            g_cvar.convar_queue_count != 0 || g_cvar.convar_filter_count != 1 ||
-            g_cvar.last_filter_slot != KEELS2_CONVAR_GLOBAL_SLOT ||
-            g_cvar.convar_change_count != changes_before_rejection ||
-            g_cvar.convar_global_change_count != globals_before_rejection ||
-            !g_cvar.ReadInt32("keels2_sample_int", commanded_value) || commanded_value != 12 ||
-            !g_cvar.Dispatch({"keel_cvar_sample", "10"}) ||
-            g_cvar.convar_queue_count != 0 || g_cvar.convar_filter_count != 2 ||
-            g_cvar.last_filter_slot != KEELS2_CONVAR_GLOBAL_SLOT ||
-            g_cvar.last_change_slot != 0 ||
-            g_cvar.last_global_slot != 0 || g_cvar.last_global_old != "12" ||
-            g_cvar.last_global_new != "10" ||
-            !g_cvar.ReadInt32("keels2_sample_int", commanded_value) || commanded_value != 10 ||
+        if (!g_cvar.Dispatch({"keel_sample", "bump"}) ||
+            g_cvar.convar_queue_count != 0 || g_cvar.convar_filter_count != 4 ||
+            g_cvar.convar_change_count != changes_before_rejection + 1 ||
+            g_cvar.convar_global_change_count != globals_before_rejection + 1 ||
+            !g_cvar.ReadInt32("keels2_sample_int", integer_value) || integer_value != 100 ||
+            !g_cvar.ReadFloat32("keels2_sample_float", floating_value) ||
+            floating_value != 1.75F ||
+            !g_cvar.Dispatch({"keel_sample", "bump"}) ||
+            g_cvar.convar_queue_count != 0 || g_cvar.convar_filter_count != 6 ||
+            !g_cvar.ReadInt32("keels2_sample_int", integer_value) || integer_value != 0 ||
+            !g_cvar.ReadFloat32("keels2_sample_float", floating_value) ||
+            floating_value != 2.0F)
+        {
+            std::fputs(messages(), stderr);
+            return 93;
+        }
+
+        for (int command = 0; command < 9; ++command)
+        {
+            if (!g_cvar.Dispatch({"keel_sample", "bump"}))
+            {
+                std::fputs(messages(), stderr);
+                return 93;
+            }
+        }
+
+        if (g_cvar.convar_queue_count != 0 || g_cvar.convar_filter_count != 24 ||
+            !g_cvar.ReadInt32("keels2_sample_int", integer_value) || integer_value != 9 ||
+            !g_cvar.ReadFloat32("keels2_sample_float", floating_value) ||
+            floating_value != 4.0F ||
             !g_cvar.LiveValueTailIntact("keels2_sample_int") ||
+            !g_cvar.LiveValueTailIntact("keels2_sample_float") ||
+            Count(messages(), "[KeelS2 Source 2 Sample] caller=") != 12 ||
+            Contains(messages(), "old=100 new=50") ||
+            !Contains(messages(), "old=100 new=0") ||
+            !Contains(messages(), "int=9 float=4 mp_limitteams=2"))
+        {
+            std::fputs(messages(), stderr);
+            return 93;
+        }
+
+        DispatchSource2LevelShutdown();
+        const std::size_t event_logs =
+            Count(messages(), "[KeelS2 Source 2 Sample] event=round_start");
+        const std::size_t frame_logs =
+            Count(messages(), "[KeelS2 Source 2 Sample] GameFrame");
+        const std::size_t connected_logs =
+            Count(messages(), "[KeelS2 Source 2 Sample] ClientConnected");
+        if (g_loop_shutdown_calls != 1 ||
             !g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
             g_cvar.ActiveConVarCallbacks("keels2_sample_int") != 0 ||
-            g_cvar.convar_unregister_count != 4 || g_cvar.ActiveCount() != 1 ||
+            g_cvar.convar_unregister_count != 2 || g_cvar.ActiveCount() != 1 ||
             !g_cvar.HasConVar("keels2_sample_int") ||
+            !g_cvar.HasConVar("keels2_sample_float") ||
+            g_cvar.Dispatch({"keel_sample"}) ||
+            !dispatch_game_event(&g_game_event_instance))
+        {
+            std::fputs(messages(), stderr);
+            return 93;
+        }
+
+        dispatch_lifecycle();
+        if (Count(messages(), "[KeelS2 Source 2 Sample] event=round_start") != event_logs ||
+            Count(messages(), "[KeelS2 Source 2 Sample] GameFrame") != frame_logs ||
+            Count(messages(), "[KeelS2 Source 2 Sample] ClientConnected") != connected_logs ||
             !g_cvar.Dispatch({"keel", "plugins", "load", "01_convar_facade"}) ||
-            g_cvar.convar_register_count != 8 ||
-            g_cvar.convar_registration_string_count != 2 ||
+            g_cvar.convar_register_count != 4 ||
+            g_cvar.convar_registration_string_count != 0 ||
             g_cvar.convar_invalid_registration_string_count != 0 ||
             EngineInvalidFreeCount() != 0 ||
             g_cvar.ActiveConVarCallbacks("keels2_sample_int") != 1 ||
             g_cvar.ActiveCount() != 2 ||
-            !g_cvar.Dispatch({"keel_cvar_sample"}) ||
+            game_event_add_count() != 1 || !game_event_listener_active() ||
+            !g_cvar.ReadInt32("keels2_sample_int", integer_value) || integer_value != 9 ||
+            !g_cvar.ReadFloat32("keels2_sample_float", floating_value) ||
+            floating_value != 4.0F || !DispatchSource2LevelInit() ||
+            g_loop_init_calls != 2 || !dispatch_game_event(&g_game_event_instance) ||
+            !dispatch_client_connect() || rejection_message()[0] != '\0' ||
+            client_connect_original_calls() != 2)
+        {
+            std::fputs(messages(), stderr);
+            return 93;
+        }
+
+        dispatch_client_command();
+        dispatch_lifecycle();
+        if (client_command_original_calls() != 2 ||
+            !g_cvar.Dispatch({"keel_sample"}) ||
+            !g_cvar.ReadInt32("keels2_sample_int", integer_value) || integer_value != 9 ||
+            !g_cvar.ReadFloat32("keels2_sample_float", floating_value) ||
+            floating_value != 4.0F || g_cvar.convar_filter_count != 24 ||
+            Count(messages(), "[KeelS2 Source 2 Sample] caller=") != 13 ||
+            !g_cvar.Dispatch({"keel_sample", "invalid"}) ||
+            !Contains(messages(), "usage: keel_sample [bump]") ||
+            !g_cvar.Dispatch({"keel_sample", "bump"}) ||
+            !g_cvar.ReadInt32("keels2_sample_int", integer_value) || integer_value != 10 ||
+            !g_cvar.ReadFloat32("keels2_sample_float", floating_value) ||
+            floating_value != 4.0F || g_cvar.convar_queue_count != 0 ||
+            g_cvar.convar_filter_count != 26 ||
+            Count(messages(), "[KeelS2 Source 2 Sample] caller=") != 14)
+        {
+            std::fputs(messages(), stderr);
+            return 93;
+        }
+
+        DispatchSource2LevelShutdown();
+        if (g_loop_shutdown_calls != 2 ||
             !g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
             g_cvar.ActiveConVarCallbacks("keels2_sample_int") != 0 ||
-            g_cvar.convar_unregister_count != 8 || g_cvar.ActiveCount() != 1)
+            g_cvar.convar_unregister_count != 4 || g_cvar.ActiveCount() != 1)
         {
             std::fputs(messages(), stderr);
             return 93;
@@ -3454,7 +3937,7 @@ int main(int argument_count, char** arguments)
     const auto repeated_disconnect = VtableFunction<DisconnectFunction>(config, 1);
     repeated_disconnect(config);
 
-    if (source2_callbacks &&
+    if ((source2_callbacks || convar_facade) &&
         (game_event_remove_count() != 1 || game_event_listener_active()))
     {
         return 117;
@@ -3509,6 +3992,8 @@ int main(int argument_count, char** arguments)
             "plugin service shutdown complete\n"
             "ConVar service shutdown begin\n"
             "ConVar service shutdown complete\n"
+            "schema and entity service shutdown begin\n"
+            "schema and entity service shutdown complete\n"
             "lifecycle service shutdown begin\n"
             "lifecycle service shutdown complete\n"
             "Source 2 callback service shutdown begin\n"
@@ -3530,6 +4015,7 @@ int main(int argument_count, char** arguments)
             "plugin service released\n"
             "Source 2 callback service released\n"
             "ConVar service released\n"
+            "schema and entity service released\n"
             "lifecycle service released\n"
             "keelhook service released\n"
             "game adapter stop begin\n"
@@ -3602,7 +4088,7 @@ int main(int argument_count, char** arguments)
         std::fputs(output, stderr);
         return 33;
     }
-    if (convar_service || convar_failed_load || convar_facade)
+    if (convar_service || convar_failed_load || convar_facade || convar_authoring)
     {
         g_cvar.Reset();
         if (EngineOutstandingAllocationCount() != 0 ||

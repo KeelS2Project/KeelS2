@@ -271,10 +271,10 @@ def package_entries(platform_key: str) -> tuple[str, ...]:
             "addons/keels2/bin/win64/server.dll",
             "addons/keels2/plugins/win64/keels2_basic.dll",
             "addons/keels2/plugins/win64/keels2_callbacks.dll",
-            "addons/keels2/plugins/win64/keels2_convar.dll",
+            "addons/keels2/plugins/win64/keels2_entities.dll",
             "addons/keels2/plugins/win64/keels2_lifecycle.dll",
-            "addons/keels2/plugins/win64/keels2_parity.dll",
             "addons/keels2/plugins/win64/keels2_runtime.dll",
+            "addons/keels2/plugins/win64/keels2_sample.dll",
             "addons/keels2/tools/win64/keels2_compatibility_review.exe",
         )
     if platform_key == "linux-x86_64":
@@ -289,10 +289,10 @@ def package_entries(platform_key: str) -> tuple[str, ...]:
             "addons/keels2/bin/linuxsteamrt64/libserver.so",
             "addons/keels2/plugins/linuxsteamrt64/keels2_basic.so",
             "addons/keels2/plugins/linuxsteamrt64/keels2_callbacks.so",
-            "addons/keels2/plugins/linuxsteamrt64/keels2_convar.so",
+            "addons/keels2/plugins/linuxsteamrt64/keels2_entities.so",
             "addons/keels2/plugins/linuxsteamrt64/keels2_lifecycle.so",
-            "addons/keels2/plugins/linuxsteamrt64/keels2_parity.so",
             "addons/keels2/plugins/linuxsteamrt64/keels2_runtime.so",
+            "addons/keels2/plugins/linuxsteamrt64/keels2_sample.so",
             "addons/keels2/tools/linuxsteamrt64/keels2_compatibility_review",
         )
     stop(f"unsupported artifact platform: {platform_key}")
@@ -317,6 +317,20 @@ def release_asset_names(version: str) -> list[str]:
         names.extend(artifact_names(version, platform_key).values())
     names.append(f"KeelS2-v{version}-SHA256SUMS.txt")
     return sorted(names)
+
+
+def verify_package_inventory(package_root: Path, entries: tuple[str, ...]) -> None:
+    prefix = PurePosixPath("addons/keels2")
+    actual = {
+        (prefix / PurePosixPath(path.relative_to(package_root).as_posix())).as_posix()
+        for path in package_root.rglob("*")
+        if path.is_file()
+    }
+    expected = set(entries)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        extra = sorted(actual - expected)
+        stop(f"package entry set differs; missing={missing} extra={extra}")
 
 
 def content_hashes(package_root: Path, entries: tuple[str, ...]) -> dict[str, str]:
@@ -583,6 +597,7 @@ def build_release(args: argparse.Namespace) -> None:
     )
     package_root = build_dir / "package" / "addons" / "keels2"
     entries = package_entries(platform_key)
+    verify_package_inventory(package_root, entries)
     hashes = content_hashes(package_root, entries)
     names = artifact_names(version, platform_key)
     archive = release_dir / names["archive"]
@@ -971,6 +986,16 @@ def self_test(_: argparse.Namespace) -> None:
                 target = package_root / Path(*relative.parts[2:])
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(f"{platform_key}:{index}:{entry}\n".encode())
+            verify_package_inventory(package_root, entries)
+            unexpected = package_root / "unexpected.bin"
+            unexpected.write_bytes(b"unexpected\n")
+            try:
+                verify_package_inventory(package_root, entries)
+            except Stop:
+                pass
+            else:
+                stop(f"unexpected package-file self-test failed for {platform_key}")
+            unexpected.unlink()
             version = "0.1.0-selftest"
             names = artifact_names(version, platform_key)
             contents = release_dir / names["contents"]

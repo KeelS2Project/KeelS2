@@ -3,6 +3,7 @@
 #include "keelhook_service.h"
 #include "lifecycle_service.h"
 #include "plugin_service.h"
+#include "schema_entity_service.h"
 #include "source2_callbacks_service.h"
 
 #include <algorithm>
@@ -431,6 +432,7 @@ PluginRecord* Host::StartPlugin(
         KeelResult lifecycle_release = KEEL_RESULT_OK;
         KeelResult plugin_service_release = KEEL_RESULT_OK;
         KeelResult source2_callbacks_release = KEEL_RESULT_OK;
+        KeelResult schema_entities_release = KEEL_RESULT_OK;
         KeelResult release = KEEL_RESULT_OK;
         if (plugin_service_)
         {
@@ -456,6 +458,12 @@ PluginRecord* Host::StartPlugin(
             source2_callbacks_release = source2_callbacks_->ReleasePlugin(record->handle);
             state_lock.lock();
         }
+        if (schema_entities_)
+        {
+            state_lock.unlock();
+            schema_entities_release = schema_entities_->ReleasePlugin(record->handle);
+            state_lock.lock();
+        }
         if (keelhook_)
         {
             state_lock.unlock();
@@ -466,6 +474,7 @@ PluginRecord* Host::StartPlugin(
         record->state = PluginState::error;
         if (plugin_service_release != KEEL_RESULT_OK ||
             source2_callbacks_release != KEEL_RESULT_OK || convar_release != KEEL_RESULT_OK ||
+            schema_entities_release != KEEL_RESULT_OK ||
             lifecycle_release != KEEL_RESULT_OK || release != KEEL_RESULT_OK)
         {
             record->cleanup_pending = true;
@@ -863,6 +872,21 @@ void Host::UnloadPluginCommand(
             plugin->cleanup_pending = true;
             plugin->diagnostic = "ConVar cleanup is incomplete; plugin is quarantined";
             Write(KEEL_LOG_ERROR, "plugin unload could not release ConVar resources: " + name);
+            return;
+        }
+    }
+    if (schema_entities_)
+    {
+        state_lock.unlock();
+        const KeelResult release = schema_entities_->ReleasePlugin(handle);
+        state_lock.lock();
+        if (release != KEEL_RESULT_OK)
+        {
+            plugin->cleanup_pending = true;
+            plugin->diagnostic = "schema and entity cleanup is incomplete; plugin is quarantined";
+            Write(
+                KEEL_LOG_ERROR,
+                "plugin unload could not release schema and entity resources: " + name);
             return;
         }
     }

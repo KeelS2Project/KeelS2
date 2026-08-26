@@ -644,7 +644,7 @@ KeelResult ConVarService::FindImpl(
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
     *output = 0;
-    if (!name || !Host::ValidCommandName(name) || !ValidType(expected_type))
+    if (!ValidLookupName(name) || !ValidType(expected_type))
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
@@ -729,6 +729,10 @@ KeelResult ConVarService::Read(
         slot != KEELS2_CONVAR_GLOBAL_SLOT)
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    if (!adapter_.IsGameThread())
+    {
+        return KEEL_RESULT_WRONG_THREAD;
     }
     std::scoped_lock host_lock(host_.state_mutex_);
     PluginRecord* owner = host_.PluginByHandle(plugin);
@@ -959,6 +963,31 @@ bool ConVarService::ValidType(KeelConVarType type) noexcept
 {
     return type == KEELS2_CONVAR_BOOL || type == KEELS2_CONVAR_INT32 ||
         type == KEELS2_CONVAR_FLOAT32 || type == KEELS2_CONVAR_STRING;
+}
+
+bool ConVarService::ValidLookupName(const char* name) noexcept
+{
+    if (!name)
+    {
+        return false;
+    }
+    std::size_t length{};
+    for (const unsigned char* character = reinterpret_cast<const unsigned char*>(name);
+         *character;
+         ++character)
+    {
+        const bool letter = (*character >= 'a' && *character <= 'z') ||
+            (*character >= 'A' && *character <= 'Z');
+        if (!letter && !(*character >= '0' && *character <= '9') && *character != '_')
+        {
+            return false;
+        }
+        if (++length > 63)
+        {
+            return false;
+        }
+    }
+    return length != 0;
 }
 
 bool ConVarService::ValidValue(const KeelConVarValue& value, KeelConVarType type) noexcept

@@ -3,8 +3,10 @@
 
 #include <keels2/bootstrap_api.h>
 #include <keels2/convar.h>
+#include <keels2/entities.h>
 #include <keels2/keelhook.h>
 #include <keels2/lifecycle.h>
+#include <keels2/schema.h>
 #include <keels2/source2.h>
 #include <keels2/source2_callbacks.h>
 
@@ -55,6 +57,27 @@ struct GameCommandSpec
     void* user_data;
 };
 
+struct GameSchemaField
+{
+    void* declaring_class{};
+    std::int32_t offset{};
+    std::uint32_t value_size{};
+    std::uint32_t value_alignment{};
+    KeelSchemaModule module{};
+    KeelSchemaValueType value_type{};
+    std::string class_name;
+    std::string field_name;
+    std::string module_name;
+    std::string compatibility_profile;
+};
+
+struct GameEntityIdentity
+{
+    std::int32_t index{};
+    std::uint32_t source2_handle{};
+    std::uint64_t epoch{};
+};
+
 class GameAdapter
 {
 public:
@@ -67,6 +90,7 @@ public:
         std::string& error) = 0;
     virtual bool CompleteStartup(std::string& error) = 0;
     virtual void Stop() noexcept = 0;
+    virtual bool IsGameThread() const noexcept = 0;
     virtual KeelResult QueryInterface(
         KeelSource2Capability capability,
         KeelSource2InterfaceInfo& info) const noexcept = 0;
@@ -119,6 +143,27 @@ public:
     virtual KeelResult DescribeConVar(
         GameConVarHandle convar,
         KeelConVarInfo& info) const noexcept = 0;
+    virtual KeelResult ResolveSchemaField(
+        const KeelSchemaFieldSpec& spec,
+        GameSchemaField& field,
+        std::string& error) = 0;
+    virtual KeelResult FindEntityByIndex(
+        std::int32_t index,
+        GameEntityIdentity& entity,
+        std::string& error) = 0;
+    virtual KeelResult FindEntityBySource2Handle(
+        std::uint32_t source2_handle,
+        GameEntityIdentity& entity,
+        std::string& error) = 0;
+    virtual KeelResult ValidateEntity(
+        const GameEntityIdentity& entity,
+        std::string& error) = 0;
+    virtual KeelResult ReadEntityField(
+        const GameEntityIdentity& entity,
+        const GameSchemaField& field,
+        void* value,
+        std::uint32_t value_size,
+        std::string& error) = 0;
 };
 
 std::unique_ptr<GameAdapter> CreateGameAdapter();

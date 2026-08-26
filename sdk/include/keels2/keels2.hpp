@@ -2,9 +2,11 @@
 #define KEELS2_KEELS2_HPP
 
 #include <keels2/convar.h>
+#include <keels2/entities.hpp>
 #include <keels2/lifecycle.h>
 #include <keels2/plugin.hpp>
 #include <keels2/plugins.h>
+#include <keels2/schema.hpp>
 #include <keels2/source2.hpp>
 #include <keels2/source2_authoring.h>
 #include <keels2/source2_callbacks.h>
@@ -18,15 +20,19 @@
 
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <functional>
 #include <iterator>
+#include <limits>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -68,6 +74,14 @@ struct PluginDependency
     DependencyRequirement requirement{DependencyRequirement::at_least};
 };
 
+namespace keels2
+{
+
+template <typename Value>
+class ConVar;
+
+}
+
 namespace keels2::detail
 {
 
@@ -75,6 +89,10 @@ template <typename Value>
 inline constexpr bool kSupportedConVar =
     std::is_same_v<Value, bool> || std::is_same_v<Value, std::int32_t> ||
     std::is_same_v<Value, float> || std::is_same_v<Value, CUtlString>;
+
+template <typename Value>
+inline constexpr bool kBoundedConVar =
+    std::is_same_v<Value, std::int32_t> || std::is_same_v<Value, float>;
 
 template <typename Value>
 constexpr KeelConVarType ConVarType() noexcept
@@ -119,10 +137,364 @@ KeelConVarValue ToConVarValue(const Value& value) noexcept
     }
     else
     {
-        output.value.string_value = value.Get();
+        const char* text = value.Get();
+        output.value.string_value = text ? text : "";
     }
     return output;
 }
+
+inline bool EqualConVarName(std::string_view first, std::string_view second) noexcept
+{
+    if (first.size() != second.size())
+    {
+        return false;
+    }
+    for (std::size_t index{}; index < first.size(); ++index)
+    {
+        unsigned char left = static_cast<unsigned char>(first[index]);
+        unsigned char right = static_cast<unsigned char>(second[index]);
+        if (left >= 'A' && left <= 'Z')
+        {
+            left = static_cast<unsigned char>(left + ('a' - 'A'));
+        }
+        if (right >= 'A' && right <= 'Z')
+        {
+            right = static_cast<unsigned char>(right + ('a' - 'A'));
+        }
+        if (left != right)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+template <typename Value>
+bool ValidConVarValue(const KeelConVarValue& value) noexcept
+{
+    static_assert(kSupportedConVar<Value>);
+    if (value.size != sizeof(value) || value.type != ConVarType<Value>())
+    {
+        return false;
+    }
+    if constexpr (std::is_same_v<Value, bool>)
+    {
+        return value.value.boolean_value == KEEL_FALSE ||
+            value.value.boolean_value == KEEL_TRUE;
+    }
+    else if constexpr (std::is_same_v<Value, float>)
+    {
+        return std::isfinite(value.value.float32_value);
+    }
+    else if constexpr (std::is_same_v<Value, CUtlString>)
+    {
+        return value.value.string_value != nullptr;
+    }
+    return true;
+}
+
+template <typename Value>
+Value FromConVarValue(const KeelConVarValue& value)
+{
+    static_assert(kSupportedConVar<Value>);
+    if (!ValidConVarValue<Value>(value))
+    {
+        return Value{};
+    }
+    if constexpr (std::is_same_v<Value, bool>)
+    {
+        return value.value.boolean_value == KEEL_TRUE;
+    }
+    else if constexpr (std::is_same_v<Value, std::int32_t>)
+    {
+        return value.value.int32_value;
+    }
+    else if constexpr (std::is_same_v<Value, float>)
+    {
+        return value.value.float32_value;
+    }
+    else
+    {
+        return CUtlString(value.value.string_value ? value.value.string_value : "");
+    }
+}
+
+template <typename Value>
+class AuthoringConVarState final
+{
+public:
+    explicit AuthoringConVarState(std::string name)
+        : name_(std::move(name))
+    {
+        static_assert(kSupportedConVar<Value>);
+        static_assert(sizeof(ConVarRef) == 8);
+        static_assert(std::is_trivially_copyable_v<ConVarRef>);
+    }
+
+    bool Bind(
+        const KeelConVarApi* service,
+        KeelPluginHandle plugin,
+        KeelConVarHandle handle,
+        void* native_convar) noexcept
+    {
+        if (!service || !service->read || !service->queue_set || !service->describe ||
+            !plugin || !handle || !native_convar || !g_pCVar)
+        {
+            return false;
+        }
+        ConVarRef reference;
+        std::memcpy(&reference, native_convar, sizeof(reference));
+        try
+        {
+            CConVarRef<Value> native(reference);
+            if (!native.IsConVarDataValid() ||
+                native.GetType() != TranslateConVarType<Value>())
+            {
+                return false;
+            }
+            KeelConVarInfo info{};
+            info.size = sizeof(info);
+            if (service->describe(plugin, handle, &info) != KEEL_RESULT_OK ||
+                info.size != sizeof(info) || info.type != ConVarType<Value>() ||
+                !info.name || !EqualConVarName(name_, info.name) ||
+                (info.has_minimum != KEEL_FALSE && info.has_minimum != KEEL_TRUE) ||
+                (info.has_maximum != KEEL_FALSE && info.has_maximum != KEEL_TRUE) ||
+                info.reserved_minimum != 0 || info.reserved_maximum != 0 ||
+                !ValidConVarValue<Value>(info.default_value))
+            {
+                return false;
+            }
+            if constexpr (!kBoundedConVar<Value>)
+            {
+                if (info.has_minimum == KEEL_TRUE || info.has_maximum == KEEL_TRUE)
+                {
+                    return false;
+                }
+            }
+            std::optional<Value> minimum;
+            std::optional<Value> maximum;
+            if (info.has_minimum == KEEL_TRUE)
+            {
+                if (!ValidConVarValue<Value>(info.minimum_value))
+                {
+                    return false;
+                }
+                minimum = FromConVarValue<Value>(info.minimum_value);
+            }
+            if (info.has_maximum == KEEL_TRUE)
+            {
+                if (!ValidConVarValue<Value>(info.maximum_value))
+                {
+                    return false;
+                }
+                maximum = FromConVarValue<Value>(info.maximum_value);
+            }
+            if constexpr (kBoundedConVar<Value>)
+            {
+                const Value default_value = FromConVarValue<Value>(info.default_value);
+                if ((minimum && maximum && *minimum > *maximum) ||
+                    (minimum && default_value < *minimum) ||
+                    (maximum && default_value > *maximum))
+                {
+                    return false;
+                }
+            }
+            name_ = info.name;
+            native_convar_.emplace(native);
+            minimum_ = std::move(minimum);
+            maximum_ = std::move(maximum);
+            service_ = service;
+            plugin_ = plugin;
+            handle_ = handle;
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    void SetActive(bool active) noexcept
+    {
+        active_.store(active, std::memory_order_release);
+    }
+
+    bool Active() const noexcept
+    {
+        return active_.load(std::memory_order_acquire);
+    }
+
+    Value Get() const
+    {
+        if (!Active() || !service_ || !service_->read)
+        {
+            return Value{};
+        }
+        KeelConVarValue value{};
+        value.size = sizeof(value);
+        value.type = ConVarType<Value>();
+        return service_->read(plugin_, handle_, KEELS2_CONVAR_GLOBAL_SLOT, &value) ==
+                KEEL_RESULT_OK
+            ? FromConVarValue<Value>(value)
+            : Value{};
+    }
+
+    bool Set(const Value& value) noexcept
+    {
+        try
+        {
+            if (!Active() || !service_ || !service_->queue_set)
+            {
+                return false;
+            }
+            const KeelConVarValue converted = ToConVarValue(value);
+            if (!ValidConVarValue<Value>(converted))
+            {
+                return false;
+            }
+            return service_->queue_set(
+                       plugin_,
+                       handle_,
+                       KEELS2_CONVAR_GLOBAL_SLOT,
+                       &converted) == KEEL_RESULT_OK;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    const char* Name() const noexcept
+    {
+        return name_.c_str();
+    }
+
+    bool HasMinimum() const noexcept
+    {
+        return minimum_.has_value();
+    }
+
+    bool HasMaximum() const noexcept
+    {
+        return maximum_.has_value();
+    }
+
+    Value Minimum() const
+    {
+        if (minimum_)
+        {
+            return *minimum_;
+        }
+        if constexpr (kBoundedConVar<Value>)
+        {
+            return std::numeric_limits<Value>::lowest();
+        }
+        return Value{};
+    }
+
+    Value Maximum() const
+    {
+        if (maximum_)
+        {
+            return *maximum_;
+        }
+        if constexpr (kBoundedConVar<Value>)
+        {
+            return (std::numeric_limits<Value>::max)();
+        }
+        return Value{};
+    }
+
+    CConVarRef<Value>* Native() const noexcept
+    {
+        return Active() && native_convar_
+            ? const_cast<CConVarRef<Value>*>(&*native_convar_)
+            : nullptr;
+    }
+
+private:
+    std::string name_;
+    std::optional<CConVarRef<Value>> native_convar_;
+    std::optional<Value> minimum_;
+    std::optional<Value> maximum_;
+    const KeelConVarApi* service_{};
+    KeelPluginHandle plugin_{};
+    KeelConVarHandle handle_{};
+    std::atomic<bool> active_{};
+};
+
+template <typename Value>
+class AuthoringTypedConVarResource;
+
+}
+
+namespace keels2
+{
+
+template <typename Value>
+class ConVar final
+{
+public:
+    static_assert(detail::kSupportedConVar<Value>);
+
+    ConVar() = default;
+
+    explicit operator bool() const noexcept
+    {
+        return state_ && state_->Active();
+    }
+
+    Value Get() const
+    {
+        return state_ ? state_->Get() : Value{};
+    }
+
+    bool Set(const Value& value) const noexcept
+    {
+        return state_ && state_->Set(value);
+    }
+
+    const char* GetName() const noexcept
+    {
+        return state_ ? state_->Name() : "";
+    }
+
+    bool HasMin() const noexcept
+    {
+        return state_ && state_->HasMinimum();
+    }
+
+    bool HasMax() const noexcept
+    {
+        return state_ && state_->HasMaximum();
+    }
+
+    Value Min() const
+    {
+        return state_ ? state_->Minimum() : Value{};
+    }
+
+    Value Max() const
+    {
+        return state_ ? state_->Maximum() : Value{};
+    }
+
+private:
+    friend class Plugin;
+    friend class detail::AuthoringTypedConVarResource<Value>;
+
+    explicit ConVar(std::shared_ptr<detail::AuthoringConVarState<Value>> state) noexcept
+        : state_(std::move(state))
+    {
+    }
+
+    std::shared_ptr<detail::AuthoringConVarState<Value>> state_;
+};
+
+}
+
+namespace keels2::detail
+{
 
 class AuthoringCommandBinding
 {
@@ -248,25 +620,32 @@ public:
     bool Adopt(
         std::shared_ptr<ContextState> state,
         const KeelSource2AuthoringApi* service,
+        const KeelConVarApi* convar_service,
         KeelConVarHandle handle,
         void* native_convar) noexcept
     {
-        if (!BindNative(native_convar))
+        if (!state || !BindNative(
+                convar_service,
+                state->plugin,
+                handle,
+                native_convar))
         {
             return false;
         }
         state_ = std::move(state);
         service_ = service;
         handle_ = handle;
+        SetHandleActive(true);
         active_.store(true, std::memory_order_release);
         return true;
     }
 
     KeelResult Reset() noexcept
     {
-        active_.store(false, std::memory_order_release);
+        const bool was_active = active_.exchange(false, std::memory_order_acq_rel);
         if (!handle_)
         {
+            SetHandleActive(false);
             return KEEL_RESULT_OK;
         }
         if (!state_ || !state_->accepting_resources.load(std::memory_order_acquire) ||
@@ -283,7 +662,12 @@ public:
         }
         else if (result == KEEL_RESULT_BUSY)
         {
-            active_.store(true, std::memory_order_release);
+            SetHandleActive(was_active);
+            active_.store(was_active, std::memory_order_release);
+        }
+        else
+        {
+            SetHandleActive(false);
         }
         return result;
     }
@@ -294,6 +678,7 @@ public:
     }
 
     virtual void* NativeConVar() const noexcept = 0;
+    virtual const void* StateIdentity() const noexcept = 0;
 
     static void Dispatch(
         void* convar,
@@ -303,8 +688,12 @@ public:
         void* user_data) noexcept;
 
 protected:
-    virtual bool BindNative(void* native_convar) noexcept = 0;
-    virtual void ResetNative() noexcept = 0;
+    virtual bool BindNative(
+        const KeelConVarApi* service,
+        KeelPluginHandle plugin,
+        KeelConVarHandle handle,
+        void* native_convar) noexcept = 0;
+    virtual void SetHandleActive(bool active) noexcept = 0;
 
     virtual void Invoke(
         void* convar,
@@ -321,7 +710,7 @@ protected:
 private:
     void Clear() noexcept
     {
-        ResetNative();
+        SetHandleActive(false);
         state_.reset();
         service_ = nullptr;
         handle_ = 0;
@@ -338,12 +727,11 @@ template <typename Value>
 class AuthoringTypedConVarResource : public AuthoringConVarResource
 {
 public:
-    explicit AuthoringTypedConVarResource(Plugin& plugin)
-        : AuthoringConVarResource(plugin)
+    AuthoringTypedConVarResource(Plugin& plugin, std::string name)
+        : AuthoringConVarResource(plugin),
+          state_(std::make_shared<AuthoringConVarState<Value>>(std::move(name)))
     {
         static_assert(kSupportedConVar<Value>);
-        static_assert(sizeof(ConVarRef) == 8);
-        static_assert(std::is_trivially_copyable_v<ConVarRef>);
     }
 
     ~AuthoringTypedConVarResource() override
@@ -353,43 +741,36 @@ public:
 
     void* NativeConVar() const noexcept override
     {
-        return native_convar_ ? const_cast<CConVarRef<Value>*>(&*native_convar_) : nullptr;
+        return state_->Native();
+    }
+
+    const void* StateIdentity() const noexcept override
+    {
+        return state_.get();
+    }
+
+    keels2::ConVar<Value> Handle() const noexcept
+    {
+        return keels2::ConVar<Value>(state_);
     }
 
 protected:
-    bool BindNative(void* native_convar) noexcept override
+    bool BindNative(
+        const KeelConVarApi* service,
+        KeelPluginHandle plugin,
+        KeelConVarHandle handle,
+        void* native_convar) noexcept override
     {
-        if (!native_convar || !g_pCVar)
-        {
-            return false;
-        }
-        ConVarRef reference;
-        std::memcpy(&reference, native_convar, sizeof(reference));
-        try
-        {
-            native_convar_.emplace(reference);
-            if (!native_convar_->IsConVarDataValid() ||
-                native_convar_->GetType() != TranslateConVarType<Value>())
-            {
-                native_convar_.reset();
-                return false;
-            }
-            return true;
-        }
-        catch (...)
-        {
-            native_convar_.reset();
-            return false;
-        }
+        return state_->Bind(service, plugin, handle, native_convar);
     }
 
-    void ResetNative() noexcept override
+    void SetHandleActive(bool active) noexcept override
     {
-        native_convar_.reset();
+        state_->SetActive(active);
     }
 
 private:
-    std::optional<CConVarRef<Value>> native_convar_;
+    std::shared_ptr<AuthoringConVarState<Value>> state_;
 };
 
 class GameEventBinding
@@ -500,13 +881,20 @@ class AuthoringMemberConVar final : public AuthoringTypedConVarResource<Value>
 {
 public:
     using Method = void (Owner::*)(
-        CConVarRef<Value>*,
+        keels2::ConVar<Value>&,
         CSplitScreenSlot,
-        const Value*,
-        const Value*);
+        Value,
+        Value);
 
-    AuthoringMemberConVar(Plugin& plugin, Owner& owner, Method method)
-        : AuthoringTypedConVarResource<Value>(plugin), owner_(owner), method_(method)
+    AuthoringMemberConVar(
+        Plugin& plugin,
+        std::string name,
+        Owner& owner,
+        Method method)
+        : AuthoringTypedConVarResource<Value>(plugin, std::move(name)),
+          owner_(owner),
+          method_(method),
+          convar_(this->Handle())
     {
     }
 
@@ -521,14 +909,15 @@ private:
         std::invoke(
             method_,
             owner_,
-            static_cast<CConVarRef<Value>*>(this->NativeConVar()),
+            convar_,
             CSplitScreenSlot{slot},
-            static_cast<const Value*>(new_value),
-            static_cast<const Value*>(old_value));
+            Value(*static_cast<const Value*>(new_value)),
+            Value(*static_cast<const Value*>(old_value)));
     }
 
     Owner& owner_;
     Method method_;
+    keels2::ConVar<Value> convar_;
 };
 
 }
@@ -536,9 +925,17 @@ private:
 namespace keels2
 {
 
+template <typename Value>
+using SchemaField = schema::Field<Value>;
+
+using Entity = entities::Entity;
+
 class Plugin
 {
 public:
+    template <typename Value>
+    using ConVar = keels2::ConVar<Value>;
+
     virtual ~Plugin() = default;
 
     virtual bool Load()
@@ -549,7 +946,7 @@ public:
     {
     }
 
-    virtual std::int32_t CallbackPriority() const noexcept
+    virtual int32 CallbackPriority() const noexcept
     {
         return 0;
     }
@@ -768,9 +1165,29 @@ protected:
         context_.Log(KEEL_LOG_INFO, message);
     }
 
+    template <typename... Arguments>
+        requires (sizeof...(Arguments) > 0)
+    void LogMessage(const char* format, Arguments&&... arguments) const noexcept
+    {
+        context_.Log(
+            KEEL_LOG_INFO,
+            format,
+            std::forward<Arguments>(arguments)...);
+    }
+
     void LogWarning(const char* message) const noexcept
     {
         context_.Log(KEEL_LOG_WARNING, message);
+    }
+
+    template <typename... Arguments>
+        requires (sizeof...(Arguments) > 0)
+    void LogWarning(const char* format, Arguments&&... arguments) const noexcept
+    {
+        context_.Log(
+            KEEL_LOG_WARNING,
+            format,
+            std::forward<Arguments>(arguments)...);
     }
 
     void LogError(const char* message) const noexcept
@@ -778,12 +1195,22 @@ protected:
         context_.Log(KEEL_LOG_ERROR, message);
     }
 
+    template <typename... Arguments>
+        requires (sizeof...(Arguments) > 0)
+    void LogError(const char* format, Arguments&&... arguments) const noexcept
+    {
+        context_.Log(
+            KEEL_LOG_ERROR,
+            format,
+            std::forward<Arguments>(arguments)...);
+    }
+
     template <typename Owner>
     bool CreateCommand(
         const char* name,
         const char* description,
         void (Owner::*callback)(const CCommandContext&, const CCommand&),
-        std::uint64_t flags = 0)
+        uint64 flags = 0)
     {
         static_assert(std::is_base_of_v<Plugin, Owner>);
         if (!name || !name[0] || !description || !callback || !context_)
@@ -859,116 +1286,168 @@ protected:
     }
 
     template <typename Value>
-    CConVarRef<Value>* CreateConVar(
+    ConVar<Value> CreateConVar(
         const char* name,
-        std::uint64_t flags,
-        const char* help_string,
         const Value& default_value,
-        bool has_minimum = false,
-        const Value& minimum = Value{},
-        bool has_maximum = false,
-        const Value& maximum = Value{})
+        const char* help_string,
+        uint64 flags = FCVAR_NONE)
     {
         static_assert(keels2::detail::kSupportedConVar<Value>);
+        if (!name || !name[0])
+        {
+            return {};
+        }
         auto resource =
-            std::make_unique<keels2::detail::AuthoringTypedConVarResource<Value>>(*this);
-        return CreateConVarResource(
+            std::make_unique<keels2::detail::AuthoringTypedConVarResource<Value>>(
+                *this,
+                name);
+        return CreateConVarResource<Value>(
             name,
             flags,
             help_string,
             default_value,
-            has_minimum,
+            false,
+            Value{},
+            false,
+            Value{},
+            std::move(resource),
+            false);
+    }
+
+    template <typename Value>
+    ConVar<Value> CreateConVar(
+        const char* name,
+        const Value& default_value,
+        const char* help_string,
+        uint64 flags,
+        const Value& minimum,
+        const Value& maximum)
+    {
+        static_assert(keels2::detail::kBoundedConVar<Value>);
+        if (!name || !name[0])
+        {
+            return {};
+        }
+        auto resource =
+            std::make_unique<keels2::detail::AuthoringTypedConVarResource<Value>>(
+                *this,
+                name);
+        return CreateConVarResource<Value>(
+            name,
+            flags,
+            help_string,
+            default_value,
+            true,
             minimum,
-            has_maximum,
+            true,
             maximum,
             std::move(resource),
             false);
     }
 
     template <typename Value, typename Owner>
-    CConVarRef<Value>* CreateConVar(
+    ConVar<Value> CreateConVar(
         const char* name,
-        std::uint64_t flags,
-        const char* help_string,
         const Value& default_value,
-        bool has_minimum,
-        const Value& minimum,
-        bool has_maximum,
-        const Value& maximum,
+        const char* help_string,
+        uint64 flags,
         void (Owner::*callback)(
-            CConVarRef<Value>*,
+            ConVar<Value>&,
             CSplitScreenSlot,
-            const Value*,
-            const Value*))
+            Value,
+            Value))
     {
         static_assert(keels2::detail::kSupportedConVar<Value>);
         static_assert(std::is_base_of_v<Plugin, Owner>);
-        if (!callback)
+        if (!name || !name[0] || !callback)
         {
-            return nullptr;
+            return {};
         }
         Owner* owner = dynamic_cast<Owner*>(this);
         if (!owner)
         {
-            return nullptr;
+            return {};
         }
         auto resource = std::make_unique<keels2::detail::AuthoringMemberConVar<Value, Owner>>(
             *this,
+            name,
             *owner,
             callback);
-        return CreateConVarResource(
+        return CreateConVarResource<Value>(
             name,
             flags,
             help_string,
             default_value,
-            has_minimum,
-            minimum,
-            has_maximum,
-            maximum,
+            false,
+            Value{},
+            false,
+            Value{},
             std::move(resource),
             true);
     }
 
     template <typename Value, typename Owner>
-    CConVarRef<Value>* CreateConVar(
+    ConVar<Value> CreateConVar(
         const char* name,
-        std::uint64_t flags,
-        const char* help_string,
         const Value& default_value,
+        const char* help_string,
+        uint64 flags,
+        const Value& minimum,
+        const Value& maximum,
         void (Owner::*callback)(
-            CConVarRef<Value>*,
+            ConVar<Value>&,
             CSplitScreenSlot,
-            const Value*,
-            const Value*))
+            Value,
+            Value))
     {
-        return CreateConVar(
+        static_assert(keels2::detail::kBoundedConVar<Value>);
+        static_assert(std::is_base_of_v<Plugin, Owner>);
+        if (!name || !name[0] || !callback)
+        {
+            return {};
+        }
+        Owner* owner = dynamic_cast<Owner*>(this);
+        if (!owner)
+        {
+            return {};
+        }
+        auto resource = std::make_unique<keels2::detail::AuthoringMemberConVar<Value, Owner>>(
+            *this,
+            name,
+            *owner,
+            callback);
+        return CreateConVarResource<Value>(
             name,
             flags,
             help_string,
             default_value,
-            false,
-            Value{},
-            false,
-            Value{},
-            callback);
+            true,
+            minimum,
+            true,
+            maximum,
+            std::move(resource),
+            true);
     }
 
     template <typename Value>
-    CConVarRef<Value>* FindConVar(const char* name)
+    ConVar<Value> FindConVar(const char* name)
     {
         static_assert(keels2::detail::kSupportedConVar<Value>);
         if (!name || !name[0] || !context_)
         {
-            return nullptr;
+            return {};
         }
         std::scoped_lock lock(convars_mutex_);
         const KeelSource2AuthoringApi* service = Source2AuthoringService();
-        if (!service)
+        const KeelConVarApi* convar_service = ConVarService();
+        if (!service || !convar_service)
         {
-            return nullptr;
+            return {};
         }
         auto resource =
-            std::make_unique<keels2::detail::AuthoringTypedConVarResource<Value>>(*this);
+            std::make_unique<keels2::detail::AuthoringTypedConVarResource<Value>>(
+                *this,
+                name);
         KeelConVarHandle handle{};
         void* native_convar{};
         if (service->find_convar(
@@ -978,37 +1457,61 @@ protected:
                 &handle,
                 &native_convar) != KEEL_RESULT_OK || !handle || !native_convar)
         {
-            return nullptr;
+            return {};
         }
         g_pCVar = GetCVarSystem<ICvar>();
-        if (!g_pCVar || !resource->Adopt(context_.State(), service, handle, native_convar))
+        if (!g_pCVar || !resource->Adopt(
+                context_.State(),
+                service,
+                convar_service,
+                handle,
+                native_convar))
         {
             static_cast<void>(service->release_convar(context_.PluginHandle(), handle));
-            return nullptr;
+            return {};
         }
+        ConVar<Value> output = resource->Handle();
         convar_resources_.push_back(std::move(resource));
-        return static_cast<CConVarRef<Value>*>(convar_resources_.back()->NativeConVar());
+        return output;
     }
 
     template <typename Value>
-    bool RemoveConVar(CConVarRef<Value>* convar) noexcept
+    bool RemoveConVar(const ConVar<Value>& convar) noexcept
     {
         static_assert(keels2::detail::kSupportedConVar<Value>);
-        if (!convar)
+        if (!convar.state_)
         {
             return false;
         }
-        std::scoped_lock lock(convars_mutex_);
-        for (auto& resource : convar_resources_)
+        std::list<std::unique_ptr<keels2::detail::AuthoringConVarResource>> selected;
         {
-            if (!resource->Active() || resource->NativeConVar() != convar)
+            std::scoped_lock lock(convars_mutex_);
+            for (auto resource = convar_resources_.begin();
+                 resource != convar_resources_.end();
+                 ++resource)
             {
-                continue;
+                if (!(*resource)->Active() ||
+                    (*resource)->StateIdentity() != convar.state_.get())
+                {
+                    continue;
+                }
+                selected.splice(selected.end(), convar_resources_, resource);
+                break;
             }
-            const KeelResult result = resource->Reset();
-            return result == KEEL_RESULT_OK || result == KEEL_RESULT_NOT_FOUND;
         }
-        return false;
+        if (selected.empty())
+        {
+            return false;
+        }
+        const KeelResult result = selected.front()->Reset();
+        if (result == KEEL_RESULT_BUSY ||
+            (result != KEEL_RESULT_OK && result != KEEL_RESULT_NOT_FOUND &&
+                result != KEEL_RESULT_NOT_READY))
+        {
+            std::scoped_lock lock(convars_mutex_);
+            convar_resources_.splice(convar_resources_.end(), selected);
+        }
+        return result == KEEL_RESULT_OK || result == KEEL_RESULT_NOT_FOUND;
     }
 
     std::vector<PluginSnapshot> Plugins()
@@ -1114,6 +1617,46 @@ protected:
             interface_name);
     }
 
+    template <typename Value>
+    bool FindSchemaField(
+        const char* class_name,
+        const char* field_name,
+        SchemaField<Value>& output) noexcept
+    {
+        static_assert(schema::detail::kSupportedValue<Value>);
+        std::scoped_lock lock(schema_entities_mutex_);
+        if (!context_ ||
+            (!schema_service_ && schema_service_.Connect(context_) != KEEL_RESULT_OK))
+        {
+            return false;
+        }
+        return schema_service_.Resolve(class_name, field_name, output) == KEEL_RESULT_OK;
+    }
+
+    bool FindEntity(int index, Entity& output) noexcept
+    {
+        std::scoped_lock lock(schema_entities_mutex_);
+        if (!context_ ||
+            (!entities_service_ && entities_service_.Connect(context_) != KEEL_RESULT_OK))
+        {
+            return false;
+        }
+        return entities_service_.Find(index, output) == KEEL_RESULT_OK;
+    }
+
+    bool FindEntity(const CEntityHandle& handle, Entity& output) noexcept
+    {
+        std::scoped_lock lock(schema_entities_mutex_);
+        if (!context_ ||
+            (!entities_service_ && entities_service_.Connect(context_) != KEEL_RESULT_OK))
+        {
+            return false;
+        }
+        return entities_service_.FindSource2(
+                   static_cast<uint32>(handle.ToInt()),
+                   output) == KEEL_RESULT_OK;
+    }
+
 private:
     friend class keels2::detail::AuthoringCommandBinding;
     friend class keels2::detail::AuthoringConVarResource;
@@ -1180,27 +1723,28 @@ private:
     }
 
     template <typename Value>
-    CConVarRef<Value>* CreateConVarResource(
+    ConVar<Value> CreateConVarResource(
         const char* name,
-        std::uint64_t flags,
+        uint64 flags,
         const char* help_string,
         const Value& default_value,
         bool has_minimum,
         const Value& minimum,
         bool has_maximum,
         const Value& maximum,
-        std::unique_ptr<keels2::detail::AuthoringConVarResource> resource,
+        std::unique_ptr<keels2::detail::AuthoringTypedConVarResource<Value>> resource,
         bool callback)
     {
         if (!name || !name[0] || !help_string || !resource || !context_)
         {
-            return nullptr;
+            return {};
         }
         std::scoped_lock lock(convars_mutex_);
         const KeelSource2AuthoringApi* service = Source2AuthoringService();
-        if (!service)
+        const KeelConVarApi* convar_service = ConVarService();
+        if (!service || !convar_service)
         {
-            return nullptr;
+            return {};
         }
         KeelConVarSpec spec{};
         spec.size = sizeof(spec);
@@ -1229,16 +1773,22 @@ private:
                 &handle,
                 &native_convar) != KEEL_RESULT_OK || !handle || !native_convar)
         {
-            return nullptr;
+            return {};
         }
         g_pCVar = GetCVarSystem<ICvar>();
-        if (!g_pCVar || !resource->Adopt(context_.State(), service, handle, native_convar))
+        if (!g_pCVar || !resource->Adopt(
+                context_.State(),
+                service,
+                convar_service,
+                handle,
+                native_convar))
         {
             static_cast<void>(service->release_convar(context_.PluginHandle(), handle));
-            return nullptr;
+            return {};
         }
+        ConVar<Value> output = resource->Handle();
         convar_resources_.push_back(std::move(resource));
-        return static_cast<CConVarRef<Value>*>(convar_resources_.back()->NativeConVar());
+        return output;
     }
 
     const KeelSource2AuthoringApi* Source2AuthoringService() noexcept
@@ -1267,6 +1817,33 @@ private:
         }
         source2_authoring_service_ = service;
         return source2_authoring_service_;
+    }
+
+    const KeelConVarApi* ConVarService() noexcept
+    {
+        std::scoped_lock lock(convar_service_mutex_);
+        if (convar_service_)
+        {
+            return convar_service_;
+        }
+        const void* raw{};
+        if (context_.QueryService(
+                KEELS2_CONVAR_SERVICE_NAME,
+                KEELS2_CONVAR_API_VERSION,
+                &raw) != KEEL_RESULT_OK)
+        {
+            return nullptr;
+        }
+        const auto* service = static_cast<const KeelConVarApi*>(raw);
+        if (!service || service->size != sizeof(KeelConVarApi) ||
+            service->api_version != KEELS2_CONVAR_API_VERSION || !service->create ||
+            !service->find || !service->release || !service->read ||
+            !service->queue_set || !service->describe)
+        {
+            return nullptr;
+        }
+        convar_service_ = service;
+        return convar_service_;
     }
 
     const KeelSource2CallbacksApi* Source2CallbacksService() noexcept
@@ -1380,12 +1957,15 @@ private:
             game_events_.clear();
         }
         {
-            std::scoped_lock lock(convars_mutex_);
-            for (auto& resource : convar_resources_)
+            std::list<std::unique_ptr<keels2::detail::AuthoringConVarResource>> resources;
+            {
+                std::scoped_lock lock(convars_mutex_);
+                resources.splice(resources.end(), convar_resources_);
+            }
+            for (auto& resource : resources)
             {
                 static_cast<void>(resource->Reset());
             }
-            convar_resources_.clear();
         }
         {
             std::scoped_lock lock(plugin_service_mutex_);
@@ -1404,6 +1984,10 @@ private:
             source2_authoring_service_ = nullptr;
         }
         {
+            std::scoped_lock lock(convar_service_mutex_);
+            convar_service_ = nullptr;
+        }
+        {
             std::scoped_lock lock(source2_callbacks_mutex_);
             source2_callbacks_service_ = nullptr;
         }
@@ -1415,16 +1999,23 @@ private:
             source2_service_ = {};
             source2_connected_ = false;
         }
+        {
+            std::scoped_lock lock(schema_entities_mutex_);
+            schema_service_ = {};
+            entities_service_ = {};
+        }
     }
 
     std::vector<std::unique_ptr<keels2::detail::AuthoringCommandBinding>> commands_;
-    std::vector<std::unique_ptr<keels2::detail::AuthoringConVarResource>> convar_resources_;
+    std::list<std::unique_ptr<keels2::detail::AuthoringConVarResource>> convar_resources_;
     std::vector<std::unique_ptr<keels2::detail::GameEventBinding>> game_events_;
     std::mutex commands_mutex_;
     std::mutex convars_mutex_;
     std::mutex game_events_mutex_;
     std::mutex source2_authoring_mutex_;
     const KeelSource2AuthoringApi* source2_authoring_service_{};
+    std::mutex convar_service_mutex_;
+    const KeelConVarApi* convar_service_{};
     std::mutex source2_callbacks_mutex_;
     const KeelSource2CallbacksApi* source2_callbacks_service_{};
     std::mutex plugin_service_mutex_;
@@ -1436,6 +2027,9 @@ private:
     keels2::source2::Interface source2_cvar_;
     std::atomic<bool> dispatch_enabled_{};
     bool source2_connected_{};
+    std::mutex schema_entities_mutex_;
+    schema::Service schema_service_;
+    entities::Service entities_service_;
     keels2::Context context_;
 };
 

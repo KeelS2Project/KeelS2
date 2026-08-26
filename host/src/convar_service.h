@@ -143,6 +143,7 @@ private:
         KeelPluginHandle plugin,
         KeelConVarHandle convar) const;
     static bool ValidType(KeelConVarType type) noexcept;
+    static bool ValidLookupName(const char* name) noexcept;
     static bool ValidValue(const KeelConVarValue& value, KeelConVarType type) noexcept;
     static bool ValidDefinition(const KeelConVarSpec& spec) noexcept;
     static bool EqualDefinition(const Definition& definition, const KeelConVarSpec& spec) noexcept;
