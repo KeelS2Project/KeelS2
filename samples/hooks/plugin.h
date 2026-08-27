@@ -16,14 +16,17 @@ public:
     bool Load() override;
 
 private:
-    keels2::kh::Action GameFrameHook(
-        keels2::kh::Call<void>& call,
+    PluginResult GameFramePre(
         bool simulating,
         bool firstTick,
         bool lastTick);
 
-    keels2::kh::Action ClientConnectHook(
-        keels2::kh::Call<bool>& call,
+    PluginResult GameFramePost(
+        bool simulating,
+        bool firstTick,
+        bool lastTick);
+
+    PluginResult ClientConnectPost(
         CPlayerSlot slot,
         const char* name,
         uint64 xuid,
@@ -31,9 +34,9 @@ private:
         bool unknown,
         CBufferString* rejectionMessage);
 
-    void ClientCommandHook(CPlayerSlot slot, const CCommand& command);
+    PluginResult ClientCommandPre(CPlayerSlot slot, const CCommand& command);
 
-    void ClientDisconnectHook(
+    PluginResult ClientDisconnectPre(
         CPlayerSlot slot,
         ENetworkDisconnectionReason reason,
         const char* name,

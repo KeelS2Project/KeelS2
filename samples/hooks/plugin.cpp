@@ -11,22 +11,26 @@ bool HooksPlugin::Load()
     auto* server = GetSource2Server<IServerGameDLL>();
     auto* clients = GetSource2GameClients<IServerGameClients>();
     if (!server || !clients ||
-        !HookVirtual<
+        !HookPre(
+            server,
             &IServerGameDLL::GameFrame,
-            &HooksPlugin::GameFrameHook>(
-                server,
-                keels2::kh::Phase::Both) ||
-        !HookVirtual<
+            &HooksPlugin::GameFramePre) ||
+        !HookPost(
+            server,
+            &IServerGameDLL::GameFrame,
+            &HooksPlugin::GameFramePost) ||
+        !HookPost(
+            clients,
             &IServerGameClients::ClientConnect,
-            &HooksPlugin::ClientConnectHook>(
-                clients,
-                keels2::kh::Phase::Post) ||
-        !HookVirtual<
+            &HooksPlugin::ClientConnectPost) ||
+        !HookPre(
+            clients,
             &IServerGameClients::ClientCommand,
-            &HooksPlugin::ClientCommandHook>(clients) ||
-        !HookVirtual<
+            &HooksPlugin::ClientCommandPre) ||
+        !HookPre(
+            clients,
             &IServerGameClients::ClientDisconnect,
-            &HooksPlugin::ClientDisconnectHook>(clients))
+            &HooksPlugin::ClientDisconnectPre))
     {
         LogError("typed hook registration failed");
         return false;
@@ -37,38 +41,34 @@ bool HooksPlugin::Load()
     return true;
 }
 
-keels2::kh::Action HooksPlugin::GameFrameHook(
-    keels2::kh::Call<void>& call,
+PluginResult HooksPlugin::GameFramePre(
     bool simulating,
     bool firstTick,
     bool lastTick)
 {
-    if (call.CurrentPhase() == keels2::kh::Phase::Pre)
+    if (!gameFramePreLogged)
     {
-        if (!gameFramePreLogged)
-        {
-            gameFramePreLogged = true;
-            LogMessage(
-                "GameFrame pre simulating={} first_tick={} last_tick={}",
-                simulating,
-                firstTick,
-                lastTick);
-        }
-        return keels2::kh::Action::Continue;
+        gameFramePreLogged = true;
+        LogMessage(
+            "GameFrame pre simulating={} first_tick={} last_tick={}",
+            simulating,
+            firstTick,
+            lastTick);
     }
+    return plugin_continue;
+}
 
+PluginResult HooksPlugin::GameFramePost(bool, bool, bool)
+{
     if (!gameFramePostLogged)
     {
         gameFramePostLogged = true;
-        LogMessage(
-            "GameFrame post original_called={}",
-            call.OriginalCalled());
+        LogMessage("GameFrame post");
     }
-    return keels2::kh::Action::Continue;
+    return plugin_continue;
 }
 
-keels2::kh::Action HooksPlugin::ClientConnectHook(
-    keels2::kh::Call<bool>& call,
+PluginResult HooksPlugin::ClientConnectPost(
     CPlayerSlot slot,
     const char* name,
     uint64 xuid,
@@ -81,34 +81,33 @@ keels2::kh::Action HooksPlugin::ClientConnectHook(
         clientConnectLogged = true;
         LogMessage(
             "ClientConnect post slot={} name={} xuid={} network_id={} "
-            "unknown={} original_called={} accepted={}",
+            "unknown={}",
             slot.Get(),
             name,
             xuid,
             networkId,
-            unknown,
-            call.OriginalCalled(),
-            call.Result().value_or(false));
+            unknown);
     }
-    return keels2::kh::Action::Continue;
+    return plugin_continue;
 }
 
-void HooksPlugin::ClientCommandHook(
+PluginResult HooksPlugin::ClientCommandPre(
     CPlayerSlot slot,
     const CCommand& command)
 {
     if (clientCommandLogged)
     {
-        return;
+        return plugin_continue;
     }
     clientCommandLogged = true;
     LogMessage(
         "ClientCommand pre slot={} verb={}",
         slot.Get(),
         command.ArgC() > 0 ? command[0] : "");
+    return plugin_continue;
 }
 
-void HooksPlugin::ClientDisconnectHook(
+PluginResult HooksPlugin::ClientDisconnectPre(
     CPlayerSlot slot,
     ENetworkDisconnectionReason reason,
     const char* name,
@@ -117,7 +116,7 @@ void HooksPlugin::ClientDisconnectHook(
 {
     if (clientDisconnectLogged)
     {
-        return;
+        return plugin_continue;
     }
     clientDisconnectLogged = true;
     LogMessage(
@@ -127,6 +126,7 @@ void HooksPlugin::ClientDisconnectHook(
         xuid,
         networkId,
         reason);
+    return plugin_continue;
 }
 
 KEELS2_PLUGIN(HooksPlugin)

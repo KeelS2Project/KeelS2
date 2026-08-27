@@ -59,18 +59,18 @@ public:
 
     bool RegisterGameFrameHook(IServerGameDLL* server)
     {
-        return HookVirtual<
+        return HookPre(
+            server,
             &IServerGameDLL::GameFrame,
-            &Source2AccessProbe::OnGameFrameHook>(server);
+            &Source2AccessProbe::OnGameFrameHook);
     }
 
-    keels2::kh::Action OnGameFrameHook(
-        keels2::kh::Call<void>&,
+    PluginResult OnGameFrameHook(
         bool,
         bool,
         bool)
     {
-        return keels2::kh::Action::Continue;
+        return plugin_continue;
     }
 
     void OnGameFrameObserver(bool, bool, bool)
@@ -83,6 +83,9 @@ public:
 };
 
 static_assert(SOURCE_ENGINE == 25);
+static_assert(plugin_continue == KH_ACTION_CONTINUE);
+static_assert(plugin_override == KH_ACTION_OVERRIDE);
+static_assert(plugin_supersede == KH_ACTION_SUPERSEDE);
 static_assert(sizeof(void*) == 8);
 static_assert(sizeof(uint64) == 8);
 static_assert(sizeof(CPlayerSlot) == 4);

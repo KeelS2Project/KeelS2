@@ -1618,56 +1618,34 @@ protected:
             interface_name);
     }
 
-    template <auto TargetMethod, auto CallbackMethod>
-    bool HookVirtual(
-        keels2::kh::MethodClass<TargetMethod>* instance,
-        keels2::kh::Phase phase = keels2::kh::Phase::Pre,
+    template <typename TargetMethod, typename CallbackMethod>
+    bool HookPre(
+        keels2::kh::MethodClassOf<TargetMethod>* instance,
+        TargetMethod target_method,
+        CallbackMethod callback_method,
         int32 priority = 0)
     {
-        using Owner = keels2::kh::MethodClass<CallbackMethod>;
-        static_assert(std::is_base_of_v<Plugin, Owner>);
-        static_assert(keels2::kh::CompatibleMethodCallback<TargetMethod, CallbackMethod>);
-        if (!hooks_accepting_.load(std::memory_order_acquire))
-        {
-            return false;
-        }
-        Owner* owner = dynamic_cast<Owner*>(this);
-        const char* profile = Source2CompatibilityProfile();
-        if (!instance || !owner || !profile)
-        {
-            return false;
-        }
-        try
-        {
-            std::scoped_lock lock(hooks_mutex_);
-            if (!hooks_accepting_.load(std::memory_order_acquire))
-            {
-                return false;
-            }
-            hooks_.reserve(hooks_.size() + 1);
-            keels2::kh::Service service;
-            if (service.Connect(context_) != KEEL_RESULT_OK)
-            {
-                return false;
-            }
-            keels2::kh::Hook hook;
-            if (service.AddVirtualHook<TargetMethod, CallbackMethod>(
-                    instance,
-                    profile,
-                    hook,
-                    phase,
-                    priority,
-                    *owner) != KEEL_RESULT_OK)
-            {
-                return false;
-            }
-            hooks_.push_back(std::move(hook));
-            return true;
-        }
-        catch (...)
-        {
-            return false;
-        }
+        return RegisterHook(
+            instance,
+            target_method,
+            callback_method,
+            keels2::kh::Phase::Pre,
+            priority);
+    }
+
+    template <typename TargetMethod, typename CallbackMethod>
+    bool HookPost(
+        keels2::kh::MethodClassOf<TargetMethod>* instance,
+        TargetMethod target_method,
+        CallbackMethod callback_method,
+        int32 priority = 0)
+    {
+        return RegisterHook(
+            instance,
+            target_method,
+            callback_method,
+            keels2::kh::Phase::Post,
+            priority);
     }
 
     template <typename Value>
@@ -1746,6 +1724,64 @@ private:
             return nullptr;
         }
         return interface.template Get<Type>();
+    }
+
+    template <typename TargetMethod, typename CallbackMethod>
+    bool RegisterHook(
+        keels2::kh::MethodClassOf<TargetMethod>* instance,
+        TargetMethod target_method,
+        CallbackMethod callback_method,
+        keels2::kh::Phase phase,
+        int32 priority)
+    {
+        static_assert(std::is_member_function_pointer_v<TargetMethod>);
+        static_assert(std::is_member_function_pointer_v<CallbackMethod>);
+        static_assert(keels2::kh::CompatibleMethods<TargetMethod, CallbackMethod>);
+        using Owner = keels2::kh::MethodClassOf<CallbackMethod>;
+        static_assert(std::is_base_of_v<Plugin, Owner>);
+        if (!hooks_accepting_.load(std::memory_order_acquire))
+        {
+            return false;
+        }
+        Owner* owner = dynamic_cast<Owner*>(this);
+        const char* profile = Source2CompatibilityProfile();
+        if (!instance || !owner || !profile)
+        {
+            return false;
+        }
+        try
+        {
+            std::scoped_lock lock(hooks_mutex_);
+            if (!hooks_accepting_.load(std::memory_order_acquire))
+            {
+                return false;
+            }
+            hooks_.reserve(hooks_.size() + 1);
+            keels2::kh::Service service;
+            if (service.Connect(context_) != KEEL_RESULT_OK)
+            {
+                return false;
+            }
+            keels2::kh::Hook hook;
+            if (service.AddVirtualHook(
+                    instance,
+                    target_method,
+                    callback_method,
+                    profile,
+                    hook,
+                    phase,
+                    priority,
+                    *owner) != KEEL_RESULT_OK)
+            {
+                return false;
+            }
+            hooks_.push_back(std::move(hook));
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
     }
 
     const char* Source2CompatibilityProfile() noexcept

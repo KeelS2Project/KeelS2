@@ -17,6 +17,13 @@
 #include <type_traits>
 #include <utility>
 
+enum PluginResult : std::uint32_t
+{
+    plugin_continue = KH_ACTION_CONTINUE,
+    plugin_override = KH_ACTION_OVERRIDE,
+    plugin_supersede = KH_ACTION_SUPERSEDE
+};
+
 namespace keels2::kh
 {
 
@@ -734,6 +741,12 @@ namespace detail
 template <typename Signature, bool Method, auto Callback, typename Owner>
 struct TypedCallback;
 
+template <typename Signature, bool Method, typename CallbackMethod>
+struct CallbackDispatch;
+
+template <typename Signature, bool Method, typename CallbackMethod, typename Owner>
+struct BoundTypedCallback;
+
 template <typename Type>
 struct MemberFunctionTraits;
 
@@ -799,6 +812,7 @@ private:
 
     static constexpr bool valid_return =
         std::is_void_v<CallbackReturn> ||
+        std::is_same_v<CallbackReturn, PluginResult> ||
         std::is_same_v<CallbackReturn, Action> ||
         std::is_same_v<CallbackReturn, KeelHookAction>;
 
@@ -951,6 +965,9 @@ public:
     }
 
 private:
+    template <typename Signature, bool Method, typename CallbackMethod>
+    friend struct detail::CallbackDispatch;
+
     template <typename Signature, bool Method, auto Callback, typename Owner>
     friend struct detail::TypedCallback;
 
@@ -966,11 +983,8 @@ private:
 namespace detail
 {
 
-template <typename Signature, bool Method, auto Callback, typename Owner>
-struct TypedCallback;
-
-template <typename Return, typename... Arguments, bool Method, auto Callback, typename Owner>
-struct TypedCallback<Return(Arguments...), Method, Callback, Owner>
+template <typename Return, typename... Arguments, bool Method, typename CallbackMethod>
+struct CallbackDispatch<Return(Arguments...), Method, CallbackMethod>
 {
     static_assert(!std::is_reference_v<Return>);
     static_assert((!std::is_rvalue_reference_v<Arguments> && ...));
@@ -981,23 +995,25 @@ struct TypedCallback<Return(Arguments...), Method, Callback, Owner>
 
     using Compatibility = CallbackCompatibility<
         Return(Arguments...),
-        typename MemberFunctionTraits<decltype(Callback)>::Signature>;
+        typename MemberFunctionTraits<CallbackMethod>::Signature>;
     static constexpr bool with_call = Compatibility::with_call;
-    static constexpr bool without_call = Compatibility::without_call;
 
     static_assert(
         Compatibility::value,
         "typed KeelHook callback does not match the target method arguments");
 
-    template <typename... Parameters>
-    static KeelHookAction Invoke(Owner& owner, Parameters&&... parameters)
+    template <typename Owner, typename... Parameters>
+    static KeelHookAction Invoke(
+        Owner& owner,
+        CallbackMethod callback,
+        Parameters&&... parameters)
     {
         using Result = std::invoke_result_t<
-            decltype(Callback), Owner&, Parameters...>;
+            CallbackMethod, Owner&, Parameters...>;
         if constexpr (std::is_void_v<Result>)
         {
             std::invoke(
-                Callback,
+                callback,
                 owner,
                 std::forward<Parameters>(parameters)...);
             return KH_ACTION_CONTINUE;
@@ -1005,14 +1021,17 @@ struct TypedCallback<Return(Arguments...), Method, Callback, Owner>
         else
         {
             static_assert(
-                std::is_same_v<Result, Action> ||
+                std::is_same_v<Result, PluginResult> ||
+                    std::is_same_v<Result, Action> ||
                     std::is_same_v<Result, KeelHookAction>,
-                "typed KeelHook callbacks must return void or keels2::kh::Action");
+                "typed KeelHook callbacks must return void or PluginResult");
             const Result result = std::invoke(
-                Callback,
+                callback,
                 owner,
                 std::forward<Parameters>(parameters)...);
-            if constexpr (std::is_same_v<Result, Action>)
+            if constexpr (
+                std::is_same_v<Result, PluginResult> ||
+                std::is_same_v<Result, Action>)
             {
                 return static_cast<KeelHookAction>(result);
             }
@@ -1032,10 +1051,11 @@ struct TypedCallback<Return(Arguments...), Method, Callback, Owner>
         return (ValidArgument<Arguments>(frame.arguments[offset + Indexes]) && ...);
     }
 
-    template <std::size_t... Indexes>
+    template <typename Owner, std::size_t... Indexes>
     static KeelHookAction DispatchArguments(
         KeelHookFrame& frame,
         Owner& owner,
+        CallbackMethod callback,
         void* instance,
         std::size_t offset,
         std::index_sequence<Indexes...>)
@@ -1049,6 +1069,7 @@ struct TypedCallback<Return(Arguments...), Method, Callback, Owner>
         {
             action = Invoke(
                 owner,
+                callback,
                 call,
                 ExposeArgument<Arguments>(std::get<Indexes>(arguments))...);
         }
@@ -1056,6 +1077,7 @@ struct TypedCallback<Return(Arguments...), Method, Callback, Owner>
         {
             action = Invoke(
                 owner,
+                callback,
                 ExposeArgument<Arguments>(std::get<Indexes>(arguments))...);
         }
         const bool written = (WriteArgument<Arguments>(
@@ -1064,10 +1086,14 @@ struct TypedCallback<Return(Arguments...), Method, Callback, Owner>
         return written ? action : KH_ACTION_CONTINUE;
     }
 
-    static KeelHookAction Dispatch(KeelHookFrame* frame, void* user_data)
+    template <typename Owner>
+    static KeelHookAction Dispatch(
+        KeelHookFrame* frame,
+        Owner* owner,
+        CallbackMethod callback)
     {
         constexpr std::size_t argument_count = sizeof...(Arguments) + (Method ? 1 : 0);
-        if (!frame || !user_data || frame->size != sizeof(KeelHookFrame) ||
+        if (!frame || !owner || frame->size != sizeof(KeelHookFrame) ||
             (frame->phase != KH_PHASE_PRE && frame->phase != KH_PHASE_POST) ||
             frame->argument_count != argument_count ||
             (argument_count != 0 && !frame->arguments) ||
@@ -1095,19 +1121,58 @@ struct TypedCallback<Return(Arguments...), Method, Callback, Owner>
         }
         return DispatchArguments(
             *frame,
-            *static_cast<Owner*>(user_data),
+            *owner,
+            callback,
             instance,
             offset,
             std::index_sequence_for<Arguments...>{});
     }
 };
 
-template <auto Method>
-std::optional<std::uint32_t> VirtualMethodIndex() noexcept
+template <typename Signature, bool Method, auto Callback, typename Owner>
+struct TypedCallback
 {
-    using Pointer = decltype(Method);
+    static KeelHookAction Dispatch(KeelHookFrame* frame, void* user_data)
+    {
+        return CallbackDispatch<
+            Signature,
+            Method,
+            decltype(Callback)>::Dispatch(
+                frame,
+                static_cast<Owner*>(user_data),
+                Callback);
+    }
+};
+
+template <typename Signature, bool Method, typename CallbackMethod, typename Owner>
+struct BoundTypedCallback
+{
+    BoundTypedCallback(Owner& value_owner, CallbackMethod value_callback) noexcept
+        : owner(&value_owner), callback(value_callback)
+    {
+    }
+
+    static KeelHookAction Dispatch(KeelHookFrame* frame, void* user_data)
+    {
+        auto* binding = static_cast<BoundTypedCallback*>(user_data);
+        if (!binding)
+        {
+            return KH_ACTION_CONTINUE;
+        }
+        return CallbackDispatch<Signature, Method, CallbackMethod>::Dispatch(
+            frame,
+            binding->owner,
+            binding->callback);
+    }
+
+    Owner* owner{};
+    CallbackMethod callback{};
+};
+
+template <typename Pointer>
+std::optional<std::uint32_t> VirtualMethodIndex(Pointer method) noexcept
+{
     static_assert(std::is_member_function_pointer_v<Pointer>);
-    const Pointer method = Method;
 #if defined(_MSC_VER) && defined(_M_X64)
     if constexpr (sizeof(Pointer) != sizeof(void*) &&
         sizeof(Pointer) != sizeof(void*) * 2)
@@ -1223,6 +1288,14 @@ using MethodClass = typename detail::MemberFunctionTraits<decltype(Method)>::Cla
 template <auto Method>
 using MethodSignature = typename detail::MemberFunctionTraits<decltype(Method)>::Signature;
 
+template <typename Method>
+using MethodClassOf = typename detail::MemberFunctionTraits<
+    std::remove_cvref_t<Method>>::ClassType;
+
+template <typename Method>
+using MethodSignatureOf = typename detail::MemberFunctionTraits<
+    std::remove_cvref_t<Method>>::Signature;
+
 template <typename Signature, auto Callback>
 concept CompatibleCallback = detail::CallbackCompatibility<
     Signature,
@@ -1232,10 +1305,21 @@ template <auto TargetMethod, auto CallbackMethod>
 concept CompatibleMethodCallback =
     CompatibleCallback<MethodSignature<TargetMethod>, CallbackMethod>;
 
+template <typename TargetMethod, typename CallbackMethod>
+concept CompatibleMethods = detail::CallbackCompatibility<
+    MethodSignatureOf<TargetMethod>,
+    MethodSignatureOf<CallbackMethod>>::value;
+
 template <auto Method>
 std::optional<std::uint32_t> VirtualIndex() noexcept
 {
-    return detail::VirtualMethodIndex<Method>();
+    return detail::VirtualMethodIndex(Method);
+}
+
+template <typename Method>
+std::optional<std::uint32_t> VirtualIndex(Method method) noexcept
+{
+    return detail::VirtualMethodIndex(method);
 }
 
 class TargetSpec final
@@ -1500,6 +1584,7 @@ public:
         if (this != &other)
         {
             target_.swap(other.target_);
+            binding_.swap(other.binding_);
             std::swap(handle_, other.handle_);
         }
         return *this;
@@ -1556,6 +1641,7 @@ public:
             release_result == KEEL_RESULT_NOT_READY)
         {
             target_.reset();
+            binding_.reset();
         }
         return release_result == KEEL_RESULT_OK ? callback_result : release_result;
     }
@@ -1566,25 +1652,30 @@ private:
 
     void Adopt(
         std::shared_ptr<detail::TargetState> target,
-        KeelHookCallbackHandle handle) noexcept
+        KeelHookCallbackHandle handle,
+        std::shared_ptr<void> binding = {}) noexcept
     {
         target_ = std::move(target);
         handle_ = handle;
+        binding_ = std::move(binding);
     }
 
     void Clear() noexcept
     {
         handle_ = 0;
         target_.reset();
+        binding_.reset();
     }
 
     void MoveFrom(Callback& other) noexcept
     {
         target_ = std::move(other.target_);
+        binding_ = std::move(other.binding_);
         handle_ = std::exchange(other.handle_, 0);
     }
 
     std::shared_ptr<detail::TargetState> target_;
+    std::shared_ptr<void> binding_;
     KeelHookCallbackHandle handle_{};
 };
 
@@ -1751,33 +1842,30 @@ public:
             output);
     }
 
+    template <typename Method>
+    KeelResult Resolve(
+        MethodClassOf<Method>* instance,
+        Method method,
+        const char* profile,
+        Target& output)
+    {
+        static_assert(std::is_member_function_pointer_v<Method>);
+        const auto index = VirtualIndex(method);
+        if (!index)
+        {
+            return KEEL_RESULT_UNSUPPORTED;
+        }
+        return Resolve<MethodSignatureOf<Method>>(
+            VirtualTargetSpec::Shared(instance, *index, profile),
+            output);
+    }
+
     KeelResult AddCallback(
         const Target& target,
         const KeelHookCallbackSpec& spec,
         Callback& output) const noexcept
     {
-        if (!*this || !target || target.state_->api != api_ ||
-            target.state_->context != context_)
-        {
-            return KEEL_RESULT_INVALID_ARGUMENT;
-        }
-        if (output.target_ || output.handle_)
-        {
-            return KEEL_RESULT_ALREADY_EXISTS;
-        }
-        KeelHookCallbackHandle handle{};
-        const KeelResult result = api_->add_callback(
-            context_->plugin,
-            target.state_->handle,
-            &spec,
-            &handle);
-        if (result == KEEL_RESULT_OK)
-        {
-            std::scoped_lock lock(context_->keelhook_targets_mutex);
-            ++target.state_->references;
-            output.Adopt(target.state_, handle);
-        }
-        return result;
+        return AddCallback(target, spec, output, {});
     }
 
     template <auto Method, typename Owner>
@@ -1790,7 +1878,10 @@ public:
     {
         static_assert(std::is_invocable_v<decltype(Method), Owner&, Frame&>);
         using Result = std::invoke_result_t<decltype(Method), Owner&, Frame&>;
-        static_assert(std::is_same_v<Result, Action> || std::is_same_v<Result, KeelHookAction>);
+        static_assert(
+            std::is_same_v<Result, PluginResult> ||
+            std::is_same_v<Result, Action> ||
+            std::is_same_v<Result, KeelHookAction>);
         const KeelHookCallbackSpec spec{
             sizeof(KeelHookCallbackSpec),
             phases,
@@ -1798,7 +1889,9 @@ public:
             0,
             [](KeelHookFrame* frame, void* user_data) -> KeelHookAction {
                 Frame view(frame);
-                if constexpr (std::is_same_v<Result, Action>)
+                if constexpr (
+                    std::is_same_v<Result, PluginResult> ||
+                    std::is_same_v<Result, Action>)
                 {
                     return static_cast<KeelHookAction>(
                         std::invoke(Method, *static_cast<Owner*>(user_data), view));
@@ -1864,6 +1957,43 @@ public:
         return AddCallback(target, spec, output);
     }
 
+    template <typename TargetMethod, typename CallbackMethod, typename Owner>
+    KeelResult AddMethodCallback(
+        const Target& target,
+        TargetMethod,
+        CallbackMethod callback_method,
+        Callback& output,
+        Phase phase,
+        std::int32_t priority,
+        Owner& owner) const
+    {
+        static_assert(std::is_member_function_pointer_v<TargetMethod>);
+        static_assert(std::is_member_function_pointer_v<CallbackMethod>);
+        static_assert(CompatibleMethods<TargetMethod, CallbackMethod>);
+        static_assert(std::is_base_of_v<
+            MethodClassOf<CallbackMethod>,
+            std::remove_cvref_t<Owner>>);
+        using Binding = detail::BoundTypedCallback<
+            MethodSignatureOf<TargetMethod>,
+            true,
+            CallbackMethod,
+            Owner>;
+        auto binding = std::make_shared<Binding>(owner, callback_method);
+        const KeelHookCallbackSpec spec{
+            sizeof(KeelHookCallbackSpec),
+            static_cast<std::uint32_t>(phase),
+            priority,
+            0,
+            &Binding::Dispatch,
+            binding.get()
+        };
+        return AddCallback(
+            target,
+            spec,
+            output,
+            std::move(binding));
+    }
+
     template <auto TargetMethod, auto CallbackMethod, typename Owner>
     KeelResult AddVirtualHook(
         MethodClass<TargetMethod>* instance,
@@ -1901,7 +2031,82 @@ public:
         return KEEL_RESULT_OK;
     }
 
+    template <typename TargetMethod, typename CallbackMethod, typename Owner>
+    KeelResult AddVirtualHook(
+        MethodClassOf<TargetMethod>* instance,
+        TargetMethod target_method,
+        CallbackMethod callback_method,
+        const char* profile,
+        Hook& output,
+        Phase phase,
+        std::int32_t priority,
+        Owner& owner)
+    {
+        if (!output.Empty())
+        {
+            return KEEL_RESULT_ALREADY_EXISTS;
+        }
+        Hook hook;
+        KeelResult result = Resolve(
+            instance,
+            target_method,
+            profile,
+            hook.target_);
+        if (result != KEEL_RESULT_OK)
+        {
+            return result;
+        }
+        result = AddMethodCallback(
+            hook.target_,
+            target_method,
+            callback_method,
+            hook.callback_,
+            phase,
+            priority,
+            owner);
+        if (result != KEEL_RESULT_OK)
+        {
+            static_cast<void>(hook.target_.Reset());
+            return result;
+        }
+        output = std::move(hook);
+        return KEEL_RESULT_OK;
+    }
+
 private:
+    KeelResult AddCallback(
+        const Target& target,
+        const KeelHookCallbackSpec& spec,
+        Callback& output,
+        std::shared_ptr<void> binding) const noexcept
+    {
+        if (!*this || !target || target.state_->api != api_ ||
+            target.state_->context != context_)
+        {
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+        if (output.target_ || output.handle_)
+        {
+            return KEEL_RESULT_ALREADY_EXISTS;
+        }
+        KeelHookCallbackHandle handle{};
+        const KeelResult result = api_->add_callback(
+            context_->plugin,
+            target.state_->handle,
+            &spec,
+            &handle);
+        if (result == KEEL_RESULT_OK)
+        {
+            std::scoped_lock lock(context_->keelhook_targets_mutex);
+            ++target.state_->references;
+            output.Adopt(
+                target.state_,
+                handle,
+                std::move(binding));
+        }
+        return result;
+    }
+
     KeelResult ResolveTarget(
         const TargetSpec& spec,
         const KeelHookPrototype& prototype,

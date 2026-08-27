@@ -7,7 +7,7 @@
 #include <cstring>
 #include <mutex>
 #include <thread>
-#include <unordered_set>
+#include <unordered_map>
 
 namespace
 {
@@ -121,6 +121,16 @@ struct ObserverOwner
 
     int calls{};
     bool observed{};
+};
+
+struct PluginResultOwner
+{
+    PluginResult Observe(bool)
+    {
+        return result;
+    }
+
+    PluginResult result{plugin_continue};
 };
 
 struct MethodOwner
@@ -256,7 +266,7 @@ struct LeaseBackend
     std::uint32_t add_calls{};
     std::uint32_t remove_calls{};
     KeelHookCallbackHandle next_callback{1};
-    std::unordered_set<KeelHookCallbackHandle> callbacks;
+    std::unordered_map<KeelHookCallbackHandle, KeelHookCallbackSpec> callbacks;
     std::atomic<bool> block_remove{};
     std::atomic<bool> remove_entered{};
     std::atomic<bool> late_done{};
@@ -314,12 +324,12 @@ KeelResult ReleaseTarget(KeelPluginHandle, KeelHookTargetHandle target)
 KeelResult AddCallback(
     KeelPluginHandle,
     KeelHookTargetHandle target,
-    const KeelHookCallbackSpec*,
+    const KeelHookCallbackSpec* spec,
     KeelHookCallbackHandle* output)
 {
     std::scoped_lock lock(g_lease_backend.mutex);
     ++g_lease_backend.add_calls;
-    if (target != 41 || !g_lease_backend.lease || !output)
+    if (target != 41 || !g_lease_backend.lease || !spec || !spec->callback || !output)
     {
         return KEEL_RESULT_NOT_FOUND;
     }
@@ -329,7 +339,7 @@ KeelResult AddCallback(
         return KEEL_RESULT_ENGINE_FAILURE;
     }
     const KeelHookCallbackHandle handle = g_lease_backend.next_callback++;
-    g_lease_backend.callbacks.insert(handle);
+    g_lease_backend.callbacks.emplace(handle, *spec);
     *output = handle;
     return KEEL_RESULT_OK;
 }
@@ -670,9 +680,31 @@ public:
     bool Load() override
     {
         auto* server = GetSource2Server<IServerGameDLL>();
-        if (!server || !HookVirtual<
+        if (!server || !HookPre(
+                server,
                 &IServerGameDLL::GameFrame,
-                &FailedHookPlugin::OnInitialFrame>(server))
+                &FailedHookPlugin::OnInitialFrame))
+        {
+            return false;
+        }
+        KeelHookCallbackSpec registered{};
+        {
+            std::scoped_lock lock(g_lease_backend.mutex);
+            if (g_lease_backend.callbacks.size() != 1)
+            {
+                return false;
+            }
+            registered = g_lease_backend.callbacks.begin()->second;
+        }
+        std::array arguments{
+            Pointer(server),
+            Boolean(true),
+            Boolean(false),
+            Boolean(false)
+        };
+        KeelHookFrame frame = Frame(KH_PHASE_PRE, arguments, Void());
+        if (registered.callback(&frame, registered.user_data) != KH_ACTION_CONTINUE ||
+            initial_calls_ != 1)
         {
             return false;
         }
@@ -683,9 +715,10 @@ public:
                 g_lease_backend.remove_entered.wait(false, std::memory_order_acquire);
             }
             g_late_hook_result.store(
-                HookVirtual<
+                HookPre(
+                    server,
                     &IServerGameDLL::GameFrame,
-                    &FailedHookPlugin::OnLateFrame>(server),
+                    &FailedHookPlugin::OnLateFrame),
                 std::memory_order_release);
             g_lease_backend.late_done.store(true, std::memory_order_release);
             g_lease_backend.late_done.notify_all();
@@ -694,23 +727,24 @@ public:
     }
 
 private:
-    keels2::kh::Action OnInitialFrame(
-        keels2::kh::Call<void>&,
+    PluginResult OnInitialFrame(
         bool,
         bool,
         bool)
     {
-        return keels2::kh::Action::Continue;
+        ++initial_calls_;
+        return plugin_continue;
     }
 
-    keels2::kh::Action OnLateFrame(
-        keels2::kh::Call<void>&,
+    PluginResult OnLateFrame(
         bool,
         bool,
         bool)
     {
-        return keels2::kh::Action::Continue;
+        return plugin_continue;
     }
+
+    int initial_calls_{};
 };
 
 using FreeDispatch = keels2::kh::detail::TypedCallback<
@@ -723,6 +757,11 @@ using ObserverDispatch = keels2::kh::detail::TypedCallback<
     false,
     &ObserverOwner::Observe,
     ObserverOwner>;
+using PluginResultDispatch = keels2::kh::detail::TypedCallback<
+    void(bool),
+    false,
+    &PluginResultOwner::Observe,
+    PluginResultOwner>;
 using MethodDispatch = keels2::kh::detail::TypedCallback<
     std::int32_t(std::int32_t),
     true,
@@ -789,8 +828,27 @@ bool CheckFreeDispatch()
         KH_PHASE_PRE,
         observer_arguments,
         Void());
-    return ObserverDispatch::Dispatch(&observer_frame, &observer) == KH_ACTION_CONTINUE &&
-        observer.calls == 1 && observer.observed;
+    if (ObserverDispatch::Dispatch(&observer_frame, &observer) != KH_ACTION_CONTINUE ||
+        observer.calls != 1 || !observer.observed)
+    {
+        return false;
+    }
+
+    PluginResultOwner result_owner;
+    if (PluginResultDispatch::Dispatch(&observer_frame, &result_owner) !=
+            KH_ACTION_CONTINUE)
+    {
+        return false;
+    }
+    result_owner.result = plugin_override;
+    if (PluginResultDispatch::Dispatch(&observer_frame, &result_owner) !=
+            KH_ACTION_OVERRIDE)
+    {
+        return false;
+    }
+    result_owner.result = plugin_supersede;
+    return PluginResultDispatch::Dispatch(&observer_frame, &result_owner) ==
+        KH_ACTION_SUPERSEDE;
 }
 
 bool CheckMethodAndReferences()
