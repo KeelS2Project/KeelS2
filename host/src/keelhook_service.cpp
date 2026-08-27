@@ -235,6 +235,7 @@ public:
         {
             return;
         }
+        owner->second.accepting = true;
         owner->second.active = true;
         for (const auto& [handle, callback] : callbacks_)
         {
@@ -260,6 +261,7 @@ public:
             {
                 return KEEL_RESULT_BUSY;
             }
+            owner->second.accepting = false;
             owner->second.active = false;
             for (const auto& [handle, callback] : callbacks_)
             {
@@ -1060,7 +1062,7 @@ private:
         CollectPhysical();
         {
             std::scoped_lock lock(registry_mutex_);
-            if (!OwnerReadyLocked(plugin))
+            if (!OwnerExistsLocked(plugin))
             {
                 return KEEL_RESULT_NOT_READY;
             }
@@ -1174,7 +1176,7 @@ private:
         bool was_enabled{};
         {
             std::scoped_lock lock(registry_mutex_);
-            if (!OwnerReadyLocked(plugin))
+            if (!OwnerExistsLocked(plugin))
             {
                 return KEEL_RESULT_NOT_READY;
             }
@@ -2598,6 +2600,11 @@ private:
     {
         const auto owner = owners_.find(plugin);
         return !shutting_down_ && owner != owners_.end() && owner->second.accepting;
+    }
+
+    bool OwnerExistsLocked(KeelPluginHandle plugin) const
+    {
+        return !shutting_down_ && owners_.contains(plugin);
     }
 
     static bool IsCurrentOwner(KeelPluginHandle plugin)

@@ -1745,6 +1745,8 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "[KeelHook Target Fixture] resolver and incompatible-prototype checks passed") &&
             Contains(messages, "callbacks remained staged until plugin activation") &&
             Contains(messages, "[KeelHook Peer Fixture] shared physical target joined") &&
+            Contains(messages, "[KeelHook Peer Fixture] shared typed lease reset and reuse passed") &&
+            Contains(messages, "[KeelHook Peer Fixture] shared typed callbacks dispatched independently") &&
             Contains(messages, "plugin unload is busy in KeelHook: KeelHook Target Fixture") &&
             Contains(messages, "detour, virtual scopes, aggregate calls, ordering, recursion, action semantics, and concurrency passed") &&
             Contains(messages, "plugin paused: [01] KeelHook Target Fixture") &&
@@ -3887,18 +3889,31 @@ int main(int argument_count, char** arguments)
             return 101;
         }
         using KeelHookTargetFunction = std::int32_t (*)(std::int32_t, std::int32_t);
+        using KeelHookPauseTargetFunction = std::int32_t (*)(std::int32_t);
         using KeelHookLastArgumentFunction = std::int32_t (*)();
+        using KeelHookPauseCountFunction = std::uint32_t (*)();
+        using KeelHookPauseCleanupFunction = KeelBool (*)();
         const auto target = reinterpret_cast<KeelHookTargetFunction>(
             keelhook_target.Symbol("KeelHookFixtureTarget"));
+        const auto pause_target = reinterpret_cast<KeelHookPauseTargetFunction>(
+            keelhook_target.Symbol("KeelHookPauseFixtureTarget"));
         const auto last_left = reinterpret_cast<KeelHookLastArgumentFunction>(
             keelhook_target.Symbol("KeelTest_KeelHookLastLeft"));
         const auto last_right = reinterpret_cast<KeelHookLastArgumentFunction>(
             keelhook_target.Symbol("KeelTest_KeelHookLastRight"));
-        if (!target || !last_left || !last_right ||
+        const auto pause_calls = reinterpret_cast<KeelHookPauseCountFunction>(
+            keelhook_target.Symbol("KeelTest_KeelHookPauseCalls"));
+        const auto pause_cleanup = reinterpret_cast<KeelHookPauseCleanupFunction>(
+            keelhook_target.Symbol("KeelTest_KeelHookPauseCleanup"));
+        if (!target || !pause_target || !last_left || !last_right || !pause_calls ||
+            !pause_cleanup || pause_calls() != 1 ||
             !g_cvar.Dispatch({"keel", "plugins", "pause", "1"}) ||
             target(2, 3) != 900 || last_left() != 2 || last_right() != 5 ||
+            pause_target(5) != 15 || pause_calls() != 1 ||
+            pause_cleanup() != KEEL_TRUE || pause_target(5) != 15 || pause_calls() != 1 ||
             !g_cvar.Dispatch({"keel", "plugins", "resume", "1"}) ||
-            target(2, 3) != 900 || last_left() != 3 || last_right() != 5)
+            target(2, 3) != 900 || last_left() != 3 || last_right() != 5 ||
+            pause_target(5) != 15 || pause_calls() != 1)
         {
             std::fputs(messages(), stderr);
             return 102;

@@ -5,12 +5,15 @@
 #include <keels2/plugin.hpp>
 
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -19,6 +22,24 @@ namespace keels2::kh
 
 template <typename Type>
 struct AggregateTraits;
+
+template <typename Type>
+struct ValueAdapter;
+
+template <typename Type>
+concept AdaptedValue = requires(
+    const KeelHookValue& source,
+    KeelHookValue& destination,
+    const std::remove_cv_t<Type>& input)
+{
+    { ValueAdapter<std::remove_cv_t<Type>>::type } -> std::convertible_to<KeelHookValueType>;
+    { ValueAdapter<std::remove_cv_t<Type>>::Read(source) } noexcept ->
+        std::same_as<std::remove_cv_t<Type>>;
+    { ValueAdapter<std::remove_cv_t<Type>>::Fallback() } noexcept ->
+        std::same_as<std::remove_cv_t<Type>>;
+    { ValueAdapter<std::remove_cv_t<Type>>::Write(destination, input) } noexcept ->
+        std::same_as<bool>;
+} && std::is_nothrow_copy_constructible_v<std::remove_cv_t<Type>>;
 
 template <typename Type>
 concept DescribedAggregate =
@@ -39,48 +60,56 @@ struct ValueType<bool> : std::integral_constant<KeelHookValueType, KH_VALUE_BOOL
 {
 };
 
-template <>
-struct ValueType<std::int8_t> : std::integral_constant<KeelHookValueType, KH_VALUE_INT8>
+template <typename Type>
+consteval KeelHookValueType IntegralValueType()
 {
-};
+    static_assert(std::is_integral_v<Type>);
+    static_assert(!std::is_same_v<Type, bool>);
+    if constexpr (sizeof(Type) == 1)
+    {
+        return std::is_signed_v<Type> ? KH_VALUE_INT8 : KH_VALUE_UINT8;
+    }
+    else if constexpr (sizeof(Type) == 2)
+    {
+        return std::is_signed_v<Type> ? KH_VALUE_INT16 : KH_VALUE_UINT16;
+    }
+    else if constexpr (sizeof(Type) == 4)
+    {
+        return std::is_signed_v<Type> ? KH_VALUE_INT32 : KH_VALUE_UINT32;
+    }
+    else
+    {
+        static_assert(sizeof(Type) == 8);
+        return std::is_signed_v<Type> ? KH_VALUE_INT64 : KH_VALUE_UINT64;
+    }
+}
 
-template <>
-struct ValueType<std::uint8_t> : std::integral_constant<KeelHookValueType, KH_VALUE_UINT8>
-{
-};
-
-template <>
-struct ValueType<std::int16_t> : std::integral_constant<KeelHookValueType, KH_VALUE_INT16>
-{
-};
-
-template <>
-struct ValueType<std::uint16_t> : std::integral_constant<KeelHookValueType, KH_VALUE_UINT16>
-{
-};
-
-template <>
-struct ValueType<std::int32_t> : std::integral_constant<KeelHookValueType, KH_VALUE_INT32>
-{
-};
-
-template <>
-struct ValueType<std::uint32_t> : std::integral_constant<KeelHookValueType, KH_VALUE_UINT32>
-{
-};
-
-template <>
-struct ValueType<std::int64_t> : std::integral_constant<KeelHookValueType, KH_VALUE_INT64>
-{
-};
-
-template <>
-struct ValueType<std::uint64_t> : std::integral_constant<KeelHookValueType, KH_VALUE_UINT64>
+template <typename Type>
+struct ValueType<Type, std::enable_if_t<
+    std::is_integral_v<Type> && !std::is_same_v<Type, bool> && !AdaptedValue<Type>>>
+    : std::integral_constant<KeelHookValueType, IntegralValueType<Type>()>
 {
 };
 
 template <typename Type>
 struct ValueType<Type*> : std::integral_constant<KeelHookValueType, KH_VALUE_POINTER>
+{
+};
+
+template <typename Type>
+struct ValueType<Type&> : std::integral_constant<KeelHookValueType, KH_VALUE_POINTER>
+{
+};
+
+template <typename Type>
+struct ValueType<Type, std::enable_if_t<std::is_enum_v<Type> && !AdaptedValue<Type>>>
+    : ValueType<std::underlying_type_t<Type>>
+{
+};
+
+template <typename Type>
+struct ValueType<Type, std::enable_if_t<AdaptedValue<Type>>>
+    : std::integral_constant<KeelHookValueType, ValueAdapter<Type>::type>
 {
 };
 
@@ -95,7 +124,8 @@ struct ValueType<double> : std::integral_constant<KeelHookValueType, KH_VALUE_FL
 };
 
 template <typename Type>
-struct ValueType<Type, std::enable_if_t<DescribedAggregate<Type>>>
+struct ValueType<Type, std::enable_if_t<
+    DescribedAggregate<Type> && !AdaptedValue<Type>>>
     : std::integral_constant<KeelHookValueType, KH_VALUE_AGGREGATE>
 {
 };
@@ -109,12 +139,19 @@ struct AggregateMetadata;
 template <typename Type>
 consteval const KeelHookAggregate* AggregateDescriptor()
 {
-    using Plain = std::remove_cv_t<Type>;
-    if constexpr (DescribedAggregate<Plain>)
+    if constexpr (std::is_reference_v<Type>)
     {
-        return &AggregateMetadata<Plain>::value;
+        return nullptr;
     }
-    return nullptr;
+    else
+    {
+        using Plain = std::remove_cv_t<Type>;
+        if constexpr (DescribedAggregate<Plain> && !AdaptedValue<Plain>)
+        {
+            return &AggregateMetadata<Plain>::value;
+        }
+        return nullptr;
+    }
 }
 
 struct AggregateFieldDefinition
@@ -243,6 +280,8 @@ struct Prototype;
 template <typename Return, typename... Arguments>
 struct Prototype<Return(Arguments...)>
 {
+    static_assert(!std::is_reference_v<Return>);
+    static_assert((!std::is_rvalue_reference_v<Arguments> && ...));
     static_assert(sizeof...(Arguments) <= KEELHOOK_MAX_ARGUMENTS);
     static inline constexpr std::array<KeelHookValueType, sizeof...(Arguments)> arguments{
         ValueTypeV<Arguments>...
@@ -269,6 +308,8 @@ struct MethodPrototype;
 template <typename Return, typename... Arguments>
 struct MethodPrototype<Return(Arguments...)>
 {
+    static_assert(!std::is_reference_v<Return>);
+    static_assert((!std::is_rvalue_reference_v<Arguments> && ...));
     static_assert(sizeof...(Arguments) + 1 <= KEELHOOK_MAX_ARGUMENTS);
     static inline constexpr std::array<KeelHookValueType, sizeof...(Arguments) + 1> arguments{
         KH_VALUE_POINTER,
@@ -299,7 +340,7 @@ bool ValidValue(const KeelHookValue& value) noexcept
     {
         return false;
     }
-    if constexpr (DescribedAggregate<Plain>)
+    if constexpr (DescribedAggregate<Plain> && !AdaptedValue<Plain>)
     {
         return value.scalar.aggregate.data &&
             value.scalar.aggregate.size == sizeof(Plain) &&
@@ -312,18 +353,35 @@ bool ValidValue(const KeelHookValue& value) noexcept
 }
 
 template <typename Type>
-Type Read(const KeelHookValue& value)
+    requires (!std::is_reference_v<Type>)
+Type Read(const KeelHookValue& value) noexcept
 {
     using Plain = std::remove_cv_t<Type>;
     if (!ValidValue<Plain>(value))
     {
-        return Plain{};
+        if constexpr (AdaptedValue<Plain>)
+        {
+            return ValueAdapter<Plain>::Fallback();
+        }
+        else
+        {
+            return Plain{};
+        }
     }
-    if constexpr (DescribedAggregate<Plain>)
+    if constexpr (AdaptedValue<Plain>)
+    {
+        return ValueAdapter<Plain>::Read(value);
+    }
+    else if constexpr (DescribedAggregate<Plain>)
     {
         Plain result{};
         std::memcpy(&result, value.scalar.aggregate.data, sizeof(result));
         return result;
+    }
+    else if constexpr (std::is_enum_v<Plain>)
+    {
+        using Underlying = std::underlying_type_t<Plain>;
+        return static_cast<Plain>(Read<Underlying>(value));
     }
     else if constexpr (std::is_same_v<Plain, bool>)
     {
@@ -361,6 +419,54 @@ Type Read(const KeelHookValue& value)
     {
         return value.scalar.uint64;
     }
+    else if constexpr (std::is_integral_v<Plain>)
+    {
+        if constexpr (sizeof(Plain) == 1)
+        {
+            if constexpr (std::is_signed_v<Plain>)
+            {
+                return static_cast<Plain>(value.scalar.int8);
+            }
+            else
+            {
+                return static_cast<Plain>(value.scalar.uint8);
+            }
+        }
+        else if constexpr (sizeof(Plain) == 2)
+        {
+            if constexpr (std::is_signed_v<Plain>)
+            {
+                return static_cast<Plain>(value.scalar.int16);
+            }
+            else
+            {
+                return static_cast<Plain>(value.scalar.uint16);
+            }
+        }
+        else if constexpr (sizeof(Plain) == 4)
+        {
+            if constexpr (std::is_signed_v<Plain>)
+            {
+                return static_cast<Plain>(value.scalar.int32);
+            }
+            else
+            {
+                return static_cast<Plain>(value.scalar.uint32);
+            }
+        }
+        else
+        {
+            static_assert(sizeof(Plain) == 8);
+            if constexpr (std::is_signed_v<Plain>)
+            {
+                return static_cast<Plain>(value.scalar.int64);
+            }
+            else
+            {
+                return static_cast<Plain>(value.scalar.uint64);
+            }
+        }
+    }
     else if constexpr (std::is_pointer_v<Plain>)
     {
         if constexpr (std::is_function_v<std::remove_pointer_t<Plain>>)
@@ -387,16 +493,29 @@ Type Read(const KeelHookValue& value)
 }
 
 template <typename Type>
-bool Write(KeelHookValue& value, Type input)
+    requires (!std::is_reference_v<Type>)
+bool Write(KeelHookValue& value, const Type& input) noexcept
 {
     using Plain = std::remove_cv_t<Type>;
     if (!ValidValue<Plain>(value))
     {
         return false;
     }
-    if constexpr (DescribedAggregate<Plain>)
+    if constexpr (AdaptedValue<Plain>)
+    {
+        return ValueAdapter<Plain>::Write(value, input);
+    }
+    else if constexpr (DescribedAggregate<Plain>)
     {
         std::memcpy(value.scalar.aggregate.data, &input, sizeof(input));
+    }
+    else if constexpr (std::is_enum_v<Plain>)
+    {
+        using Underlying = std::underlying_type_t<Plain>;
+        if (!Write(value, static_cast<Underlying>(input)))
+        {
+            return false;
+        }
     }
     else if constexpr (std::is_same_v<Plain, bool>)
     {
@@ -434,6 +553,54 @@ bool Write(KeelHookValue& value, Type input)
     {
         value.scalar.uint64 = input;
     }
+    else if constexpr (std::is_integral_v<Plain>)
+    {
+        if constexpr (sizeof(Plain) == 1)
+        {
+            if constexpr (std::is_signed_v<Plain>)
+            {
+                value.scalar.int8 = static_cast<std::int8_t>(input);
+            }
+            else
+            {
+                value.scalar.uint8 = static_cast<std::uint8_t>(input);
+            }
+        }
+        else if constexpr (sizeof(Plain) == 2)
+        {
+            if constexpr (std::is_signed_v<Plain>)
+            {
+                value.scalar.int16 = static_cast<std::int16_t>(input);
+            }
+            else
+            {
+                value.scalar.uint16 = static_cast<std::uint16_t>(input);
+            }
+        }
+        else if constexpr (sizeof(Plain) == 4)
+        {
+            if constexpr (std::is_signed_v<Plain>)
+            {
+                value.scalar.int32 = static_cast<std::int32_t>(input);
+            }
+            else
+            {
+                value.scalar.uint32 = static_cast<std::uint32_t>(input);
+            }
+        }
+        else
+        {
+            static_assert(sizeof(Plain) == 8);
+            if constexpr (std::is_signed_v<Plain>)
+            {
+                value.scalar.int64 = static_cast<std::int64_t>(input);
+            }
+            else
+            {
+                value.scalar.uint64 = static_cast<std::uint64_t>(input);
+            }
+        }
+    }
     else if constexpr (std::is_pointer_v<Plain>)
     {
         if constexpr (std::is_function_v<std::remove_pointer_t<Plain>>)
@@ -464,6 +631,13 @@ enum class Action : std::uint32_t
     Continue = KH_ACTION_CONTINUE,
     Override = KH_ACTION_OVERRIDE,
     Supersede = KH_ACTION_SUPERSEDE
+};
+
+enum class Phase : std::uint32_t
+{
+    Pre = KH_PHASE_PRE,
+    Post = KH_PHASE_POST,
+    Both = KH_PHASE_BOTH
 };
 
 class Frame final
@@ -502,9 +676,10 @@ public:
     }
 
     template <typename Type>
-    std::optional<std::remove_cv_t<Type>> Argument(std::size_t index) const
+        requires (!std::is_reference_v<Type>)
+    std::optional<std::remove_cvref_t<Type>> Argument(std::size_t index) const
     {
-        using Plain = std::remove_cv_t<Type>;
+        using Plain = std::remove_cvref_t<Type>;
         if (!*this || index >= frame_->argument_count ||
             !ValidValue<Plain>(frame_->arguments[index]))
         {
@@ -514,16 +689,18 @@ public:
     }
 
     template <typename Type>
-    bool SetArgument(std::size_t index, Type value) noexcept
+        requires (!std::is_reference_v<Type>)
+    bool SetArgument(std::size_t index, const Type& value) noexcept
     {
         return *this && index < frame_->argument_count &&
             Write(frame_->arguments[index], value);
     }
 
     template <typename Type>
-    std::optional<std::remove_cv_t<Type>> Result() const
+        requires (!std::is_reference_v<Type>)
+    std::optional<std::remove_cvref_t<Type>> Result() const
     {
-        using Plain = std::remove_cv_t<Type>;
+        using Plain = std::remove_cvref_t<Type>;
         static_assert(!std::is_void_v<Plain>);
         if (!*this || !ValidValue<Plain>(frame_->result))
         {
@@ -533,7 +710,8 @@ public:
     }
 
     template <typename Type>
-    bool SetResult(Type value) noexcept
+        requires (!std::is_reference_v<Type>)
+    bool SetResult(const Type& value) noexcept
     {
         return *this && Write(frame_->result, value);
     }
@@ -546,6 +724,519 @@ public:
 private:
     KeelHookFrame* frame_{};
 };
+
+template <typename Return>
+class Call;
+
+namespace detail
+{
+
+template <typename Signature, bool Method, auto Callback, typename Owner>
+struct TypedCallback;
+
+template <typename Type>
+struct MemberFunctionTraits;
+
+template <typename Return, typename Class, typename... Arguments>
+struct MemberFunctionTraitsBase
+{
+    using ClassType = Class;
+    using ReturnType = Return;
+    using Signature = Return(Arguments...);
+};
+
+template <typename Return, typename Class, typename... Arguments>
+struct MemberFunctionTraits<Return (Class::*)(Arguments...)>
+    : MemberFunctionTraitsBase<Return, Class, Arguments...>
+{
+};
+
+template <typename Return, typename Class, typename... Arguments>
+struct MemberFunctionTraits<Return (Class::*)(Arguments...) const>
+    : MemberFunctionTraitsBase<Return, Class, Arguments...>
+{
+};
+
+template <typename Return, typename Class, typename... Arguments>
+struct MemberFunctionTraits<Return (Class::*)(Arguments...) noexcept>
+    : MemberFunctionTraitsBase<Return, Class, Arguments...>
+{
+};
+
+template <typename Return, typename Class, typename... Arguments>
+struct MemberFunctionTraits<Return (Class::*)(Arguments...) const noexcept>
+    : MemberFunctionTraitsBase<Return, Class, Arguments...>
+{
+};
+
+template <typename Target, typename Callback>
+consteval bool CompatibleCallbackArgument()
+{
+    if constexpr (std::is_lvalue_reference_v<Target>)
+    {
+        return std::is_same_v<Target, Callback>;
+    }
+    else
+    {
+        return !std::is_rvalue_reference_v<Callback> &&
+            std::is_same_v<
+                std::remove_cvref_t<Callback>,
+                std::remove_cv_t<Target>>;
+    }
+}
+
+template <typename TargetSignature, typename CallbackSignature>
+struct CallbackCompatibility;
+
+template <typename Return, typename... Arguments, typename CallbackReturn,
+    typename... CallbackArguments>
+struct CallbackCompatibility<
+    Return(Arguments...),
+    CallbackReturn(CallbackArguments...)>
+{
+private:
+    using CallbackTuple = std::tuple<CallbackArguments...>;
+
+    static constexpr bool valid_return =
+        std::is_void_v<CallbackReturn> ||
+        std::is_same_v<CallbackReturn, Action> ||
+        std::is_same_v<CallbackReturn, KeelHookAction>;
+
+    template <std::size_t Offset, std::size_t... Indexes>
+    static consteval bool CompatibleArguments(std::index_sequence<Indexes...>)
+    {
+        return (CompatibleCallbackArgument<
+            Arguments,
+            std::tuple_element_t<Offset + Indexes, CallbackTuple>>() && ...);
+    }
+
+    static consteval bool WithoutCall()
+    {
+        if constexpr (sizeof...(CallbackArguments) != sizeof...(Arguments))
+        {
+            return false;
+        }
+        else
+        {
+            return valid_return && CompatibleArguments<0>(
+                std::index_sequence_for<Arguments...>{});
+        }
+    }
+
+    static consteval bool WithCall()
+    {
+        if constexpr (sizeof...(CallbackArguments) != sizeof...(Arguments) + 1)
+        {
+            return false;
+        }
+        else
+        {
+            using First = std::tuple_element_t<0, CallbackTuple>;
+            return valid_return && std::is_lvalue_reference_v<First> &&
+                std::is_same_v<std::remove_cvref_t<First>, Call<Return>> &&
+                CompatibleArguments<1>(std::index_sequence_for<Arguments...>{});
+        }
+    }
+
+public:
+    static constexpr bool with_call = WithCall();
+    static constexpr bool without_call = WithoutCall();
+    static constexpr bool value = with_call || without_call;
+};
+
+template <typename Type>
+using ArgumentStorage = std::conditional_t<
+    std::is_lvalue_reference_v<Type>,
+    std::add_pointer_t<std::remove_reference_t<Type>>,
+    std::remove_cv_t<Type>>;
+
+template <typename Type>
+bool ValidArgument(const KeelHookValue& value)
+{
+    if constexpr (std::is_lvalue_reference_v<Type>)
+    {
+        using Pointer = std::add_pointer_t<std::remove_reference_t<Type>>;
+        return ValidValue<Pointer>(value) && Read<Pointer>(value);
+    }
+    else
+    {
+        return ValidValue<std::remove_cv_t<Type>>(value);
+    }
+}
+
+template <typename Type>
+ArgumentStorage<Type> ReadArgument(const KeelHookValue& value)
+{
+    if constexpr (std::is_lvalue_reference_v<Type>)
+    {
+        using Pointer = std::add_pointer_t<std::remove_reference_t<Type>>;
+        return Read<Pointer>(value);
+    }
+    else
+    {
+        return Read<std::remove_cv_t<Type>>(value);
+    }
+}
+
+template <typename Type>
+decltype(auto) ExposeArgument(ArgumentStorage<Type>& value)
+{
+    if constexpr (std::is_lvalue_reference_v<Type>)
+    {
+        return static_cast<Type>(*value);
+    }
+    else
+    {
+        return (value);
+    }
+}
+
+template <typename Type>
+bool WriteArgument(KeelHookValue& destination, const ArgumentStorage<Type>& value)
+{
+    if constexpr (std::is_lvalue_reference_v<Type>)
+    {
+        return true;
+    }
+    else
+    {
+        return Write(destination, value);
+    }
+}
+
+}
+
+template <typename Return>
+class Call final
+{
+public:
+    Call(const Call&) = delete;
+    Call& operator=(const Call&) = delete;
+    Call(Call&&) = delete;
+    Call& operator=(Call&&) = delete;
+
+    Phase CurrentPhase() const noexcept
+    {
+        return frame_.Phase() == KH_PHASE_POST ? Phase::Post : Phase::Pre;
+    }
+
+    bool OriginalCalled() const noexcept
+    {
+        return frame_.OriginalCalled();
+    }
+
+    KeelHookTargetHandle TargetHandle() const noexcept
+    {
+        return frame_.TargetHandle();
+    }
+
+    template <typename Class>
+    Class* Instance() const noexcept
+    {
+        return static_cast<Class*>(instance_);
+    }
+
+    template <typename Value = Return>
+        requires (std::is_same_v<Value, Return> && !std::is_void_v<Value>)
+    std::optional<std::remove_cv_t<Value>> Result() const
+    {
+        return frame_.template Result<std::remove_cv_t<Value>>();
+    }
+
+    template <typename Value = Return>
+        requires (std::is_same_v<Value, Return> && !std::is_void_v<Value>)
+    bool SetResult(const std::remove_cv_t<Value>& value) noexcept
+    {
+        return frame_.SetResult(value);
+    }
+
+private:
+    template <typename Signature, bool Method, auto Callback, typename Owner>
+    friend struct detail::TypedCallback;
+
+    Call(KeelHookFrame* frame, void* instance) noexcept
+        : frame_(frame), instance_(instance)
+    {
+    }
+
+    Frame frame_;
+    void* instance_{};
+};
+
+namespace detail
+{
+
+template <typename Signature, bool Method, auto Callback, typename Owner>
+struct TypedCallback;
+
+template <typename Return, typename... Arguments, bool Method, auto Callback, typename Owner>
+struct TypedCallback<Return(Arguments...), Method, Callback, Owner>
+{
+    static_assert(!std::is_reference_v<Return>);
+    static_assert((!std::is_rvalue_reference_v<Arguments> && ...));
+
+    template <typename Type>
+    using ExposedArgument = decltype(ExposeArgument<Type>(
+        std::declval<ArgumentStorage<Type>&>()));
+
+    using Compatibility = CallbackCompatibility<
+        Return(Arguments...),
+        typename MemberFunctionTraits<decltype(Callback)>::Signature>;
+    static constexpr bool with_call = Compatibility::with_call;
+    static constexpr bool without_call = Compatibility::without_call;
+
+    static_assert(
+        Compatibility::value,
+        "typed KeelHook callback does not match the target method arguments");
+
+    template <typename... Parameters>
+    static KeelHookAction Invoke(Owner& owner, Parameters&&... parameters)
+    {
+        using Result = std::invoke_result_t<
+            decltype(Callback), Owner&, Parameters...>;
+        if constexpr (std::is_void_v<Result>)
+        {
+            std::invoke(
+                Callback,
+                owner,
+                std::forward<Parameters>(parameters)...);
+            return KH_ACTION_CONTINUE;
+        }
+        else
+        {
+            static_assert(
+                std::is_same_v<Result, Action> ||
+                    std::is_same_v<Result, KeelHookAction>,
+                "typed KeelHook callbacks must return void or keels2::kh::Action");
+            const Result result = std::invoke(
+                Callback,
+                owner,
+                std::forward<Parameters>(parameters)...);
+            if constexpr (std::is_same_v<Result, Action>)
+            {
+                return static_cast<KeelHookAction>(result);
+            }
+            else
+            {
+                return result;
+            }
+        }
+    }
+
+    template <std::size_t... Indexes>
+    static bool ValidArguments(
+        const KeelHookFrame& frame,
+        std::size_t offset,
+        std::index_sequence<Indexes...>)
+    {
+        return (ValidArgument<Arguments>(frame.arguments[offset + Indexes]) && ...);
+    }
+
+    template <std::size_t... Indexes>
+    static KeelHookAction DispatchArguments(
+        KeelHookFrame& frame,
+        Owner& owner,
+        void* instance,
+        std::size_t offset,
+        std::index_sequence<Indexes...>)
+    {
+        std::tuple<ArgumentStorage<Arguments>...> arguments{
+            ReadArgument<Arguments>(frame.arguments[offset + Indexes])...
+        };
+        Call<Return> call(&frame, instance);
+        KeelHookAction action{};
+        if constexpr (with_call)
+        {
+            action = Invoke(
+                owner,
+                call,
+                ExposeArgument<Arguments>(std::get<Indexes>(arguments))...);
+        }
+        else
+        {
+            action = Invoke(
+                owner,
+                ExposeArgument<Arguments>(std::get<Indexes>(arguments))...);
+        }
+        const bool written = (WriteArgument<Arguments>(
+            frame.arguments[offset + Indexes],
+            std::get<Indexes>(arguments)) && ...);
+        return written ? action : KH_ACTION_CONTINUE;
+    }
+
+    static KeelHookAction Dispatch(KeelHookFrame* frame, void* user_data)
+    {
+        constexpr std::size_t argument_count = sizeof...(Arguments) + (Method ? 1 : 0);
+        if (!frame || !user_data || frame->size != sizeof(KeelHookFrame) ||
+            (frame->phase != KH_PHASE_PRE && frame->phase != KH_PHASE_POST) ||
+            frame->argument_count != argument_count ||
+            (argument_count != 0 && !frame->arguments) ||
+            (frame->flags & ~KH_FRAME_ORIGINAL_CALLED) != 0 ||
+            !ValidValue<Return>(frame->result))
+        {
+            return KH_ACTION_CONTINUE;
+        }
+        void* instance{};
+        constexpr std::size_t offset = Method ? 1 : 0;
+        if constexpr (Method)
+        {
+            if (!ValidValue<void*>(frame->arguments[0]) ||
+                !(instance = Read<void*>(frame->arguments[0])))
+            {
+                return KH_ACTION_CONTINUE;
+            }
+        }
+        if (!ValidArguments(
+                *frame,
+                offset,
+                std::index_sequence_for<Arguments...>{}))
+        {
+            return KH_ACTION_CONTINUE;
+        }
+        return DispatchArguments(
+            *frame,
+            *static_cast<Owner*>(user_data),
+            instance,
+            offset,
+            std::index_sequence_for<Arguments...>{});
+    }
+};
+
+template <auto Method>
+std::optional<std::uint32_t> VirtualMethodIndex() noexcept
+{
+    using Pointer = decltype(Method);
+    static_assert(std::is_member_function_pointer_v<Pointer>);
+    const Pointer method = Method;
+#if defined(_MSC_VER) && defined(_M_X64)
+    if constexpr (sizeof(Pointer) != sizeof(void*) &&
+        sizeof(Pointer) != sizeof(void*) * 2)
+    {
+        return std::nullopt;
+    }
+    std::array<std::byte, sizeof(Pointer)> representation{};
+    std::memcpy(representation.data(), &method, sizeof(method));
+    std::uintptr_t thunk{};
+    std::memcpy(&thunk, representation.data(), sizeof(thunk));
+    if (!thunk)
+    {
+        return std::nullopt;
+    }
+    if constexpr (sizeof(Pointer) == sizeof(void*) * 2)
+    {
+        for (std::size_t index = sizeof(void*); index < representation.size(); ++index)
+        {
+            if (representation[index] != std::byte{})
+            {
+                return std::nullopt;
+            }
+        }
+    }
+    const auto* code = reinterpret_cast<const std::uint8_t*>(thunk);
+    if (code[0] == 0xE9)
+    {
+        std::int32_t displacement{};
+        std::memcpy(&displacement, code + 1, sizeof(displacement));
+        const auto base = reinterpret_cast<std::uintptr_t>(code + 5);
+        if ((displacement > 0 && static_cast<std::uintptr_t>(displacement) >
+                std::numeric_limits<std::uintptr_t>::max() - base) ||
+            (displacement < 0 && static_cast<std::uintptr_t>(-(
+                static_cast<std::int64_t>(displacement))) > base))
+        {
+            return std::nullopt;
+        }
+        code = reinterpret_cast<const std::uint8_t*>(
+            displacement >= 0
+                ? base + static_cast<std::uintptr_t>(displacement)
+                : base - static_cast<std::uintptr_t>(-(
+                    static_cast<std::int64_t>(displacement))));
+    }
+    if (code[0] != 0x48 || code[1] != 0x8B || code[2] != 0x01 ||
+        code[3] != 0xFF)
+    {
+        return std::nullopt;
+    }
+    std::uint32_t byte_offset{};
+    if (code[4] == 0x20)
+    {
+        byte_offset = 0;
+    }
+    else if (code[4] == 0x60)
+    {
+        byte_offset = code[5];
+    }
+    else if (code[4] == 0xA0)
+    {
+        std::int32_t displacement{};
+        std::memcpy(&displacement, code + 5, sizeof(displacement));
+        if (displacement < 0)
+        {
+            return std::nullopt;
+        }
+        byte_offset = static_cast<std::uint32_t>(displacement);
+    }
+    else
+    {
+        return std::nullopt;
+    }
+    if (byte_offset % sizeof(void*) != 0)
+    {
+        return std::nullopt;
+    }
+    return byte_offset / sizeof(void*);
+#elif (defined(__GNUC__) || defined(__clang__)) && defined(__x86_64__)
+    struct Representation
+    {
+        std::intptr_t function;
+        std::intptr_t adjustment;
+    };
+    if constexpr (sizeof(Pointer) != sizeof(Representation))
+    {
+        return std::nullopt;
+    }
+    Representation representation{};
+    std::memcpy(&representation, &method, sizeof(method));
+    if (representation.function <= 0 ||
+        (representation.function & 1) == 0 ||
+        representation.adjustment != 0)
+    {
+        return std::nullopt;
+    }
+    const auto byte_offset = static_cast<std::uintptr_t>(representation.function - 1);
+    const auto index = byte_offset / sizeof(void*);
+    if (byte_offset % sizeof(void*) != 0 ||
+        index > std::numeric_limits<std::uint32_t>::max())
+    {
+        return std::nullopt;
+    }
+    return static_cast<std::uint32_t>(index);
+#else
+    return std::nullopt;
+#endif
+}
+
+}
+
+template <auto Method>
+using MethodClass = typename detail::MemberFunctionTraits<decltype(Method)>::ClassType;
+
+template <auto Method>
+using MethodSignature = typename detail::MemberFunctionTraits<decltype(Method)>::Signature;
+
+template <typename Signature, auto Callback>
+concept CompatibleCallback = detail::CallbackCompatibility<
+    Signature,
+    typename detail::MemberFunctionTraits<decltype(Callback)>::Signature>::value;
+
+template <auto TargetMethod, auto CallbackMethod>
+concept CompatibleMethodCallback =
+    CompatibleCallback<MethodSignature<TargetMethod>, CallbackMethod>;
+
+template <auto Method>
+std::optional<std::uint32_t> VirtualIndex() noexcept
+{
+    return detail::VirtualMethodIndex<Method>();
+}
 
 class TargetSpec final
 {
@@ -668,60 +1359,84 @@ namespace detail
 
 struct TargetState final
 {
-    ~TargetState()
+    KeelResult ReleaseReferenceLocked() noexcept
     {
-        static_cast<void>(Reset());
-    }
-
-    KeelResult Reset() noexcept
-    {
-        if (!handle)
+        if (references == 0)
+        {
+            return KEEL_RESULT_NOT_FOUND;
+        }
+        --references;
+        if (references != 0)
         {
             return KEEL_RESULT_OK;
         }
-        if (!context ||
-            !context->accepting_resources.load(std::memory_order_acquire) ||
-            !context->api || !api ||
-            !api->release_target)
+        KeelResult result = KEEL_RESULT_NOT_READY;
+        if (context &&
+            context->accepting_resources.load(std::memory_order_acquire) &&
+            context->api && api && api->release_target && handle)
         {
-            Clear();
-            return KEEL_RESULT_NOT_READY;
+            result = api->release_target(context->plugin, handle);
         }
-        const KeelResult result = api->release_target(context->plugin, handle);
         if (result == KEEL_RESULT_OK || result == KEEL_RESULT_NOT_FOUND ||
             result == KEEL_RESULT_NOT_READY)
         {
-            Clear();
+            if (context)
+            {
+                const auto iterator = context->keelhook_targets.find(handle);
+                if (iterator != context->keelhook_targets.end())
+                {
+                    const auto registered = iterator->second.lock();
+                    if (!registered || registered.get() == this)
+                    {
+                        context->keelhook_targets.erase(iterator);
+                    }
+                }
+            }
+            api = nullptr;
+            handle = 0;
+            context.reset();
+        }
+        else
+        {
+            ++references;
         }
         return result;
-    }
-
-    void Clear() noexcept
-    {
-        api = nullptr;
-        context.reset();
-        handle = 0;
     }
 
     std::shared_ptr<keels2::detail::ContextState> context;
     const KeelHookApi* api{};
     KeelHookTargetHandle handle{};
+    std::size_t references{};
 };
 
 }
 
 class Service;
 class Callback;
+class Hook;
 
 class Target final
 {
 public:
     Target() = default;
-    ~Target() = default;
+    ~Target()
+    {
+        static_cast<void>(Reset());
+    }
     Target(const Target&) = delete;
     Target& operator=(const Target&) = delete;
-    Target(Target&&) noexcept = default;
-    Target& operator=(Target&&) noexcept = default;
+    Target(Target&& other) noexcept
+        : state_(std::move(other.state_))
+    {
+    }
+    Target& operator=(Target&& other) noexcept
+    {
+        if (this != &other)
+        {
+            state_.swap(other.state_);
+        }
+        return *this;
+    }
 
     explicit operator bool() const noexcept
     {
@@ -740,7 +1455,14 @@ public:
         {
             return KEEL_RESULT_OK;
         }
-        const KeelResult result = state_->Reset();
+        const auto context = state_->context;
+        if (!context)
+        {
+            state_.reset();
+            return KEEL_RESULT_NOT_READY;
+        }
+        std::scoped_lock lock(context->keelhook_targets_mutex);
+        const KeelResult result = state_->ReleaseReferenceLocked();
         if (result == KEEL_RESULT_OK || result == KEEL_RESULT_NOT_FOUND ||
             result == KEEL_RESULT_NOT_READY)
         {
@@ -752,6 +1474,7 @@ public:
 private:
     friend class Service;
     friend class Callback;
+    friend class Hook;
     std::shared_ptr<detail::TargetState> state_;
 };
 
@@ -776,8 +1499,8 @@ public:
     {
         if (this != &other)
         {
-            static_cast<void>(Reset());
-            MoveFrom(other);
+            target_.swap(other.target_);
+            std::swap(handle_, other.handle_);
         }
         return *this;
     }
@@ -795,33 +1518,55 @@ public:
 
     KeelResult Reset() noexcept
     {
-        if (!handle_)
+        if (!target_)
         {
             return KEEL_RESULT_OK;
         }
-        if (!target_ || !target_->context ||
-            !target_->context->accepting_resources.load(std::memory_order_acquire) ||
-            !target_->context->api ||
-            !target_->api || !target_->api->remove_callback)
+        const auto context = target_->context;
+        if (!context)
         {
             Clear();
             return KEEL_RESULT_NOT_READY;
         }
-        const KeelResult result = target_->api->remove_callback(
-            target_->context->plugin,
-            handle_);
-        if (result == KEEL_RESULT_OK || result == KEEL_RESULT_NOT_FOUND ||
-            result == KEEL_RESULT_NOT_READY)
+        KeelResult callback_result = KEEL_RESULT_OK;
+        if (handle_)
         {
-            Clear();
+            if (!context->accepting_resources.load(std::memory_order_acquire) ||
+                !context->api || !target_->api || !target_->api->remove_callback)
+            {
+                callback_result = KEEL_RESULT_NOT_READY;
+            }
+            else
+            {
+                callback_result = target_->api->remove_callback(
+                    context->plugin,
+                    handle_);
+            }
+            if (callback_result != KEEL_RESULT_OK &&
+                callback_result != KEEL_RESULT_NOT_FOUND &&
+                callback_result != KEEL_RESULT_NOT_READY)
+            {
+                return callback_result;
+            }
+            handle_ = 0;
         }
-        return result;
+        std::scoped_lock lock(context->keelhook_targets_mutex);
+        const KeelResult release_result = target_->ReleaseReferenceLocked();
+        if (release_result == KEEL_RESULT_OK || release_result == KEEL_RESULT_NOT_FOUND ||
+            release_result == KEEL_RESULT_NOT_READY)
+        {
+            target_.reset();
+        }
+        return release_result == KEEL_RESULT_OK ? callback_result : release_result;
     }
 
 private:
     friend class Service;
+    friend class Hook;
 
-    void Adopt(std::shared_ptr<detail::TargetState> target, KeelHookCallbackHandle handle) noexcept
+    void Adopt(
+        std::shared_ptr<detail::TargetState> target,
+        KeelHookCallbackHandle handle) noexcept
     {
         target_ = std::move(target);
         handle_ = handle;
@@ -841,6 +1586,59 @@ private:
 
     std::shared_ptr<detail::TargetState> target_;
     KeelHookCallbackHandle handle_{};
+};
+
+class Hook final
+{
+public:
+    Hook() = default;
+    ~Hook()
+    {
+        static_cast<void>(Reset());
+    }
+
+    Hook(const Hook&) = delete;
+    Hook& operator=(const Hook&) = delete;
+    Hook(Hook&&) noexcept = default;
+    Hook& operator=(Hook&&) noexcept = default;
+
+    explicit operator bool() const noexcept
+    {
+        return target_ && callback_;
+    }
+
+    KeelHookTargetHandle TargetHandle() const noexcept
+    {
+        return target_.Handle();
+    }
+
+    KeelHookCallbackHandle CallbackHandle() const noexcept
+    {
+        return callback_.Handle();
+    }
+
+    KeelResult Reset() noexcept
+    {
+        const KeelResult callback_result = callback_.Reset();
+        if (callback_result != KEEL_RESULT_OK &&
+            callback_result != KEEL_RESULT_NOT_FOUND &&
+            callback_result != KEEL_RESULT_NOT_READY)
+        {
+            return callback_result;
+        }
+        return target_.Reset();
+    }
+
+private:
+    friend class Service;
+
+    bool Empty() const noexcept
+    {
+        return !target_.state_ && !callback_.handle_;
+    }
+
+    Target target_;
+    Callback callback_;
 };
 
 class Service final
@@ -900,13 +1698,19 @@ public:
         {
             return KEEL_RESULT_NOT_READY;
         }
-        if (output)
+        if (output.state_)
         {
             return KEEL_RESULT_ALREADY_EXISTS;
         }
         if (!api_->resolve_virtual_target)
         {
             return KEEL_RESULT_INCOMPATIBLE;
+        }
+        auto fresh = std::make_shared<detail::TargetState>();
+        std::scoped_lock lock(context_->keelhook_targets_mutex);
+        if (!*this)
+        {
+            return KEEL_RESULT_NOT_READY;
         }
         KeelHookTargetHandle handle{};
         const KeelResult result = api_->resolve_virtual_target(
@@ -920,11 +1724,7 @@ public:
         }
         try
         {
-            auto state = std::make_shared<detail::TargetState>();
-            state->context = context_;
-            state->api = api_;
-            state->handle = handle;
-            output.state_ = std::move(state);
+            AdoptResolvedTargetLocked(handle, std::move(fresh), output);
         }
         catch (...)
         {
@@ -932,6 +1732,23 @@ public:
             throw;
         }
         return KEEL_RESULT_OK;
+    }
+
+    template <auto Method>
+    KeelResult Resolve(
+        MethodClass<Method>* instance,
+        const char* profile,
+        Target& output)
+    {
+        static_assert(std::is_member_function_pointer_v<decltype(Method)>);
+        const auto index = VirtualIndex<Method>();
+        if (!index)
+        {
+            return KEEL_RESULT_UNSUPPORTED;
+        }
+        return Resolve<MethodSignature<Method>>(
+            VirtualTargetSpec::Shared(instance, *index, profile),
+            output);
     }
 
     KeelResult AddCallback(
@@ -944,7 +1761,7 @@ public:
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
-        if (output)
+        if (output.target_ || output.handle_)
         {
             return KEEL_RESULT_ALREADY_EXISTS;
         }
@@ -956,6 +1773,8 @@ public:
             &handle);
         if (result == KEEL_RESULT_OK)
         {
+            std::scoped_lock lock(context_->keelhook_targets_mutex);
+            ++target.state_->references;
             output.Adopt(target.state_, handle);
         }
         return result;
@@ -994,6 +1813,94 @@ public:
         return AddCallback(target, spec, output);
     }
 
+    template <typename Signature, auto Method, typename Owner>
+    KeelResult AddCallback(
+        const Target& target,
+        Callback& output,
+        Phase phase,
+        std::int32_t priority,
+        Owner& owner) const noexcept
+    {
+        static_assert(CompatibleCallback<Signature, Method>);
+        static_assert(std::is_base_of_v<
+            MethodClass<Method>,
+            std::remove_cvref_t<Owner>>);
+        const KeelHookCallbackSpec spec{
+            sizeof(KeelHookCallbackSpec),
+            static_cast<std::uint32_t>(phase),
+            priority,
+            0,
+            &detail::TypedCallback<Signature, false, Method, Owner>::Dispatch,
+            &owner
+        };
+        return AddCallback(target, spec, output);
+    }
+
+    template <auto TargetMethod, auto CallbackMethod, typename Owner>
+    KeelResult AddMethodCallback(
+        const Target& target,
+        Callback& output,
+        Phase phase,
+        std::int32_t priority,
+        Owner& owner) const noexcept
+    {
+        static_assert(std::is_member_function_pointer_v<decltype(TargetMethod)>);
+        static_assert(CompatibleMethodCallback<TargetMethod, CallbackMethod>);
+        static_assert(std::is_base_of_v<
+            MethodClass<CallbackMethod>,
+            std::remove_cvref_t<Owner>>);
+        const KeelHookCallbackSpec spec{
+            sizeof(KeelHookCallbackSpec),
+            static_cast<std::uint32_t>(phase),
+            priority,
+            0,
+            &detail::TypedCallback<
+                MethodSignature<TargetMethod>,
+                true,
+                CallbackMethod,
+                Owner>::Dispatch,
+            &owner
+        };
+        return AddCallback(target, spec, output);
+    }
+
+    template <auto TargetMethod, auto CallbackMethod, typename Owner>
+    KeelResult AddVirtualHook(
+        MethodClass<TargetMethod>* instance,
+        const char* profile,
+        Hook& output,
+        Phase phase,
+        std::int32_t priority,
+        Owner& owner)
+    {
+        if (!output.Empty())
+        {
+            return KEEL_RESULT_ALREADY_EXISTS;
+        }
+        Hook hook;
+        KeelResult result = Resolve<TargetMethod>(
+            instance,
+            profile,
+            hook.target_);
+        if (result != KEEL_RESULT_OK)
+        {
+            return result;
+        }
+        result = AddMethodCallback<TargetMethod, CallbackMethod>(
+            hook.target_,
+            hook.callback_,
+            phase,
+            priority,
+            owner);
+        if (result != KEEL_RESULT_OK)
+        {
+            static_cast<void>(hook.target_.Reset());
+            return result;
+        }
+        output = std::move(hook);
+        return KEEL_RESULT_OK;
+    }
+
 private:
     KeelResult ResolveTarget(
         const TargetSpec& spec,
@@ -1004,9 +1911,15 @@ private:
         {
             return KEEL_RESULT_NOT_READY;
         }
-        if (output)
+        if (output.state_)
         {
             return KEEL_RESULT_ALREADY_EXISTS;
+        }
+        auto fresh = std::make_shared<detail::TargetState>();
+        std::scoped_lock lock(context_->keelhook_targets_mutex);
+        if (!*this)
+        {
+            return KEEL_RESULT_NOT_READY;
         }
         KeelHookTargetHandle handle{};
         const KeelResult result = api_->resolve_target(
@@ -1020,11 +1933,7 @@ private:
         }
         try
         {
-            auto state = std::make_shared<detail::TargetState>();
-            state->context = context_;
-            state->api = api_;
-            state->handle = handle;
-            output.state_ = std::move(state);
+            AdoptResolvedTargetLocked(handle, std::move(fresh), output);
         }
         catch (...)
         {
@@ -1032,6 +1941,30 @@ private:
             throw;
         }
         return KEEL_RESULT_OK;
+    }
+
+    void AdoptResolvedTargetLocked(
+        KeelHookTargetHandle handle,
+        std::shared_ptr<detail::TargetState> fresh,
+        Target& output)
+    {
+        std::shared_ptr<detail::TargetState> state;
+        const auto iterator = context_->keelhook_targets.find(handle);
+        if (iterator != context_->keelhook_targets.end())
+        {
+            state = std::static_pointer_cast<detail::TargetState>(
+                iterator->second.lock());
+        }
+        if (!state)
+        {
+            fresh->context = context_;
+            fresh->api = api_;
+            fresh->handle = handle;
+            state = std::move(fresh);
+            context_->keelhook_targets[handle] = state;
+        }
+        ++state->references;
+        output.state_ = std::move(state);
     }
 
     std::shared_ptr<keels2::detail::ContextState> context_;

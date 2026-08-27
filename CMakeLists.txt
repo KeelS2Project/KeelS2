@@ -392,6 +392,8 @@ add_subdirectory(samples/callbacks)
 keels2_set_output(keels2_callbacks "plugins/${KEELS2_PLATFORM_DIR}")
 add_subdirectory(samples/entities)
 keels2_set_output(keels2_entities "plugins/${KEELS2_PLATFORM_DIR}")
+add_subdirectory(samples/hooks)
+keels2_set_output(keels2_hooks "plugins/${KEELS2_PLATFORM_DIR}")
 
 if(BUILD_TESTING)
     if(WIN32)
@@ -463,6 +465,16 @@ if(BUILD_TESTING)
     target_link_libraries(keels2_vtable_hook PRIVATE keels2_detour)
     keels2_enable_warnings(keels2_vtable_hook)
     add_test(NAME vtable_hook COMMAND keels2_vtable_hook)
+
+    add_executable(keels2_keelhook_authoring
+        tests/keelhook_authoring.cpp
+        tests/source2_command_fixture.cpp
+        tests/keelhook_virtual_fixture.cpp
+    )
+    target_include_directories(keels2_keelhook_authoring PRIVATE tests)
+    target_link_libraries(keels2_keelhook_authoring PRIVATE KeelS2::SDK)
+    keels2_enable_warnings(keels2_keelhook_authoring)
+    add_test(NAME keelhook_authoring COMMAND keels2_keelhook_authoring)
 
     add_library(keels2_bootstrap_test SHARED
         bootstrap/src/bootstrap.cpp
@@ -990,6 +1002,45 @@ if(BUILD_TESTING)
     set_tests_properties(
         sdk_entities_out_of_tree_build
         PROPERTIES DEPENDS sdk_entities_out_of_tree_configure
+    )
+
+    set(KEELS2_STANDALONE_HOOKS_BUILD_DIR "${CMAKE_BINARY_DIR}/standalone-hooks")
+    set(KEELS2_STANDALONE_HOOKS_CONFIGURE
+        ${CMAKE_COMMAND}
+        --fresh
+        -S "${CMAKE_CURRENT_SOURCE_DIR}/samples/hooks"
+        -B "${KEELS2_STANDALONE_HOOKS_BUILD_DIR}"
+        "-DKeelS2_DIR=${KEELS2_SDK_INSTALL_DIR}/${KEELS2_CMAKE_INSTALL_DIR}"
+        "-DKEELS2_SOURCE_SDK_ROOT=${KEELS2_SOURCE_SDK_RESOLVED_ROOT}"
+    )
+    if(CMAKE_GENERATOR)
+        list(APPEND KEELS2_STANDALONE_HOOKS_CONFIGURE -G "${CMAKE_GENERATOR}")
+    endif()
+    if(CMAKE_GENERATOR_PLATFORM)
+        list(APPEND KEELS2_STANDALONE_HOOKS_CONFIGURE -A "${CMAKE_GENERATOR_PLATFORM}")
+    endif()
+    if(CMAKE_GENERATOR_TOOLSET)
+        list(APPEND KEELS2_STANDALONE_HOOKS_CONFIGURE -T "${CMAKE_GENERATOR_TOOLSET}")
+    endif()
+    if(NOT KEELS2_MULTI_CONFIG)
+        list(APPEND KEELS2_STANDALONE_HOOKS_CONFIGURE
+            "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
+    endif()
+    add_test(
+        NAME sdk_hooks_out_of_tree_configure
+        COMMAND ${KEELS2_STANDALONE_HOOKS_CONFIGURE}
+    )
+    set_tests_properties(sdk_hooks_out_of_tree_configure PROPERTIES DEPENDS sdk_install)
+    add_test(
+        NAME sdk_hooks_out_of_tree_build
+        COMMAND ${CMAKE_COMMAND}
+            --build "${KEELS2_STANDALONE_HOOKS_BUILD_DIR}"
+            --config $<CONFIG>
+            --parallel
+    )
+    set_tests_properties(
+        sdk_hooks_out_of_tree_build
+        PROPERTIES DEPENDS sdk_hooks_out_of_tree_configure
     )
 
     add_library(keels2_fake_server SHARED tests/fake_server.cpp)

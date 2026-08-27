@@ -29,6 +29,8 @@
 extern "C" KEELS2_PLUGIN_EXPORT std::int32_t KeelHookFixtureTarget(
     std::int32_t left,
     std::int32_t right);
+extern "C" KEELS2_PLUGIN_EXPORT std::int32_t KeelHookPauseFixtureTarget(
+    std::int32_t value);
 
 template <>
 struct keels2::kh::AggregateTraits<KeelHookFixtureCoordinates>
@@ -65,12 +67,15 @@ KeelHookCallbackHandle g_override{};
 KeelHookCallbackHandle g_low{};
 KeelHookCallbackHandle g_self{};
 KeelHookCallbackHandle g_cleanup{};
+KeelHookTargetHandle g_pause_target{};
+KeelHookCallbackHandle g_pause_callback{};
 KeelHookTargetHandle g_virtual_shared_target{};
 KeelHookCallbackHandle g_virtual_shared_callback{};
 std::atomic<std::uint64_t> g_original_calls{};
 std::atomic<std::int32_t> g_last_left{};
 std::atomic<std::int32_t> g_last_right{};
 std::atomic<std::uint32_t> g_self_calls{};
+std::atomic<std::uint32_t> g_pause_calls{};
 std::atomic<bool> g_capture{};
 std::atomic<bool> g_run{};
 std::atomic<bool> g_after_peer{};
@@ -239,6 +244,12 @@ KeelHookAction CleanupCallback(KeelHookFrame* frame, void* user_data)
         Log(KEEL_LOG_INFO, "concurrent callback retained host API access during unload");
     }
     return HighCallback(frame, user_data);
+}
+
+KeelHookAction PauseCallback(KeelHookFrame*, void*)
+{
+    g_pause_calls.fetch_add(1, std::memory_order_acq_rel);
+    return KH_ACTION_CONTINUE;
 }
 
 KeelHookAction VirtualCallback(KeelHookFrame* frame, void*)
@@ -545,6 +556,12 @@ void RunCommand(const KeelCommandInvocation*, void*)
         Log(KEEL_LOG_ERROR, "KeelHook virtual target integration failed");
         return;
     }
+    if (KeelHookPauseFixtureTarget(5) != 15 ||
+        g_pause_calls.load(std::memory_order_acquire) != 1)
+    {
+        Log(KEEL_LOG_ERROR, "pause admission fixture did not dispatch");
+        return;
+    }
 
     std::atomic<bool> thread_failure{};
     std::array<std::thread, 4> workers;
@@ -824,6 +841,12 @@ extern "C" KEELS2_PLUGIN_EXPORT KEELHOOK_NOINLINE std::int32_t KeelHookFixtureTa
     return left * 10 + right;
 }
 
+extern "C" KEELS2_PLUGIN_EXPORT KEELHOOK_NOINLINE std::int32_t KeelHookPauseFixtureTarget(
+    std::int32_t value)
+{
+    return value + 10;
+}
+
 extern "C" KEELS2_PLUGIN_EXPORT std::int32_t KeelTest_KeelHookLastLeft()
 {
     return g_last_left.load(std::memory_order_acquire);
@@ -832,6 +855,59 @@ extern "C" KEELS2_PLUGIN_EXPORT std::int32_t KeelTest_KeelHookLastLeft()
 extern "C" KEELS2_PLUGIN_EXPORT std::int32_t KeelTest_KeelHookLastRight()
 {
     return g_last_right.load(std::memory_order_acquire);
+}
+
+extern "C" KEELS2_PLUGIN_EXPORT std::uint32_t KeelTest_KeelHookPauseCalls()
+{
+    return g_pause_calls.load(std::memory_order_acquire);
+}
+
+extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelTest_KeelHookPauseCleanup()
+{
+    const auto& prototype = keels2::kh::Prototype<std::int32_t(std::int32_t)>::value;
+    KeelHookTargetSpec target_spec{
+        sizeof(KeelHookTargetSpec),
+        KH_TARGET_ADDRESS,
+        KH_MECHANISM_DETOUR,
+        0,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        FunctionAddress(&KeelHookPauseFixtureTarget),
+        0,
+        0,
+        0
+    };
+    KeelHookTargetHandle rejected_target{91};
+    const KeelHookCallbackSpec callback_spec{
+        sizeof(KeelHookCallbackSpec),
+        KH_PHASE_PRE,
+        0,
+        0,
+        &PauseCallback,
+        nullptr
+    };
+    KeelHookCallbackHandle rejected_callback{92};
+    const bool passed =
+        g_hook->resolve_target(
+            g_plugin,
+            &target_spec,
+            &prototype,
+            &rejected_target) == KEEL_RESULT_NOT_READY && rejected_target == 0 &&
+        g_hook->add_callback(
+            g_plugin,
+            g_pause_target,
+            &callback_spec,
+            &rejected_callback) == KEEL_RESULT_NOT_READY && rejected_callback == 0 &&
+        g_hook->remove_callback(g_plugin, g_pause_callback) == KEEL_RESULT_OK &&
+        g_hook->release_target(g_plugin, g_pause_target) == KEEL_RESULT_OK;
+    if (passed)
+    {
+        g_pause_callback = 0;
+        g_pause_target = 0;
+    }
+    return passed ? KEEL_TRUE : KEEL_FALSE;
 }
 
 extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Query(
@@ -901,6 +977,24 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
         0
     };
     if (g_hook->resolve_target(plugin, &direct, &prototype, &g_target) != KEEL_RESULT_OK || !g_target)
+    {
+        return KEEL_FALSE;
+    }
+    const auto& pause_prototype =
+        keels2::kh::Prototype<std::int32_t(std::int32_t)>::value;
+    KeelHookTargetSpec pause_direct = direct;
+    pause_direct.address = FunctionAddress(&KeelHookPauseFixtureTarget);
+    if (g_hook->resolve_target(
+            plugin,
+            &pause_direct,
+            &pause_prototype,
+            &g_pause_target) != KEEL_RESULT_OK || !g_pause_target ||
+        !AddCallback(
+            g_pause_target,
+            &PauseCallback,
+            KH_PHASE_PRE,
+            0,
+            g_pause_callback))
     {
         return KEEL_FALSE;
     }
