@@ -1204,7 +1204,7 @@ std::optional<std::uint32_t> VirtualMethodIndex(Pointer method) noexcept
         std::memcpy(&displacement, code + 1, sizeof(displacement));
         const auto base = reinterpret_cast<std::uintptr_t>(code + 5);
         if ((displacement > 0 && static_cast<std::uintptr_t>(displacement) >
-                std::numeric_limits<std::uintptr_t>::max() - base) ||
+                (std::numeric_limits<std::uintptr_t>::max)() - base) ||
             (displacement < 0 && static_cast<std::uintptr_t>(-(
                 static_cast<std::int64_t>(displacement))) > base))
         {
@@ -1270,7 +1270,7 @@ std::optional<std::uint32_t> VirtualMethodIndex(Pointer method) noexcept
     const auto byte_offset = static_cast<std::uintptr_t>(representation.function - 1);
     const auto index = byte_offset / sizeof(void*);
     if (byte_offset % sizeof(void*) != 0 ||
-        index > std::numeric_limits<std::uint32_t>::max())
+        index > (std::numeric_limits<std::uint32_t>::max)())
     {
         return std::nullopt;
     }
