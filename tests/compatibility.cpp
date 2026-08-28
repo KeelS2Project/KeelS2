@@ -144,6 +144,22 @@ int main()
         return 4;
     }
 
+    const auto* updated_linux_profile = keels2::cs2::FindCompatibilityProfile(
+        {40541720, 0x9abcbab46e54de8eull},
+        "linuxsteamrt64");
+    if (!updated_linux_profile ||
+        std::strcmp(updated_linux_profile->game_version, "2000897") != 0 ||
+        std::strcmp(
+            updated_linux_profile->id,
+            "cs2-2000897-linuxsteamrt64-40541720-9abcbab46e54de8e") != 0 ||
+        std::strcmp(updated_linux_profile->server_module, "libserver.so") != 0 ||
+        std::strcmp(updated_linux_profile->cvar_module, "libtier0.so") != 0 ||
+        !ValidLifecycleProfile(*updated_linux_profile) ||
+        !ValidSchemaEntityProfile(*updated_linux_profile))
+    {
+        return 10;
+    }
+
     const auto* previous_windows_profile = keels2::cs2::FindCompatibilityProfile(
         {32794264, 0x63eca0729c4fd8a9ull},
         "win64");
@@ -214,10 +230,27 @@ int main()
         return 9;
     }
 
+    const auto* updated_windows_profile = keels2::cs2::FindCompatibilityProfile(
+        {33003672, 0xd94e9db0d5b9b5c9ull},
+        "win64");
+    if (!updated_windows_profile ||
+        std::strcmp(updated_windows_profile->game_version, "2000897") != 0 ||
+        std::strcmp(
+            updated_windows_profile->id,
+            "cs2-2000897-win64-33003672-d94e9db0d5b9b5c9") != 0 ||
+        std::strcmp(updated_windows_profile->server_module, "server.dll") != 0 ||
+        std::strcmp(updated_windows_profile->cvar_module, "tier0.dll") != 0 ||
+        !ValidLifecycleProfile(*updated_windows_profile) ||
+        !ValidSchemaEntityProfile(*updated_windows_profile))
+    {
+        return 12;
+    }
+
     if (keels2::cs2::FindCompatibilityProfile(linux_profile->server, "win64") ||
         keels2::cs2::FindCompatibilityProfile(current_linux_profile->server, "win64") ||
         keels2::cs2::FindCompatibilityProfile(next_linux_profile->server, "win64") ||
         keels2::cs2::FindCompatibilityProfile(latest_linux_profile->server, "win64") ||
+        keels2::cs2::FindCompatibilityProfile(updated_linux_profile->server, "win64") ||
         keels2::cs2::FindCompatibilityProfile(windows_profile->server, "linuxsteamrt64") ||
         keels2::cs2::FindCompatibilityProfile(
             current_windows_profile->server,
@@ -227,6 +260,9 @@ int main()
             "linuxsteamrt64") ||
         keels2::cs2::FindCompatibilityProfile(
             latest_windows_profile->server,
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            updated_windows_profile->server,
             "linuxsteamrt64") ||
         keels2::cs2::FindCompatibilityProfile(
             {current_linux_profile->server.size + 1, current_linux_profile->server.fnv1a64},
@@ -259,15 +295,27 @@ int main()
             {latest_linux_profile->server.size, latest_linux_profile->server.fnv1a64 + 1},
             "linuxsteamrt64") ||
         keels2::cs2::FindCompatibilityProfile(
+            {updated_linux_profile->server.size + 1, updated_linux_profile->server.fnv1a64},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {updated_linux_profile->server.size, updated_linux_profile->server.fnv1a64 + 1},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
             {latest_windows_profile->server.size + 1, latest_windows_profile->server.fnv1a64},
             "win64") ||
         keels2::cs2::FindCompatibilityProfile(
             {latest_windows_profile->server.size, latest_windows_profile->server.fnv1a64 + 1},
             "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {updated_windows_profile->server.size + 1, updated_windows_profile->server.fnv1a64},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {updated_windows_profile->server.size, updated_windows_profile->server.fnv1a64 + 1},
+            "win64") ||
         keels2::cs2::FindCompatibilityProfile({1, 2}, "linuxsteamrt64") ||
         keels2::cs2::FindCompatibilityProfile(linux_profile->server, nullptr))
     {
-        return 10;
+        return 11;
     }
 
     return 0;

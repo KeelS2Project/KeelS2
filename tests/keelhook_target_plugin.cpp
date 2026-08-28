@@ -309,6 +309,28 @@ bool RunVirtualTests()
 {
     void* first = KeelHookVirtualFixtureFirst();
     void* second = KeelHookVirtualFixtureSecond();
+    const auto& active_prototype =
+        keels2::kh::Prototype<std::int32_t(void*, std::int32_t)>::value;
+    const KeelHookVirtualTargetSpec active_shared{
+        sizeof(KeelHookVirtualTargetSpec),
+        KH_MECHANISM_VIRTUAL,
+        0,
+        0,
+        0,
+        0,
+        first,
+        nullptr
+    };
+    KeelHookTargetHandle active_alias{};
+    if (g_hook->resolve_virtual_target(
+            g_plugin,
+            &active_shared,
+            &active_prototype,
+            &active_alias) != KEEL_RESULT_OK ||
+        active_alias != g_virtual_shared_target)
+    {
+        return false;
+    }
     if (KeelHookVirtualFixtureCallFirst(first, 5) != 1110 ||
         KeelHookVirtualFixtureCallFirst(second, 5) != 1210 ||
         KeelHookVirtualFixtureCallSecond(first, 5) != 205)
