@@ -9,10 +9,12 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 
 namespace keels2
@@ -63,6 +65,8 @@ struct ContextState final
     const KeelHostApi* api{};
     KeelPluginHandle plugin{};
     std::atomic<bool> accepting_resources{};
+    std::mutex keelhook_targets_mutex;
+    std::unordered_map<std::uint64_t, std::weak_ptr<void>> keelhook_targets;
 };
 
 template <typename Type>

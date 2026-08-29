@@ -10,6 +10,7 @@
 #include <keels2/source2.hpp>
 #include <keels2/source2_authoring.h>
 #include <keels2/source2_callbacks.h>
+#include <keels2/source2_hooks.hpp>
 #include <keels2/source2_lifecycle.hpp>
 #include <keels2/source2_sdk.hpp>
 
@@ -1617,6 +1618,36 @@ protected:
             interface_name);
     }
 
+    template <typename TargetMethod, typename CallbackMethod>
+    bool HookPre(
+        keels2::kh::MethodClassOf<TargetMethod>* instance,
+        TargetMethod target_method,
+        CallbackMethod callback_method,
+        int32 priority = 0)
+    {
+        return RegisterHook(
+            instance,
+            target_method,
+            callback_method,
+            keels2::kh::Phase::Pre,
+            priority);
+    }
+
+    template <typename TargetMethod, typename CallbackMethod>
+    bool HookPost(
+        keels2::kh::MethodClassOf<TargetMethod>* instance,
+        TargetMethod target_method,
+        CallbackMethod callback_method,
+        int32 priority = 0)
+    {
+        return RegisterHook(
+            instance,
+            target_method,
+            callback_method,
+            keels2::kh::Phase::Post,
+            priority);
+    }
+
     template <typename Value>
     bool FindSchemaField(
         const char* class_name,
@@ -1693,6 +1724,89 @@ private:
             return nullptr;
         }
         return interface.template Get<Type>();
+    }
+
+    template <typename TargetMethod, typename CallbackMethod>
+    bool RegisterHook(
+        keels2::kh::MethodClassOf<TargetMethod>* instance,
+        TargetMethod target_method,
+        CallbackMethod callback_method,
+        keels2::kh::Phase phase,
+        int32 priority)
+    {
+        static_assert(std::is_member_function_pointer_v<TargetMethod>);
+        static_assert(std::is_member_function_pointer_v<CallbackMethod>);
+        static_assert(keels2::kh::CompatibleMethods<TargetMethod, CallbackMethod>);
+        using Owner = keels2::kh::MethodClassOf<CallbackMethod>;
+        static_assert(std::is_base_of_v<Plugin, Owner>);
+        if (!hooks_accepting_.load(std::memory_order_acquire))
+        {
+            return false;
+        }
+        Owner* owner = dynamic_cast<Owner*>(this);
+        const char* profile = Source2CompatibilityProfile();
+        if (!instance || !owner || !profile)
+        {
+            return false;
+        }
+        try
+        {
+            std::scoped_lock lock(hooks_mutex_);
+            if (!hooks_accepting_.load(std::memory_order_acquire))
+            {
+                return false;
+            }
+            hooks_.reserve(hooks_.size() + 1);
+            keels2::kh::Service service;
+            if (service.Connect(context_) != KEEL_RESULT_OK)
+            {
+                return false;
+            }
+            keels2::kh::Hook hook;
+            if (service.AddVirtualHook(
+                    instance,
+                    target_method,
+                    callback_method,
+                    profile,
+                    hook,
+                    phase,
+                    priority,
+                    *owner) != KEEL_RESULT_OK)
+            {
+                return false;
+            }
+            hooks_.push_back(std::move(hook));
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    const char* Source2CompatibilityProfile() noexcept
+    {
+        std::scoped_lock lock(source2_mutex_);
+        if (!context_)
+        {
+            return nullptr;
+        }
+        if (!source2_connected_)
+        {
+            if (source2_service_.Connect(context_) != KEEL_RESULT_OK)
+            {
+                return nullptr;
+            }
+            source2_connected_ = true;
+        }
+        if (!source2_server_ && source2_service_.Query(
+                keels2::source2::Capability::server,
+                source2_server_) != KEEL_RESULT_OK)
+        {
+            return nullptr;
+        }
+        const char* profile = source2_server_.CompatibilityProfile();
+        return profile && profile[0] ? profile : nullptr;
     }
 
     template <typename Type>
@@ -1946,8 +2060,26 @@ private:
         return dispatch_enabled_.load(std::memory_order_acquire);
     }
 
+    void BeginHookRegistration() noexcept
+    {
+        std::scoped_lock lock(hooks_mutex_);
+        hooks_accepting_.store(true, std::memory_order_release);
+    }
+
     void ResetResources() noexcept
     {
+        {
+            std::vector<keels2::kh::Hook> hooks;
+            {
+                std::scoped_lock lock(hooks_mutex_);
+                hooks_accepting_.store(false, std::memory_order_release);
+                hooks.swap(hooks_);
+            }
+            for (auto& hook : hooks)
+            {
+                static_cast<void>(hook.Reset());
+            }
+        }
         {
             std::scoped_lock lock(game_events_mutex_);
             for (auto& binding : game_events_)
@@ -2009,9 +2141,12 @@ private:
     std::vector<std::unique_ptr<keels2::detail::AuthoringCommandBinding>> commands_;
     std::list<std::unique_ptr<keels2::detail::AuthoringConVarResource>> convar_resources_;
     std::vector<std::unique_ptr<keels2::detail::GameEventBinding>> game_events_;
+    std::vector<keels2::kh::Hook> hooks_;
+    std::atomic<bool> hooks_accepting_{};
     std::mutex commands_mutex_;
     std::mutex convars_mutex_;
     std::mutex game_events_mutex_;
+    std::mutex hooks_mutex_;
     std::mutex source2_authoring_mutex_;
     const KeelSource2AuthoringApi* source2_authoring_service_{};
     std::mutex convar_service_mutex_;
@@ -2303,7 +2438,13 @@ public:
             instance->dispatch_enabled_.store(false, std::memory_order_release);
             if (!PrepareLifecycle(*instance, *state) ||
                 !PrepareSource2Callbacks(*instance, *state) ||
-                !PreparePluginEvents(*instance, *state) || !instance->Load())
+                !PreparePluginEvents(*instance, *state))
+            {
+                Rollback(*instance, *state);
+                return KEEL_FALSE;
+            }
+            instance->BeginHookRegistration();
+            if (!instance->Load())
             {
                 Rollback(*instance, *state);
                 return KEEL_FALSE;

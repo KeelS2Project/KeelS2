@@ -235,6 +235,7 @@ public:
         {
             return;
         }
+        owner->second.accepting = true;
         owner->second.active = true;
         for (const auto& [handle, callback] : callbacks_)
         {
@@ -260,6 +261,7 @@ public:
             {
                 return KEEL_RESULT_BUSY;
             }
+            owner->second.accepting = false;
             owner->second.active = false;
             for (const auto& [handle, callback] : callbacks_)
             {
@@ -849,6 +851,48 @@ private:
             }
             resolved.address = original;
             resolved.virtual_index = spec->index;
+            const TargetKey key{
+                reinterpret_cast<std::uintptr_t>(resolved.virtual_slot),
+                0,
+                spec->mechanism
+            };
+            {
+                std::scoped_lock lock(registry_mutex_);
+                if (!OwnerReadyLocked(plugin))
+                {
+                    return KEEL_RESULT_NOT_READY;
+                }
+                if (instance_tables_.contains(spec->instance) ||
+                    VirtualScopeConflictLocked(resolved.virtual_slot, spec->mechanism))
+                {
+                    Log("shared and per-instance virtual targets cannot overlap");
+                    return KEEL_RESULT_BUSY;
+                }
+                const auto existing = targets_by_key_.find(key);
+                if (existing != targets_by_key_.end())
+                {
+                    const auto& target = existing->second;
+                    if (!target->transition)
+                    {
+                        const void* expected = target->address;
+                        if (target->virtual_hook && target->virtual_hook->Enabled())
+                        {
+                            expected = target->closure;
+                        }
+                        if (original != expected)
+                        {
+                            Log("shared virtual slot no longer matches the registered target");
+                            return KEEL_RESULT_INCOMPATIBLE;
+                        }
+                    }
+                    return RegisterTargetLocked(
+                        plugin,
+                        key,
+                        resolved,
+                        canonical,
+                        output);
+                }
+            }
             const auto code_lookup = platform::FindLoadedModuleForAddress(
                 original,
                 resolved.module,
@@ -878,11 +922,6 @@ private:
                 Log(error);
                 return KEEL_RESULT_ENGINE_FAILURE;
             }
-            const TargetKey key{
-                reinterpret_cast<std::uintptr_t>(resolved.virtual_slot),
-                0,
-                spec->mechanism
-            };
             std::scoped_lock lock(registry_mutex_);
             if (!OwnerReadyLocked(plugin))
             {
@@ -1060,7 +1099,7 @@ private:
         CollectPhysical();
         {
             std::scoped_lock lock(registry_mutex_);
-            if (!OwnerReadyLocked(plugin))
+            if (!OwnerExistsLocked(plugin))
             {
                 return KEEL_RESULT_NOT_READY;
             }
@@ -1174,7 +1213,7 @@ private:
         bool was_enabled{};
         {
             std::scoped_lock lock(registry_mutex_);
-            if (!OwnerReadyLocked(plugin))
+            if (!OwnerExistsLocked(plugin))
             {
                 return KEEL_RESULT_NOT_READY;
             }
@@ -2598,6 +2637,11 @@ private:
     {
         const auto owner = owners_.find(plugin);
         return !shutting_down_ && owner != owners_.end() && owner->second.accepting;
+    }
+
+    bool OwnerExistsLocked(KeelPluginHandle plugin) const
+    {
+        return !shutting_down_ && owners_.contains(plugin);
     }
 
     static bool IsCurrentOwner(KeelPluginHandle plugin)

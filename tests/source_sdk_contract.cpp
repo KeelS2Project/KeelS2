@@ -56,9 +56,36 @@ class Source2AccessProbe : public keels2::Plugin
 public:
     using keels2::Plugin::GetEngineInterface;
     using keels2::Plugin::GetServerInterface;
+
+    bool RegisterGameFrameHook(IServerGameDLL* server)
+    {
+        return HookPre(
+            server,
+            &IServerGameDLL::GameFrame,
+            &Source2AccessProbe::OnGameFrameHook);
+    }
+
+    PluginResult OnGameFrameHook(
+        bool,
+        bool,
+        bool)
+    {
+        return plugin_continue;
+    }
+
+    void OnGameFrameObserver(bool, bool, bool)
+    {
+    }
+
+    void OnGameFrameWrong(int, bool, bool)
+    {
+    }
 };
 
 static_assert(SOURCE_ENGINE == 25);
+static_assert(plugin_continue == KH_ACTION_CONTINUE);
+static_assert(plugin_override == KH_ACTION_OVERRIDE);
+static_assert(plugin_supersede == KH_ACTION_SUPERSEDE);
 static_assert(sizeof(void*) == 8);
 static_assert(sizeof(uint64) == 8);
 static_assert(sizeof(CPlayerSlot) == 4);
@@ -72,6 +99,70 @@ static_assert(std::is_same_v<
     ClientDisconnectSignature>);
 static_assert(std::is_same_v<decltype(&IServerGameClients::ClientCommand), ClientCommandSignature>);
 static_assert(std::is_same_v<decltype(&IServerGameDLL::GameFrame), GameFrameSignature>);
+static_assert(std::is_same_v<
+    keels2::kh::MethodClass<&IServerGameDLL::GameFrame>,
+    IServerGameDLL>);
+static_assert(std::is_same_v<
+    keels2::kh::MethodSignature<&IServerGameDLL::GameFrame>,
+    void(bool, bool, bool)>);
+static_assert(keels2::kh::CompatibleMethodCallback<
+    &IServerGameDLL::GameFrame,
+    &Source2AccessProbe::OnGameFrameHook>);
+static_assert(keels2::kh::CompatibleMethodCallback<
+    &IServerGameDLL::GameFrame,
+    &Source2AccessProbe::OnGameFrameObserver>);
+static_assert(!keels2::kh::CompatibleMethodCallback<
+    &IServerGameDLL::GameFrame,
+    &Source2AccessProbe::OnGameFrameWrong>);
+static_assert(keels2::kh::ValueTypeV<CPlayerSlot> == KH_VALUE_INT32);
+static_assert(keels2::kh::ValueTypeV<CSplitScreenSlot> == KH_VALUE_INT32);
+static_assert(keels2::kh::ValueTypeV<ENetworkDisconnectionReason> == KH_VALUE_INT32);
+static_assert(keels2::kh::ValueTypeV<const CCommand&> == KH_VALUE_POINTER);
+static_assert(keels2::kh::ValueTypeV<int64> == KH_VALUE_INT64);
+static_assert(keels2::kh::ValueTypeV<uint64> == KH_VALUE_UINT64);
+static_assert(
+    keels2::kh::MethodPrototype<
+        keels2::kh::MethodSignature<&IServerGameDLL::GameFrame>>::value.argument_count == 4);
+static_assert(
+    keels2::kh::MethodPrototype<
+        keels2::kh::MethodSignature<&IServerGameDLL::GameFrame>>::arguments[0] ==
+    KH_VALUE_POINTER);
+static_assert(
+    keels2::kh::MethodPrototype<
+        keels2::kh::MethodSignature<&IServerGameDLL::GameFrame>>::arguments[1] ==
+    KH_VALUE_BOOL);
+static_assert(
+    keels2::kh::MethodPrototype<
+        keels2::kh::MethodSignature<&IServerGameDLL::GameFrame>>::arguments[2] ==
+    KH_VALUE_BOOL);
+static_assert(
+    keels2::kh::MethodPrototype<
+        keels2::kh::MethodSignature<&IServerGameDLL::GameFrame>>::arguments[3] ==
+    KH_VALUE_BOOL);
+static_assert(
+    keels2::kh::MethodPrototype<
+        keels2::kh::MethodSignature<&IServerGameClients::ClientCommand>>::value.argument_count ==
+    3);
+static_assert(
+    keels2::kh::MethodPrototype<
+        keels2::kh::MethodSignature<&IServerGameClients::ClientCommand>>::arguments[1] ==
+    KH_VALUE_INT32);
+static_assert(
+    keels2::kh::MethodPrototype<
+        keels2::kh::MethodSignature<&IServerGameClients::ClientCommand>>::arguments[2] ==
+    KH_VALUE_POINTER);
+static_assert(
+    keels2::kh::MethodPrototype<
+        keels2::kh::MethodSignature<&IServerGameClients::ClientDisconnect>>::arguments[1] ==
+    KH_VALUE_INT32);
+static_assert(
+    keels2::kh::MethodPrototype<
+        keels2::kh::MethodSignature<&IServerGameClients::ClientDisconnect>>::arguments[2] ==
+    KH_VALUE_INT32);
+static_assert(
+    keels2::kh::MethodPrototype<
+        keels2::kh::MethodSignature<&IServerGameClients::ClientDisconnect>>::arguments[4] ==
+    KH_VALUE_UINT64);
 static_assert(std::is_same_v<
     decltype(std::declval<Source2AccessProbe&>().GetEngineInterface<INetworkServerService>(
         NETWORKSERVERSERVICE_INTERFACE_VERSION)),
