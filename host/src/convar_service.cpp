@@ -163,6 +163,28 @@ const KeelConVarApi& ConVarService::Api() const noexcept
     return api_;
 }
 
+std::vector<ConVarService::Snapshot> ConVarService::Snapshots() const
+{
+    std::scoped_lock lock(registry_mutex_);
+    std::vector<Snapshot> output;
+    output.reserve(records_.size());
+    for (const auto& [handle, record] : records_)
+    {
+        output.push_back({
+            handle,
+            record->owner,
+            record->name,
+            record->created,
+            record->enabled.load(std::memory_order_acquire),
+            record->active.load(std::memory_order_acquire)
+        });
+    }
+    std::sort(output.begin(), output.end(), [](const auto& left, const auto& right) {
+        return left.handle < right.handle;
+    });
+    return output;
+}
+
 void ConVarService::Activate(KeelPluginHandle plugin)
 {
     std::scoped_lock lock(registry_mutex_);

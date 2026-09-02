@@ -9,7 +9,7 @@ public:
     static constexpr keels2::PluginInfo Info{
         "KeelS2 Entities Example",
         "KeelS2 Project",
-        "0.6.0",
+        "0.9.0",
         "Reads a typed field through a validated entity handle"
     };
 

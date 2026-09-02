@@ -2,10 +2,13 @@
 #include <keels2/cs2/cvar_abi.h>
 
 #include <igameevents.h>
+#include <eiface.h>
 #include <entity2/entityclass.h>
 #include <entity2/entityinstance.h>
 #include <entity2/entitysystem.h>
 #include <schemasystem/schemasystem.h>
+#include <networksystem/inetworkmessages.h>
+#include <playerslot.h>
 #include <tier1/bufferstring.h>
 #include <tier1/convar.h>
 
@@ -265,6 +268,55 @@ extern "C" void* KeelCs2_CreateGameEventListener(
     {
         return nullptr;
     }
+}
+
+extern "C" KeelResult KeelCs2_ServerCommand(void* engine_server, const char* command)
+{
+    if (!engine_server || !command || !command[0])
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    static_cast<IVEngineServer2*>(engine_server)->ServerCommand(command);
+    return KEEL_RESULT_OK;
+}
+
+extern "C" KeelResult KeelCs2_ClientConsolePrint(
+    void* engine_server,
+    std::int32_t slot,
+    const char* message)
+{
+    const CPlayerSlot player(slot);
+    if (!engine_server || !player.IsValid() || !message || !message[0])
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    static_cast<IVEngineServer2*>(engine_server)->ClientPrintf(player, message);
+    return KEEL_RESULT_OK;
+}
+
+extern "C" KeelResult KeelCs2_FindUserMessage(
+    void* network_messages,
+    const char* name,
+    std::uint32_t* message_id)
+{
+    if (!network_messages || !name || !name[0] || !message_id)
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    *message_id = 0;
+    auto* messages = static_cast<INetworkMessages*>(network_messages);
+    INetworkMessageInternal* message = messages->FindNetworkMessage(name);
+    if (!message)
+    {
+        return KEEL_RESULT_NOT_FOUND;
+    }
+    const NetMessageInfo_t* info = messages->GetNetMessageInfo(message);
+    if (!info)
+    {
+        return KEEL_RESULT_INCOMPATIBLE;
+    }
+    *message_id = info->m_MessageId;
+    return KEEL_RESULT_OK;
 }
 
 extern "C" void KeelCs2_DestroyGameEventListener(void* listener)

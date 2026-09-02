@@ -156,9 +156,16 @@ Type BitCopy(const auto& value)
 class KeelHookService::Implementation final
 {
 public:
-    Implementation(KeelHookService& service, std::string profile)
+    Implementation(
+        KeelHookService& service,
+        std::string profile,
+        const std::vector<CompatibilityTargetRecord>& profile_targets)
         : service_(service), service_profile_(std::move(profile))
     {
+        for (const auto& target : profile_targets)
+        {
+            profile_targets_.emplace(target.name, target);
+        }
         const auto callback_entry = &CallbackDispatch;
         platform::LoadedModule module;
         std::string error;
@@ -188,6 +195,15 @@ public:
         {
             throw std::runtime_error("KeelHook service already exists");
         }
+        api_v3_ = {
+            sizeof(KeelHookApiV3),
+            KEELHOOK_API_VERSION_3,
+            &ResolveTargetEntry,
+            &ReleaseTargetEntry,
+            &AddCallbackEntry,
+            &RemoveCallbackEntry,
+            &ResolveVirtualTargetEntry
+        };
         api_ = {
             sizeof(KeelHookApi),
             KEELHOOK_API_VERSION,
@@ -195,7 +211,10 @@ public:
             &ReleaseTargetEntry,
             &AddCallbackEntry,
             &RemoveCallbackEntry,
-            &ResolveVirtualTargetEntry
+            &ResolveVirtualTargetEntry,
+            &CallOriginalEntry,
+            &RecallEntry,
+            &SetCallbackEnabledEntry
         };
     }
 
@@ -209,6 +228,13 @@ public:
     {
         return api_;
     }
+
+    const KeelHookApiV3& ApiV3() const noexcept
+    {
+        return api_v3_;
+    }
+
+    std::vector<KeelHookService::TargetSnapshot> Snapshots() const;
 
     void Authorize(KeelPluginHandle plugin, const std::filesystem::path& path, bool active)
     {
@@ -718,6 +744,63 @@ private:
         catch (...)
         {
             instance->Log("internal exception while resolving a virtual target");
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
+    }
+
+    static KeelResult CallOriginalEntry(KeelPluginHandle plugin, KeelHookFrame* frame)
+    {
+        Implementation* instance = active_.load(std::memory_order_acquire);
+        if (!instance)
+        {
+            return KEEL_RESULT_NOT_READY;
+        }
+        try
+        {
+            return instance->CallOriginalControl(plugin, frame);
+        }
+        catch (...)
+        {
+            instance->Log("internal exception while calling an original target");
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
+    }
+
+    static KeelResult RecallEntry(KeelPluginHandle plugin, KeelHookFrame* frame)
+    {
+        Implementation* instance = active_.load(std::memory_order_acquire);
+        if (!instance)
+        {
+            return KEEL_RESULT_NOT_READY;
+        }
+        try
+        {
+            return instance->RecallControl(plugin, frame);
+        }
+        catch (...)
+        {
+            instance->Log("internal exception while recalling a target");
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
+    }
+
+    static KeelResult SetCallbackEnabledEntry(
+        KeelPluginHandle plugin,
+        KeelHookCallbackHandle callback,
+        KeelBool enabled)
+    {
+        Implementation* instance = active_.load(std::memory_order_acquire);
+        if (!instance)
+        {
+            return KEEL_RESULT_NOT_READY;
+        }
+        try
+        {
+            return instance->SetCallbackEnabled(plugin, callback, enabled);
+        }
+        catch (...)
+        {
+            instance->Log("internal exception while changing callback state");
             return KEEL_RESULT_ENGINE_FAILURE;
         }
     }
@@ -1263,6 +1346,41 @@ private:
         return KEEL_RESULT_OK;
     }
 
+    KeelResult SetCallbackEnabled(
+        KeelPluginHandle plugin,
+        KeelHookCallbackHandle handle,
+        KeelBool enabled)
+    {
+        if (!handle || (enabled != KEEL_FALSE && enabled != KEEL_TRUE))
+        {
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+        std::shared_ptr<CallbackRecord> callback;
+        {
+            std::scoped_lock lock(registry_mutex_);
+            if (!OwnerExistsLocked(plugin))
+            {
+                return KEEL_RESULT_NOT_READY;
+            }
+            const auto position = callbacks_.find(handle);
+            if (position == callbacks_.end() || position->second->owner != plugin)
+            {
+                return KEEL_RESULT_NOT_FOUND;
+            }
+            callback = position->second;
+            if (enabled == KEEL_TRUE && !OwnerReadyLocked(plugin))
+            {
+                return KEEL_RESULT_NOT_READY;
+            }
+            callback->enabled.store(enabled == KEEL_TRUE, std::memory_order_release);
+        }
+        if (enabled == KEEL_FALSE && !IsCurrentCallback(callback.get()))
+        {
+            WaitForZero(callback->active);
+        }
+        return KEEL_RESULT_OK;
+    }
+
     struct AggregateBuildContext
     {
         std::unordered_map<const KeelHookAggregate*, std::shared_ptr<AggregateData>> completed;
@@ -1659,6 +1777,38 @@ private:
                 return scan_result;
             }
         }
+        else if (spec.source == KH_TARGET_PROFILE)
+        {
+            if (spec.address || spec.module || spec.pattern || spec.profile || spec.offset != 0 ||
+                spec.occurrence != 0)
+            {
+                error = "profile target contains fields for another resolver";
+                return KEEL_RESULT_INVALID_ARGUMENT;
+            }
+            std::string name;
+            if (!CopyText(spec.symbol, 127, false, name))
+            {
+                error = "profile target name is invalid";
+                return KEEL_RESULT_INVALID_ARGUMENT;
+            }
+            const auto target = profile_targets_.find(name);
+            if (target == profile_targets_.end())
+            {
+                error = "profile target is unavailable for the running server";
+                return KEEL_RESULT_NOT_FOUND;
+            }
+            KeelHookTargetSpec expanded{};
+            expanded.size = sizeof(expanded);
+            expanded.source = KH_TARGET_PATTERN;
+            expanded.mechanism = spec.mechanism;
+            expanded.flags = spec.flags;
+            expanded.module = target->second.module.c_str();
+            expanded.pattern = target->second.pattern.c_str();
+            expanded.profile = service_profile_.c_str();
+            expanded.offset = target->second.offset;
+            expanded.occurrence = target->second.occurrence;
+            return ResolveSpec(expanded, resolved, error);
+        }
         else
         {
             error = "target source is unsupported";
@@ -2010,6 +2160,28 @@ private:
     using ArgumentAggregateStorage =
         std::array<AggregateStorage, KEELHOOK_MAX_ARGUMENTS>;
 
+    struct DispatchControl
+    {
+        KeelHookFrame* frame{};
+        TargetRecord* target{};
+        std::array<KeelHookValue, KEELHOOK_MAX_ARGUMENTS>* arguments{};
+        KeelHookValue* result{};
+        AggregateStorage* result_storage{};
+        bool* original_called{};
+        bool* overridden{};
+        bool* superseded{};
+        bool* recalled{};
+    };
+
+    struct RecallState
+    {
+        TargetRecord* target{};
+        const CallbackRecord* callback{};
+        const KeelHookValue* result{};
+        const AggregateStorage* result_storage{};
+        bool overridden{};
+    };
+
     DCsigchar Dispatch(TargetRecord& target, DCArgs* native_arguments, DCValue* native_result) noexcept
     {
         const char return_character = SignatureCharacter(target.prototype.return_type);
@@ -2023,6 +2195,18 @@ private:
             target.prototype.return_aggregate,
             result,
             result_storage);
+        const RecallState* recall_state = recall_state_;
+        recall_state_ = nullptr;
+        if (recall_state && recall_state->target == &target && recall_state->overridden)
+        {
+            CopyValue(
+                target.prototype.return_type,
+                target.prototype.return_aggregate,
+                *recall_state->result,
+                *recall_state->result_storage,
+                result,
+                result_storage);
+        }
         target.active.fetch_add(1, std::memory_order_acq_rel);
         if (target_depth_ >= target_stack_.size())
         {
@@ -2034,7 +2218,12 @@ private:
         target_stack_[target_depth_++] = &target;
 
         bool original_called{};
+        bool overridden = recall_state && recall_state->target == &target && recall_state->overridden;
         bool superseded{};
+        bool recalled{};
+        bool control_pushed{};
+        const CallbackRecord* recall_from =
+            recall_state && recall_state->target == &target ? recall_state->callback : nullptr;
         try
         {
             std::vector<std::shared_ptr<CallbackRecord>> callbacks;
@@ -2052,22 +2241,53 @@ private:
             ArgumentAggregateStorage before_argument_storage{};
             KeelHookValue before_result{};
             AggregateStorage before_result_storage{};
-            bool overridden{};
             KeelHookFrame frame{
                 sizeof(KeelHookFrame),
                 KH_PHASE_PRE,
                 target.handle,
                 static_cast<std::uint32_t>(target.prototype.arguments.size()),
-                0,
+                recall_from ? KH_FRAME_RECALLED : 0,
                 arguments.data(),
                 result
             };
-            for (const auto& callback : callbacks)
+            DispatchControl control{
+                &frame,
+                &target,
+                &arguments,
+                &result,
+                &result_storage,
+                &original_called,
+                &overridden,
+                &superseded,
+                &recalled
+            };
+            if (dispatch_depth_ >= dispatch_stack_.size())
             {
+                throw std::runtime_error("dispatch control recursion limit was reached");
+            }
+            dispatch_stack_[dispatch_depth_++] = &control;
+            control_pushed = true;
+            std::size_t pre_start{};
+            if (recall_from)
+            {
+                const auto iterator = std::find_if(
+                    callbacks.begin(),
+                    callbacks.end(),
+                    [recall_from](const auto& callback) {
+                        return callback.get() == recall_from;
+                    });
+                pre_start = iterator == callbacks.end()
+                    ? callbacks.size()
+                    : static_cast<std::size_t>(std::distance(callbacks.begin(), iterator)) + 1;
+            }
+            for (std::size_t index = pre_start; index < callbacks.size(); ++index)
+            {
+                const auto& callback = callbacks[index];
                 if ((callback->phases & KH_PHASE_PRE) == 0)
                 {
                     continue;
                 }
+                const bool original_before = original_called;
                 SnapshotValues(
                     target.prototype,
                     arguments,
@@ -2083,7 +2303,8 @@ private:
                     frame,
                     target,
                     KH_PHASE_PRE,
-                    0,
+                    (original_called ? KH_FRAME_ORIGINAL_CALLED : 0) |
+                        (frame.flags & KH_FRAME_RECALLED),
                     arguments,
                     argument_storage,
                     before_arguments,
@@ -2091,14 +2312,18 @@ private:
                     result_storage,
                     before_result,
                     before_result_storage);
+                const bool explicit_call = !original_before && original_called;
                 if (action == KH_ACTION_CONTINUE)
                 {
-                    RestoreResult(
-                        target.prototype,
-                        result,
-                        result_storage,
-                        before_result,
-                        before_result_storage);
+                    if (!explicit_call)
+                    {
+                        RestoreResult(
+                            target.prototype,
+                            result,
+                            result_storage,
+                            before_result,
+                            before_result_storage);
+                    }
                 }
                 else if (action == KH_ACTION_OVERRIDE)
                 {
@@ -2125,24 +2350,31 @@ private:
                 }
                 else
                 {
-                    RestoreArguments(
-                        target.prototype,
-                        arguments,
-                        argument_storage,
-                        before_arguments,
-                        before_argument_storage);
-                    RestoreResult(
-                        target.prototype,
-                        result,
-                        result_storage,
-                        before_result,
-                        before_result_storage);
+                    if (!explicit_call)
+                    {
+                        RestoreArguments(
+                            target.prototype,
+                            arguments,
+                            argument_storage,
+                            before_arguments,
+                            before_argument_storage);
+                        RestoreResult(
+                            target.prototype,
+                            result,
+                            result_storage,
+                            before_result,
+                            before_result_storage);
+                    }
                     Log("callback returned an invalid action");
                 }
                 frame.result = result;
+                if (recalled)
+                {
+                    break;
+                }
             }
 
-            if (!superseded)
+            if (!recalled && !superseded && !original_called)
             {
                 AggregateStorage original_storage{};
                 const KeelHookValue original = CallOriginal(target, arguments, original_storage);
@@ -2157,64 +2389,68 @@ private:
                         result,
                         result_storage);
                 }
-                frame.flags = KH_FRAME_ORIGINAL_CALLED;
+                frame.flags |= KH_FRAME_ORIGINAL_CALLED;
             }
-            frame.phase = KH_PHASE_POST;
-            frame.result = result;
-            for (auto iterator = callbacks.rbegin(); iterator != callbacks.rend(); ++iterator)
+            if (!recalled)
             {
-                const auto& callback = *iterator;
-                if ((callback->phases & KH_PHASE_POST) == 0)
+                frame.phase = KH_PHASE_POST;
+                frame.result = result;
+                for (auto iterator = callbacks.rbegin(); iterator != callbacks.rend(); ++iterator)
                 {
-                    continue;
-                }
-                SnapshotValues(
-                    target.prototype,
-                    arguments,
-                    argument_storage,
-                    result,
-                    result_storage,
-                    before_arguments,
-                    before_argument_storage,
-                    before_result,
-                    before_result_storage);
-                const KeelHookAction action = InvokeCallback(*callback, frame);
-                ValidateFrame(
-                    frame,
-                    target,
-                    KH_PHASE_POST,
-                    original_called ? KH_FRAME_ORIGINAL_CALLED : 0,
-                    arguments,
-                    argument_storage,
-                    before_arguments,
-                    before_argument_storage,
-                    result_storage,
-                    before_result,
-                    before_result_storage);
-                if (action == KH_ACTION_OVERRIDE)
-                {
-                    result = frame.result;
-                }
-                else
-                {
-                    if (action != KH_ACTION_CONTINUE)
+                    const auto& callback = *iterator;
+                    if ((callback->phases & KH_PHASE_POST) == 0)
                     {
-                        RestoreArguments(
-                            target.prototype,
-                            arguments,
-                            argument_storage,
-                            before_arguments,
-                            before_argument_storage);
-                        Log("post callback returned an invalid action");
+                        continue;
                     }
-                    RestoreResult(
+                    SnapshotValues(
                         target.prototype,
+                        arguments,
+                        argument_storage,
                         result,
+                        result_storage,
+                        before_arguments,
+                        before_argument_storage,
+                        before_result,
+                        before_result_storage);
+                    const KeelHookAction action = InvokeCallback(*callback, frame);
+                    ValidateFrame(
+                        frame,
+                        target,
+                        KH_PHASE_POST,
+                        (original_called ? KH_FRAME_ORIGINAL_CALLED : 0) |
+                            (frame.flags & KH_FRAME_RECALLED),
+                        arguments,
+                        argument_storage,
+                        before_arguments,
+                        before_argument_storage,
                         result_storage,
                         before_result,
                         before_result_storage);
+                    if (action == KH_ACTION_OVERRIDE)
+                    {
+                        result = frame.result;
+                    }
+                    else
+                    {
+                        if (action != KH_ACTION_CONTINUE)
+                        {
+                            RestoreArguments(
+                                target.prototype,
+                                arguments,
+                                argument_storage,
+                                before_arguments,
+                                before_argument_storage);
+                            Log("post callback returned an invalid action");
+                        }
+                        RestoreResult(
+                            target.prototype,
+                            result,
+                            result_storage,
+                            before_result,
+                            before_result_storage);
+                    }
+                    frame.result = result;
                 }
-                frame.result = result;
             }
         }
         catch (...)
@@ -2224,6 +2460,12 @@ private:
             {
                 result = CallOriginal(target, arguments, result_storage);
             }
+        }
+
+        if (control_pushed)
+        {
+            --dispatch_depth_;
+            dispatch_stack_[dispatch_depth_] = nullptr;
         }
 
         StoreNativeResult(target.prototype, result, native_arguments, native_result);
@@ -2261,6 +2503,102 @@ private:
         callback_stack_[callback_depth_] = nullptr;
         LeaveActive(callback.active);
         return action;
+    }
+
+    DispatchControl* CurrentControl(
+        KeelPluginHandle plugin,
+        KeelHookFrame* frame) noexcept
+    {
+        if (!frame || dispatch_depth_ == 0 || callback_depth_ == 0 ||
+            !callback_stack_[callback_depth_ - 1] ||
+            callback_stack_[callback_depth_ - 1]->owner != plugin)
+        {
+            return nullptr;
+        }
+        DispatchControl* control = dispatch_stack_[dispatch_depth_ - 1];
+        return control && control->frame == frame ? control : nullptr;
+    }
+
+    KeelResult CallOriginalControl(KeelPluginHandle plugin, KeelHookFrame* frame)
+    {
+        DispatchControl* control = CurrentControl(plugin, frame);
+        if (!control)
+        {
+            return KEEL_RESULT_NOT_READY;
+        }
+        if (frame->phase != KH_PHASE_PRE)
+        {
+            return KEEL_RESULT_UNSUPPORTED;
+        }
+        if (*control->original_called || *control->superseded)
+        {
+            return KEEL_RESULT_ALREADY_EXISTS;
+        }
+        AggregateStorage storage{};
+        const KeelHookValue value = CallOriginal(
+            *control->target,
+            *control->arguments,
+            storage);
+        CopyValue(
+            control->target->prototype.return_type,
+            control->target->prototype.return_aggregate,
+            value,
+            storage,
+            *control->result,
+            *control->result_storage);
+        frame->result = *control->result;
+        *control->original_called = true;
+        frame->flags |= KH_FRAME_ORIGINAL_CALLED;
+        return KEEL_RESULT_OK;
+    }
+
+    KeelResult RecallControl(KeelPluginHandle plugin, KeelHookFrame* frame)
+    {
+        DispatchControl* control = CurrentControl(plugin, frame);
+        if (!control)
+        {
+            return KEEL_RESULT_NOT_READY;
+        }
+        if (frame->phase != KH_PHASE_PRE || !control->target->closure)
+        {
+            return KEEL_RESULT_UNSUPPORTED;
+        }
+        if (*control->original_called || *control->superseded)
+        {
+            return KEEL_RESULT_ALREADY_EXISTS;
+        }
+        if (target_depth_ >= target_stack_.size())
+        {
+            return KEEL_RESULT_BUSY;
+        }
+        const RecallState* previous_state = recall_state_;
+        const RecallState recall_state{
+            control->target,
+            callback_stack_[callback_depth_ - 1],
+            control->result,
+            control->result_storage,
+            *control->overridden
+        };
+        recall_state_ = &recall_state;
+        AggregateStorage storage{};
+        const KeelHookValue value = CallFunction(
+            *control->target,
+            static_cast<void*>(control->target->closure),
+            *control->arguments,
+            storage);
+        recall_state_ = previous_state;
+        CopyValue(
+            control->target->prototype.return_type,
+            control->target->prototype.return_aggregate,
+            value,
+            storage,
+            *control->result,
+            *control->result_storage);
+        frame->result = *control->result;
+        *control->original_called = true;
+        *control->recalled = true;
+        frame->flags |= KH_FRAME_ORIGINAL_CALLED | KH_FRAME_RECALLED;
+        return KEEL_RESULT_OK;
     }
 
     static void BindValue(
@@ -2509,14 +2847,26 @@ private:
         const std::array<KeelHookValue, KEELHOOK_MAX_ARGUMENTS>& arguments,
         AggregateStorage& result_storage) noexcept
     {
+        return CallFunction(
+            target,
+            target.trampoline.load(std::memory_order_acquire),
+            arguments,
+            result_storage);
+    }
+
+    KeelHookValue CallFunction(
+        TargetRecord& target,
+        void* function,
+        const std::array<KeelHookValue, KEELHOOK_MAX_ARGUMENTS>& arguments,
+        AggregateStorage& result_storage) noexcept
+    {
         KeelHookValue result{};
         InitializeValue(
             target.prototype.return_type,
             target.prototype.return_aggregate,
             result,
             result_storage);
-        void* trampoline = target.trampoline.load(std::memory_order_acquire);
-        DCCallVM* machine = trampoline ? dcNewCallVM(4096) : nullptr;
+        DCCallVM* machine = function ? dcNewCallVM(4096) : nullptr;
         if (!machine)
         {
             Log("original target could not be invoked");
@@ -2533,23 +2883,23 @@ private:
         }
         switch (target.prototype.return_type)
         {
-            case KH_VALUE_VOID: dcCallVoid(machine, trampoline); break;
-            case KH_VALUE_BOOL: result.scalar.boolean = dcCallBool(machine, trampoline) ? KEEL_TRUE : KEEL_FALSE; break;
-            case KH_VALUE_INT8: result.scalar.int8 = dcCallChar(machine, trampoline); break;
-            case KH_VALUE_UINT8: result.scalar.uint8 = BitCopy<std::uint8_t>(dcCallChar(machine, trampoline)); break;
-            case KH_VALUE_INT16: result.scalar.int16 = dcCallShort(machine, trampoline); break;
-            case KH_VALUE_UINT16: result.scalar.uint16 = BitCopy<std::uint16_t>(dcCallShort(machine, trampoline)); break;
-            case KH_VALUE_INT32: result.scalar.int32 = dcCallInt(machine, trampoline); break;
-            case KH_VALUE_UINT32: result.scalar.uint32 = BitCopy<std::uint32_t>(dcCallInt(machine, trampoline)); break;
-            case KH_VALUE_INT64: result.scalar.int64 = dcCallLongLong(machine, trampoline); break;
-            case KH_VALUE_UINT64: result.scalar.uint64 = BitCopy<std::uint64_t>(dcCallLongLong(machine, trampoline)); break;
-            case KH_VALUE_POINTER: result.scalar.pointer = dcCallPointer(machine, trampoline); break;
-            case KH_VALUE_FLOAT32: result.scalar.float32 = dcCallFloat(machine, trampoline); break;
-            case KH_VALUE_FLOAT64: result.scalar.float64 = dcCallDouble(machine, trampoline); break;
+            case KH_VALUE_VOID: dcCallVoid(machine, function); break;
+            case KH_VALUE_BOOL: result.scalar.boolean = dcCallBool(machine, function) ? KEEL_TRUE : KEEL_FALSE; break;
+            case KH_VALUE_INT8: result.scalar.int8 = dcCallChar(machine, function); break;
+            case KH_VALUE_UINT8: result.scalar.uint8 = BitCopy<std::uint8_t>(dcCallChar(machine, function)); break;
+            case KH_VALUE_INT16: result.scalar.int16 = dcCallShort(machine, function); break;
+            case KH_VALUE_UINT16: result.scalar.uint16 = BitCopy<std::uint16_t>(dcCallShort(machine, function)); break;
+            case KH_VALUE_INT32: result.scalar.int32 = dcCallInt(machine, function); break;
+            case KH_VALUE_UINT32: result.scalar.uint32 = BitCopy<std::uint32_t>(dcCallInt(machine, function)); break;
+            case KH_VALUE_INT64: result.scalar.int64 = dcCallLongLong(machine, function); break;
+            case KH_VALUE_UINT64: result.scalar.uint64 = BitCopy<std::uint64_t>(dcCallLongLong(machine, function)); break;
+            case KH_VALUE_POINTER: result.scalar.pointer = dcCallPointer(machine, function); break;
+            case KH_VALUE_FLOAT32: result.scalar.float32 = dcCallFloat(machine, function); break;
+            case KH_VALUE_FLOAT64: result.scalar.float64 = dcCallDouble(machine, function); break;
             case KH_VALUE_AGGREGATE:
                 dcCallAggr(
                     machine,
-                    trampoline,
+                    function,
                     target.prototype.return_aggregate->native.get(),
                     result_storage.data());
                 break;
@@ -2851,6 +3201,7 @@ private:
     }
 
     KeelHookService& service_;
+    KeelHookApiV3 api_v3_{};
     KeelHookApi api_{};
     mutable std::mutex registry_mutex_;
     bool shutting_down_{};
@@ -2866,17 +3217,61 @@ private:
     std::vector<std::shared_ptr<TargetRecord>> retired_targets_;
     std::vector<safetyhook::IpRange> entry_hazards_;
     std::string service_profile_;
+    std::unordered_map<std::string, CompatibilityTargetRecord> profile_targets_;
 
     inline static std::atomic<Implementation*> active_{};
     inline static thread_local std::array<const CallbackRecord*, 128> callback_stack_{};
     inline static thread_local std::size_t callback_depth_{};
     inline static thread_local std::array<const TargetRecord*, 64> target_stack_{};
     inline static thread_local std::size_t target_depth_{};
+    inline static thread_local std::array<DispatchControl*, 64> dispatch_stack_{};
+    inline static thread_local std::size_t dispatch_depth_{};
+    inline static thread_local const RecallState* recall_state_{};
 };
+
+std::vector<KeelHookService::TargetSnapshot>
+KeelHookService::Implementation::Snapshots() const
+{
+    std::scoped_lock lock(registry_mutex_);
+    std::vector<KeelHookService::TargetSnapshot> output;
+    output.reserve(targets_.size());
+    for (const auto& [handle, target] : targets_)
+    {
+        KeelHookService::TargetSnapshot snapshot{
+            handle,
+            target->key.mechanism,
+            reinterpret_cast<std::uintptr_t>(target->address),
+            target->module_path.string(),
+            target->leases.size(),
+            target->active.load(std::memory_order_acquire),
+            {}
+        };
+        snapshot.callbacks.reserve(target->callbacks.size());
+        for (const auto& callback : target->callbacks)
+        {
+            snapshot.callbacks.push_back({
+                callback->handle,
+                callback->owner,
+                callback->phases,
+                callback->priority,
+                callback->enabled.load(std::memory_order_acquire),
+                callback->active.load(std::memory_order_acquire)
+            });
+        }
+        output.push_back(std::move(snapshot));
+    }
+    std::sort(output.begin(), output.end(), [](const auto& left, const auto& right) {
+        return left.handle < right.handle;
+    });
+    return output;
+}
 
 KeelHookService::KeelHookService(Host& host)
     : host_(host),
-      implementation_(std::make_unique<Implementation>(*this, host.compatibility_profile_))
+      implementation_(std::make_unique<Implementation>(
+          *this,
+          host.compatibility_profile_,
+          host.compatibility_targets_))
 {
 }
 
@@ -2885,6 +3280,11 @@ KeelHookService::~KeelHookService() = default;
 const KeelHookApi& KeelHookService::Api() const noexcept
 {
     return implementation_->Api();
+}
+
+const KeelHookApiV3& KeelHookService::ApiV3() const noexcept
+{
+    return implementation_->ApiV3();
 }
 
 void KeelHookService::Authorize(
@@ -2908,6 +3308,11 @@ KeelResult KeelHookService::Deactivate(KeelPluginHandle plugin)
 KeelResult KeelHookService::ReleasePlugin(KeelPluginHandle plugin)
 {
     return implementation_->ReleasePlugin(plugin);
+}
+
+std::vector<KeelHookService::TargetSnapshot> KeelHookService::Snapshots() const
+{
+    return implementation_->Snapshots();
 }
 
 bool KeelHookService::Shutdown()

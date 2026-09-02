@@ -33,6 +33,7 @@ namespace source2
 {
 
 class Service;
+class Runtime;
 
 }
 
@@ -44,6 +45,13 @@ class Service;
 }
 
 namespace entities
+{
+
+class Service;
+
+}
+
+namespace services
 {
 
 class Service;
@@ -520,8 +528,10 @@ private:
     friend class Plugin;
     friend class kh::Service;
     friend class source2::Service;
+    friend class source2::Runtime;
     friend class schema::Service;
     friend class entities::Service;
+    friend class services::Service;
     template <typename Type>
     friend class detail::AbiPluginAdapter;
     template <typename Type>

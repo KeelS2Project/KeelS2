@@ -25,7 +25,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 
-TOOL_VERSION = "1"
+TOOL_VERSION = "2"
 SCHEMA_VERSION = 1
 PROJECT = "KeelS2"
 DEFAULT_BRANCH = "release-engineering"
@@ -271,6 +271,7 @@ def package_entries(platform_key: str) -> tuple[str, ...]:
             "addons/keels2/compatibility/cs2-2000888-win64.accepted.tsv",
             "addons/keels2/compatibility/cs2-2000897-linuxsteamrt64.accepted.tsv",
             "addons/keels2/compatibility/cs2-2000897-win64.accepted.tsv",
+            "addons/keels2/bin/win64/keels2_game_cs2.dll",
             "addons/keels2/bin/win64/keels2_host.dll",
             "addons/keels2/bin/win64/server.dll",
             "addons/keels2/plugins/win64/keels2_basic.dll",
@@ -278,6 +279,7 @@ def package_entries(platform_key: str) -> tuple[str, ...]:
             "addons/keels2/plugins/win64/keels2_entities.dll",
             "addons/keels2/plugins/win64/keels2_hooks.dll",
             "addons/keels2/plugins/win64/keels2_lifecycle.dll",
+            "addons/keels2/plugins/win64/keels2_no_damage.dll",
             "addons/keels2/plugins/win64/keels2_runtime.dll",
             "addons/keels2/plugins/win64/keels2_sample.dll",
             "addons/keels2/tools/win64/keels2_compatibility_review.exe",
@@ -294,6 +296,7 @@ def package_entries(platform_key: str) -> tuple[str, ...]:
             "addons/keels2/compatibility/cs2-2000888-win64.accepted.tsv",
             "addons/keels2/compatibility/cs2-2000897-linuxsteamrt64.accepted.tsv",
             "addons/keels2/compatibility/cs2-2000897-win64.accepted.tsv",
+            "addons/keels2/bin/linuxsteamrt64/libkeels2_game_cs2.so",
             "addons/keels2/bin/linuxsteamrt64/libkeels2_host.so",
             "addons/keels2/bin/linuxsteamrt64/libserver.so",
             "addons/keels2/plugins/linuxsteamrt64/keels2_basic.so",
@@ -301,6 +304,7 @@ def package_entries(platform_key: str) -> tuple[str, ...]:
             "addons/keels2/plugins/linuxsteamrt64/keels2_entities.so",
             "addons/keels2/plugins/linuxsteamrt64/keels2_hooks.so",
             "addons/keels2/plugins/linuxsteamrt64/keels2_lifecycle.so",
+            "addons/keels2/plugins/linuxsteamrt64/keels2_no_damage.so",
             "addons/keels2/plugins/linuxsteamrt64/keels2_runtime.so",
             "addons/keels2/plugins/linuxsteamrt64/keels2_sample.so",
             "addons/keels2/tools/linuxsteamrt64/keels2_compatibility_review",
@@ -309,8 +313,58 @@ def package_entries(platform_key: str) -> tuple[str, ...]:
     return ()
 
 
+def sdk_entries() -> tuple[str, ...]:
+    return (
+        "KeelS2/SDK/LICENSE",
+        "KeelS2/SDK/THIRD_PARTY_NOTICES.md",
+        "KeelS2/SDK/include/keels2/bootstrap_api.h",
+        "KeelS2/SDK/include/keels2/convar.h",
+        "KeelS2/SDK/include/keels2/entities.h",
+        "KeelS2/SDK/include/keels2/entities.hpp",
+        "KeelS2/SDK/include/keels2/game_adapter.hpp",
+        "KeelS2/SDK/include/keels2/keelhook.h",
+        "KeelS2/SDK/include/keels2/keelhook.hpp",
+        "KeelS2/SDK/include/keels2/keels2.hpp",
+        "KeelS2/SDK/include/keels2/lifecycle.h",
+        "KeelS2/SDK/include/keels2/plugin.h",
+        "KeelS2/SDK/include/keels2/plugin.hpp",
+        "KeelS2/SDK/include/keels2/plugins.h",
+        "KeelS2/SDK/include/keels2/schema.h",
+        "KeelS2/SDK/include/keels2/schema.hpp",
+        "KeelS2/SDK/include/keels2/services.h",
+        "KeelS2/SDK/include/keels2/services.hpp",
+        "KeelS2/SDK/include/keels2/source2.h",
+        "KeelS2/SDK/include/keels2/source2.hpp",
+        "KeelS2/SDK/include/keels2/source2_authoring.h",
+        "KeelS2/SDK/include/keels2/source2_callbacks.h",
+        "KeelS2/SDK/include/keels2/source2_hooks.hpp",
+        "KeelS2/SDK/include/keels2/source2_lifecycle.hpp",
+        "KeelS2/SDK/include/keels2/source2_runtime.h",
+        "KeelS2/SDK/include/keels2/source2_runtime.hpp",
+        "KeelS2/SDK/include/keels2/source2_sdk.hpp",
+        "KeelS2/SDK/lib/cmake/KeelS2/KeelS2Config.cmake",
+        "KeelS2/SDK/lib/cmake/KeelS2/KeelS2ConfigVersion.cmake",
+        "KeelS2/SDK/lib/cmake/KeelS2/KeelS2GameAdapter.cmake",
+        "KeelS2/SDK/lib/cmake/KeelS2/KeelS2Plugin.cmake",
+        "KeelS2/SDK/lib/cmake/KeelS2/KeelS2SDKTargets.cmake",
+        "KeelS2/SDK/lib/cmake/KeelS2/KeelS2SourceSDK.cmake",
+    )
+
+
 def artifact_names(version: str, platform_key: str) -> dict[str, str]:
-    prefix = f"KeelS2-v{version}-{platform_key}"
+    prefix = f"KeelS2-v{version}-{platform_key}-runtime"
+    extension = "zip" if platform_key == "windows-x86_64" else "tar.gz"
+    archive = f"{prefix}.{extension}"
+    return {
+        "archive": archive,
+        "checksum": f"{archive}.sha256",
+        "contents": f"{prefix}.contents.sha256",
+        "manifest": f"{prefix}.build.json",
+    }
+
+
+def sdk_artifact_names(version: str, platform_key: str) -> dict[str, str]:
+    prefix = f"KeelS2-v{version}-{platform_key}-sdk"
     extension = "zip" if platform_key == "windows-x86_64" else "tar.gz"
     archive = f"{prefix}.{extension}"
     return {
@@ -325,6 +379,7 @@ def release_asset_names(version: str) -> list[str]:
     names: list[str] = []
     for platform_key in ("linux-x86_64", "windows-x86_64"):
         names.extend(artifact_names(version, platform_key).values())
+        names.extend(sdk_artifact_names(version, platform_key).values())
     names.append(f"KeelS2-v{version}-SHA256SUMS.txt")
     return sorted(names)
 
@@ -341,6 +396,20 @@ def verify_package_inventory(package_root: Path, entries: tuple[str, ...]) -> No
         missing = sorted(expected - actual)
         extra = sorted(actual - expected)
         stop(f"package entry set differs; missing={missing} extra={extra}")
+
+
+def verify_sdk_inventory(package_root: Path, entries: tuple[str, ...]) -> None:
+    prefix = PurePosixPath("KeelS2/SDK")
+    actual = {
+        (prefix / PurePosixPath(path.relative_to(package_root).as_posix())).as_posix()
+        for path in package_root.rglob("*")
+        if path.is_file()
+    }
+    expected = set(entries)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        extra = sorted(actual - expected)
+        stop(f"SDK package entry set differs; missing={missing} extra={extra}")
 
 
 def content_hashes(package_root: Path, entries: tuple[str, ...]) -> dict[str, str]:
@@ -456,8 +525,12 @@ def validate_member_name(name: str) -> None:
         stop(f"unsafe archive entry: {name}")
 
 
-def archive_payload_hashes(archive: Path, platform_key: str) -> dict[str, str]:
-    expected = set(package_entries(platform_key))
+def archive_payload_hashes(
+    archive: Path,
+    platform_key: str,
+    entries: tuple[str, ...] | None = None,
+) -> dict[str, str]:
+    expected = set(entries if entries is not None else package_entries(platform_key))
     actual: dict[str, str] = {}
     if platform_key == "windows-x86_64":
         try:
@@ -508,6 +581,50 @@ def sidecar_hash(path: Path, expected_name: str) -> str:
     return match.group(1)
 
 
+def verify_sdk_set(release_dir: Path, version: str, platform_key: str) -> dict[str, object]:
+    names = sdk_artifact_names(version, platform_key)
+    paths = {key: release_dir / name for key, name in names.items()}
+    for path in paths.values():
+        if not path.is_file():
+            stop(f"required SDK artifact was not found: {path}")
+    archive_hash = sha256_file(paths["archive"])
+    if sidecar_hash(paths["checksum"], names["archive"]) != archive_hash:
+        stop(f"SDK archive checksum sidecar does not match: {paths['archive']}")
+    expected_contents = parse_hash_manifest(paths["contents"])
+    entries = sdk_entries()
+    if set(expected_contents) != set(entries):
+        stop(f"SDK content manifest entry set differs: {paths['contents']}")
+    actual_contents = archive_payload_hashes(paths["archive"], platform_key, entries)
+    if expected_contents != actual_contents:
+        stop(f"SDK archive payload hashes do not match: {paths['contents']}")
+    manifest = strict_json(paths["manifest"])
+    expected_fields: dict[str, object] = {
+        "schema": SCHEMA_VERSION,
+        "project": PROJECT,
+        "version": version,
+        "tag": f"v{version}",
+        "platform": platform_key,
+        "architecture": "x86_64",
+        "artifact_kind": "sdk",
+        "archive": names["archive"],
+        "archive_sha256": archive_hash,
+        "contents": names["contents"],
+        "contents_sha256": sha256_file(paths["contents"]),
+        "tests_passed": True,
+    }
+    for key, expected in expected_fields.items():
+        if manifest.get(key) != expected:
+            stop(f"SDK build manifest field {key} differs in {paths['manifest']}")
+    if not isinstance(manifest.get("tool_version"), str) or not manifest.get("tool_version"):
+        stop(f"invalid tool version in SDK build manifest: {paths['manifest']}")
+    if not isinstance(manifest.get("configuration"), str) or not manifest.get("configuration"):
+        stop(f"invalid configuration in SDK build manifest: {paths['manifest']}")
+    commit = manifest.get("commit")
+    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        stop(f"invalid commit in SDK build manifest: {paths['manifest']}")
+    return manifest
+
+
 def verify_platform_set(release_dir: Path, version: str, platform_key: str) -> dict[str, object]:
     names = artifact_names(version, platform_key)
     paths = {key: release_dir / name for key, name in names.items()}
@@ -531,6 +648,7 @@ def verify_platform_set(release_dir: Path, version: str, platform_key: str) -> d
         "tag": f"v{version}",
         "platform": platform_key,
         "architecture": "x86_64",
+        "artifact_kind": "runtime",
         "archive": names["archive"],
         "archive_sha256": archive_hash,
         "contents": names["contents"],
@@ -547,6 +665,11 @@ def verify_platform_set(release_dir: Path, version: str, platform_key: str) -> d
     commit = manifest.get("commit")
     if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
         stop(f"invalid commit in build manifest: {paths['manifest']}")
+    sdk_manifest = verify_sdk_set(release_dir, version, platform_key)
+    if sdk_manifest.get("commit") != commit:
+        stop(f"runtime and SDK artifacts were built from different commits for {platform_key}")
+    if sdk_manifest.get("configuration") != manifest.get("configuration"):
+        stop(f"runtime and SDK artifacts use different configurations for {platform_key}")
     return manifest
 
 
@@ -630,6 +753,7 @@ def build_release(args: argparse.Namespace) -> None:
         "platform": platform_key,
         "platform_directory": platform_dir,
         "architecture": "x86_64",
+        "artifact_kind": "runtime",
         "configuration": configuration,
         "commit": commit,
         "commit_timestamp": epoch,
@@ -644,12 +768,69 @@ def build_release(args: argparse.Namespace) -> None:
         "host": platform.platform(),
     }
     atomic_text(manifest_path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    with tempfile.TemporaryDirectory(prefix="keels2-sdk-package-", dir=build_dir) as temporary_text:
+        sdk_root = Path(temporary_text) / "sdk"
+        run(
+            [
+                "cmake",
+                "--install",
+                str(build_dir),
+                "--prefix",
+                str(sdk_root),
+                "--config",
+                configuration,
+            ],
+            cwd=repo,
+        )
+        sdk_package_entries = sdk_entries()
+        verify_sdk_inventory(sdk_root, sdk_package_entries)
+        sdk_hashes = content_hashes(sdk_root, sdk_package_entries)
+        sdk_names = sdk_artifact_names(version, platform_key)
+        sdk_archive = release_dir / sdk_names["archive"]
+        sdk_contents = release_dir / sdk_names["contents"]
+        sdk_checksum = release_dir / sdk_names["checksum"]
+        sdk_manifest_path = release_dir / sdk_names["manifest"]
+        atomic_text(sdk_contents, content_manifest_text(sdk_hashes))
+        if archive_kind == "zip":
+            create_zip(sdk_root, sdk_archive, sdk_package_entries, epoch)
+        else:
+            create_tar_gz(sdk_root, sdk_archive, sdk_package_entries, epoch)
+        sdk_archive_hash = sha256_file(sdk_archive)
+        atomic_text(sdk_checksum, f"{sdk_archive_hash}  {sdk_archive.name}\n")
+        sdk_manifest = dict(manifest)
+        sdk_manifest.update({
+            "artifact_kind": "sdk",
+            "archive": sdk_archive.name,
+            "archive_sha256": sdk_archive_hash,
+            "contents": sdk_contents.name,
+            "contents_sha256": sha256_file(sdk_contents),
+        })
+        atomic_text(
+            sdk_manifest_path,
+            json.dumps(sdk_manifest, indent=2, sort_keys=True) + "\n")
     verify_platform_set(release_dir, version, platform_key)
+    run(
+        [
+            sys.executable,
+            str(repo / "tools" / "live" / "package-keels2-live.py"),
+            "--repo",
+            str(repo),
+            "--build-dir",
+            str(build_dir),
+            "--output-dir",
+            str(release_dir),
+            "--configuration",
+            configuration,
+        ],
+        cwd=repo,
+    )
     say()
     say(f"{platform_key} release artifact: PASS")
     say(f"Commit: {commit}")
     say(f"Archive: {archive}")
     say(f"SHA-256: {archive_hash}")
+    say(f"SDK archive: {sdk_archive}")
+    say(f"SDK SHA-256: {sdk_archive_hash}")
 
 
 def verify_release(args: argparse.Namespace) -> dict[str, object]:
@@ -1016,6 +1197,13 @@ def self_test(_: argparse.Namespace) -> None:
                 create_zip(package_root, archive, entries, 1785900000)
             else:
                 create_tar_gz(package_root, archive, entries, 1785900000)
+            repeated_archive = temporary / f"{platform_key}-runtime-repeat"
+            if platform_key == "windows-x86_64":
+                create_zip(package_root, repeated_archive, entries, 1785900000)
+            else:
+                create_tar_gz(package_root, repeated_archive, entries, 1785900000)
+            if sha256_file(repeated_archive) != sha256_file(archive):
+                stop(f"runtime archive is not deterministic for {platform_key}")
             archive_hash = sha256_file(archive)
             atomic_text(release_dir / names["checksum"], f"{archive_hash}  {archive.name}\n")
             manifest = {
@@ -1028,6 +1216,7 @@ def self_test(_: argparse.Namespace) -> None:
                 "architecture": "x86_64",
                 "configuration": "RelWithDebInfo",
                 "commit": "a" * 40,
+                "artifact_kind": "runtime",
                 "archive": archive.name,
                 "archive_sha256": archive_hash,
                 "contents": contents.name,
@@ -1035,6 +1224,45 @@ def self_test(_: argparse.Namespace) -> None:
                 "tests_passed": True,
             }
             atomic_text(release_dir / names["manifest"], json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+            sdk_root = temporary / platform_key / "sdk"
+            sdk_package_entries = sdk_entries()
+            for index, entry in enumerate(sdk_package_entries):
+                relative = PurePosixPath(entry)
+                target = sdk_root / Path(*relative.parts[2:])
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(f"{platform_key}:sdk:{index}:{entry}\n".encode())
+            verify_sdk_inventory(sdk_root, sdk_package_entries)
+            sdk_names = sdk_artifact_names(version, platform_key)
+            sdk_contents = release_dir / sdk_names["contents"]
+            sdk_hashes = content_hashes(sdk_root, sdk_package_entries)
+            atomic_text(sdk_contents, content_manifest_text(sdk_hashes))
+            sdk_archive = release_dir / sdk_names["archive"]
+            if platform_key == "windows-x86_64":
+                create_zip(sdk_root, sdk_archive, sdk_package_entries, 1785900000)
+            else:
+                create_tar_gz(sdk_root, sdk_archive, sdk_package_entries, 1785900000)
+            repeated_sdk_archive = temporary / f"{platform_key}-sdk-repeat"
+            if platform_key == "windows-x86_64":
+                create_zip(sdk_root, repeated_sdk_archive, sdk_package_entries, 1785900000)
+            else:
+                create_tar_gz(sdk_root, repeated_sdk_archive, sdk_package_entries, 1785900000)
+            if sha256_file(repeated_sdk_archive) != sha256_file(sdk_archive):
+                stop(f"SDK archive is not deterministic for {platform_key}")
+            sdk_archive_hash = sha256_file(sdk_archive)
+            atomic_text(
+                release_dir / sdk_names["checksum"],
+                f"{sdk_archive_hash}  {sdk_archive.name}\n")
+            sdk_manifest = dict(manifest)
+            sdk_manifest.update({
+                "artifact_kind": "sdk",
+                "archive": sdk_archive.name,
+                "archive_sha256": sdk_archive_hash,
+                "contents": sdk_contents.name,
+                "contents_sha256": sha256_file(sdk_contents),
+            })
+            atomic_text(
+                release_dir / sdk_names["manifest"],
+                json.dumps(sdk_manifest, indent=2, sort_keys=True) + "\n")
             verify_platform_set(release_dir, version, platform_key)
         verify_release(argparse.Namespace(version="0.1.0-selftest", release_dir=str(release_dir)))
         bad_zip = temporary / "bad.zip"

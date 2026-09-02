@@ -14,6 +14,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace keels2::host
 {
@@ -23,6 +24,16 @@ class Host;
 class ConVarService final
 {
 public:
+    struct Snapshot
+    {
+        KeelConVarHandle handle{};
+        KeelPluginHandle owner{};
+        std::string name;
+        bool created{};
+        bool enabled{};
+        std::uint32_t active{};
+    };
+
     ConVarService(Host& host, GameAdapter& adapter);
     ~ConVarService();
     ConVarService(const ConVarService&) = delete;
@@ -33,6 +44,7 @@ public:
     KeelResult Deactivate(KeelPluginHandle plugin);
     KeelResult ReleasePlugin(KeelPluginHandle plugin);
     bool Shutdown();
+    std::vector<Snapshot> Snapshots() const;
     KeelResult CreateNative(
         KeelPluginHandle plugin,
         const KeelConVarSpec* spec,

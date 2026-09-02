@@ -364,6 +364,28 @@ KeelResult RemoveCallback(KeelPluginHandle, KeelHookCallbackHandle callback)
     return KEEL_RESULT_OK;
 }
 
+KeelResult CallOriginal(KeelPluginHandle, KeelHookFrame*)
+{
+    return KEEL_RESULT_UNSUPPORTED;
+}
+
+KeelResult Recall(KeelPluginHandle, KeelHookFrame*)
+{
+    return KEEL_RESULT_UNSUPPORTED;
+}
+
+KeelResult SetCallbackEnabled(
+    KeelPluginHandle,
+    KeelHookCallbackHandle callback,
+    KeelBool enabled)
+{
+    std::scoped_lock lock(g_lease_backend.mutex);
+    return g_lease_backend.callbacks.contains(callback) &&
+            (enabled == KEEL_FALSE || enabled == KEEL_TRUE)
+        ? KEEL_RESULT_OK
+        : KEEL_RESULT_NOT_FOUND;
+}
+
 const KeelHookApi g_lease_api{
     sizeof(KeelHookApi),
     KEELHOOK_API_VERSION,
@@ -371,7 +393,10 @@ const KeelHookApi g_lease_api{
     &ReleaseTarget,
     &AddCallback,
     &RemoveCallback,
-    &ResolveVirtualTarget
+    &ResolveVirtualTarget,
+    &CallOriginal,
+    &Recall,
+    &SetCallbackEnabled
 };
 
 void MockLog(KeelPluginHandle, KeelLogLevel, const char*)
@@ -943,7 +968,7 @@ bool CheckMalformedFrames()
         return false;
     }
     malformed = valid;
-    malformed.flags = 2;
+    malformed.flags = 4;
     if (!check(malformed))
     {
         return false;

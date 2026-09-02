@@ -10,7 +10,8 @@ extern "C" {
 #endif
 
 #define KEELHOOK_SERVICE_NAME "keels2.keelhook"
-#define KEELHOOK_API_VERSION 3u
+#define KEELHOOK_API_VERSION_3 3u
+#define KEELHOOK_API_VERSION 4u
 #define KEELHOOK_MAX_ARGUMENTS 32u
 #define KEELHOOK_MAX_AGGREGATE_SIZE 64u
 #define KEELHOOK_MAX_AGGREGATE_ALIGNMENT 16u
@@ -47,6 +48,7 @@ typedef uint64_t KeelHookCallbackHandle;
 #define KH_TARGET_ADDRESS 1u
 #define KH_TARGET_SYMBOL 2u
 #define KH_TARGET_PATTERN 3u
+#define KH_TARGET_PROFILE 4u
 
 #define KH_MECHANISM_DETOUR 1u
 #define KH_MECHANISM_VIRTUAL 2u
@@ -63,6 +65,7 @@ typedef uint64_t KeelHookCallbackHandle;
 #define KH_ACTION_SUPERSEDE 2u
 
 #define KH_FRAME_ORIGINAL_CALLED 1u
+#define KH_FRAME_RECALLED 2u
 
 typedef union KeelHookScalar
 {
@@ -177,6 +180,29 @@ typedef struct KeelHookCallbackSpec
     void* user_data;
 } KeelHookCallbackSpec;
 
+typedef struct KeelHookApiV3
+{
+    uint32_t size;
+    uint32_t api_version;
+    KeelResult (*resolve_target)(
+        KeelPluginHandle plugin,
+        const KeelHookTargetSpec* spec,
+        const KeelHookPrototype* prototype,
+        KeelHookTargetHandle* target);
+    KeelResult (*release_target)(KeelPluginHandle plugin, KeelHookTargetHandle target);
+    KeelResult (*add_callback)(
+        KeelPluginHandle plugin,
+        KeelHookTargetHandle target,
+        const KeelHookCallbackSpec* spec,
+        KeelHookCallbackHandle* callback);
+    KeelResult (*remove_callback)(KeelPluginHandle plugin, KeelHookCallbackHandle callback);
+    KeelResult (*resolve_virtual_target)(
+        KeelPluginHandle plugin,
+        const KeelHookVirtualTargetSpec* spec,
+        const KeelHookPrototype* prototype,
+        KeelHookTargetHandle* target);
+} KeelHookApiV3;
+
 typedef struct KeelHookApi
 {
     uint32_t size;
@@ -198,6 +224,12 @@ typedef struct KeelHookApi
         const KeelHookVirtualTargetSpec* spec,
         const KeelHookPrototype* prototype,
         KeelHookTargetHandle* target);
+    KeelResult (*call_original)(KeelPluginHandle plugin, KeelHookFrame* frame);
+    KeelResult (*recall)(KeelPluginHandle plugin, KeelHookFrame* frame);
+    KeelResult (*set_callback_enabled)(
+        KeelPluginHandle plugin,
+        KeelHookCallbackHandle callback,
+        KeelBool enabled);
 } KeelHookApi;
 
 #ifdef __cplusplus

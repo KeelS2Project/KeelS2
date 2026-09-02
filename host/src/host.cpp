@@ -1,10 +1,13 @@
 #include "host.h"
 #include "convar_service.h"
+#include "game_adapter_loader.h"
 #include "keelhook_service.h"
 #include "lifecycle_service.h"
 #include "plugin_service.h"
+#include "published_service_registry.h"
 #include "schema_entity_service.h"
 #include "source2_callbacks_service.h"
+#include "source2_runtime_service.h"
 
 #include <keels2/platform/console.h>
 #include <keels2/platform/diagnostic_trace.h>
@@ -95,6 +98,37 @@ std::uint32_t Host::Start(const KeelHostStartInfo& info)
         Write(KEEL_LOG_ERROR, "host compatibility information is incomplete");
         return KEELS2_HOST_START_FAILED;
     }
+    if (info.compatibility->reserved != 0 || info.compatibility->target_count > 256 ||
+        ((info.compatibility->target_count == 0) != (info.compatibility->targets == nullptr)))
+    {
+        Write(KEEL_LOG_ERROR, "host compatibility targets are invalid");
+        return KEELS2_HOST_START_FAILED;
+    }
+    std::vector<CompatibilityTargetRecord> compatibility_targets;
+    compatibility_targets.reserve(info.compatibility->target_count);
+    for (std::uint32_t index{}; index < info.compatibility->target_count; ++index)
+    {
+        const auto& target = info.compatibility->targets[index];
+        if (target.size != sizeof(KeelHostCompatibilityTargetInfo) ||
+            !ValidMetadataText(target.name, 127, false) ||
+            !ValidMetadataText(target.module, 4096, false) ||
+            !ValidMetadataText(target.pattern, 16384, false) ||
+            std::any_of(
+                compatibility_targets.begin(),
+                compatibility_targets.end(),
+                [&](const auto& candidate) { return candidate.name == target.name; }))
+        {
+            Write(KEEL_LOG_ERROR, "host compatibility target is malformed or duplicated");
+            return KEELS2_HOST_START_FAILED;
+        }
+        compatibility_targets.push_back({
+            target.name,
+            target.module,
+            target.pattern,
+            target.offset,
+            target.occurrence
+        });
+    }
 
     state_ = HostState::starting;
     try
@@ -103,11 +137,24 @@ std::uint32_t Host::Start(const KeelHostStartInfo& info)
         platform_ = info.platform;
         game_version_ = info.compatibility->game_version;
         compatibility_profile_ = info.compatibility->profile;
+        compatibility_targets_ = std::move(compatibility_targets);
         bootstrap_directory_ = std::filesystem::path(info.bootstrap_directory);
-        adapter_ = CreateGameAdapter();
-        if (!adapter_ || game_ != adapter_->Name())
+        const GameAdapterHostApi adapter_host{
+            sizeof(GameAdapterHostApi),
+            kGameAdapterAbiVersion,
+            &BeginGameCommandDispatch,
+            &EndGameCommandDispatch
+        };
+        adapter_module_ = std::make_unique<GameAdapterModule>();
+        std::string error;
+        if (!adapter_module_->Load(
+                bootstrap_directory_,
+                game_.c_str(),
+                platform_.c_str(),
+                adapter_host,
+                error))
         {
-            Write(KEEL_LOG_ERROR, "selected game adapter does not match host start information");
+            Write(KEEL_LOG_ERROR, "game adapter module failed: " + error);
             state_ = HostState::stopping;
             if (ReleaseResources(state_lock))
             {
@@ -116,8 +163,8 @@ std::uint32_t Host::Start(const KeelHostStartInfo& info)
             }
             return KEELS2_HOST_START_RETAINED;
         }
+        adapter_ = adapter_module_->Get();
 
-        std::string error;
         if (!adapter_->Start(
                 info.engine_factory,
                 info.server_factory,
@@ -411,6 +458,11 @@ bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
     retired_commands_.clear();
     WriteShutdownTrace("host command records cleared");
 
+    if (published_services_)
+    {
+        published_services_->Shutdown();
+    }
+
     WriteShutdownTrace("plugin unload loop begin");
     for (auto iterator = load_order_.rbegin(); iterator != load_order_.rend(); ++iterator)
     {
@@ -442,7 +494,7 @@ bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
         );
         plugin->load = nullptr;
         plugin->unload = nullptr;
-        plugin->library.Close();
+        ClosePluginImage(*plugin);
         WriteShutdownTrace("plugin module released", name);
         Write(KEEL_LOG_INFO, "plugin unloaded: [" + display_id + "] " + name);
     }
@@ -452,10 +504,13 @@ bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
     WriteShutdownTrace("plugin load order cleared");
     plugins_.clear();
     WriteShutdownTrace("plugin records cleared");
+    published_services_.reset();
+    WriteShutdownTrace("published service registry released");
     plugin_service_.reset();
     WriteShutdownTrace("plugin service released");
     source2_callbacks_.reset();
     WriteShutdownTrace("Source 2 callback service released");
+    source2_runtime_.reset();
     convars_.reset();
     WriteShutdownTrace("ConVar service released");
     schema_entities_.reset();
@@ -470,7 +525,8 @@ bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
         adapter_->Stop();
         WriteShutdownTrace("game adapter stop complete");
     }
-    adapter_.reset();
+    adapter_ = nullptr;
+    adapter_module_.reset();
     WriteShutdownTrace("game adapter released");
     source2_api_v1_ = {};
     source2_api_ = {};
@@ -483,6 +539,7 @@ bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
     platform_.clear();
     game_version_.clear();
     compatibility_profile_.clear();
+    compatibility_targets_.clear();
     bootstrap_directory_.clear();
     plugin_directory_.clear();
     WriteShutdownTrace("host state cleared");
@@ -741,6 +798,19 @@ KeelResult Host::QueryService(
         *service = &source2_authoring_api_;
         return KEEL_RESULT_OK;
     }
+    if (std::strcmp(name, KEELS2_SOURCE2_RUNTIME_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_SOURCE2_RUNTIME_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!source2_runtime_)
+        {
+            source2_runtime_ = std::make_unique<Source2RuntimeService>(*this, *adapter_);
+        }
+        *service = &source2_runtime_->Api();
+        return KEEL_RESULT_OK;
+    }
     if (std::strcmp(name, KEELS2_SOURCE2_CALLBACKS_SERVICE_NAME) == 0)
     {
         if (version != KEELS2_SOURCE2_CALLBACKS_API_VERSION)
@@ -816,6 +886,19 @@ KeelResult Host::QueryService(
         *service = &plugin_service_->Api();
         return KEEL_RESULT_OK;
     }
+    if (std::strcmp(name, KEELS2_SERVICES_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_SERVICES_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!published_services_)
+        {
+            published_services_ = std::make_unique<PublishedServiceRegistry>(*this);
+        }
+        *service = &published_services_->Api();
+        return KEEL_RESULT_OK;
+    }
     if (std::strcmp(name, KEELS2_SCHEMA_SERVICE_NAME) == 0 ||
         std::strcmp(name, KEELS2_ENTITIES_SERVICE_NAME) == 0)
     {
@@ -836,9 +919,11 @@ KeelResult Host::QueryService(
     }
     if (std::strcmp(name, KEELHOOK_SERVICE_NAME) != 0)
     {
-        return KEEL_RESULT_NOT_FOUND;
+        return published_services_
+            ? published_services_->Query(plugin, name, version, service)
+            : KEEL_RESULT_NOT_FOUND;
     }
-    if (version != KEELHOOK_API_VERSION)
+    if (version != KEELHOOK_API_VERSION && version != KEELHOOK_API_VERSION_3)
     {
         return KEEL_RESULT_INCOMPATIBLE;
     }
@@ -848,9 +933,11 @@ KeelResult Host::QueryService(
     }
     keelhook_->Authorize(
         plugin,
-        owner->path,
+        owner->transient_path.empty() ? owner->path : owner->transient_path,
         owner->state == PluginState::loaded && !owner->loading);
-    *service = &keelhook_->Api();
+    *service = version == KEELHOOK_API_VERSION
+        ? static_cast<const void*>(&keelhook_->Api())
+        : static_cast<const void*>(&keelhook_->ApiV3());
     return KEEL_RESULT_OK;
 }
 
@@ -897,8 +984,8 @@ KeelResult Host::QuerySource2NamedInterface(
     {
         return KEEL_RESULT_INCOMPATIBLE;
     }
-    if ((factory != KEELS2_SOURCE2_FACTORY_ENGINE &&
-            factory != KEELS2_SOURCE2_FACTORY_SERVER) || !interface_name[0])
+    if ((factory < KEELS2_SOURCE2_FACTORY_ENGINE ||
+            factory > KEELS2_SOURCE2_FACTORY_SERVER_SERVICE) || !interface_name[0])
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
@@ -1259,21 +1346,21 @@ void Host::WriteLine(const std::string& message)
     platform::WriteEngineConsole(line.c_str());
 }
 
-bool BeginGameCommandDispatch() noexcept
+std::uint32_t BeginGameCommandDispatch() noexcept
 {
     g_dispatch_entries.fetch_add(1, std::memory_order_acq_rel);
     try
     {
         if (Host::Instance().CommandDispatchOpen())
         {
-            return true;
+            return 1;
         }
     }
     catch (...)
     {
     }
     ReleaseDispatchEntry();
-    return false;
+    return 0;
 }
 
 void EndGameCommandDispatch() noexcept

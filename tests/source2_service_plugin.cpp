@@ -1,7 +1,11 @@
 #include <keels2/source2.hpp>
+#include <keels2/source2_runtime.hpp>
 
 #include <array>
+#include <charconv>
 #include <cstring>
+#include <string>
+#include <string_view>
 
 #if !defined(KEELS2_SOURCE2_EXPECTED_PROFILE) || \
     !defined(KEELS2_SOURCE2_EXPECTED_CVAR_MODULE)
@@ -25,7 +29,10 @@ public:
     {
         context_ = &context;
         if (!ValidateRawService(context) ||
-            service_.Connect(context) != KEEL_RESULT_OK || !ValidateInterfaces() ||
+            service_.Connect(context) != KEEL_RESULT_OK ||
+            runtime_.Connect(context) != KEEL_RESULT_OK ||
+            runtime_.ServerCommand("echo loading") != KEEL_RESULT_NOT_READY ||
+            !ValidateInterfaces() ||
             !ValidateNamedInterfaces())
         {
             context.Log(KEEL_LOG_ERROR, "Source 2 interface gateway load validation failed");
@@ -50,7 +57,8 @@ public:
     void Unload(keels2::Context& context) noexcept override
     {
         const bool invalidated = !service_ && !server_ && !game_clients_ && !cvar_ &&
-            !named_engine_ && !named_server_ && !command_;
+            !named_engine_ && !named_server_ && !named_filesystem_ && !named_physics_ &&
+            !named_network_ && !named_server_service_ && !runtime_ && !command_;
         context.Log(
             invalidated ? KEEL_LOG_INFO : KEEL_LOG_ERROR,
             invalidated
@@ -76,6 +84,26 @@ private:
                 KEELS2_SOURCE2_SERVICE_NAME,
                 KEELS2_SOURCE2_API_VERSION + 1,
                 &raw) != KEEL_RESULT_INCOMPATIBLE || raw)
+        {
+            return false;
+        }
+        const void* runtime = &context;
+        if (context.QueryService(
+                KEELS2_SOURCE2_RUNTIME_SERVICE_NAME,
+                KEELS2_SOURCE2_RUNTIME_API_VERSION + 1,
+                &runtime) != KEEL_RESULT_INCOMPATIBLE || runtime ||
+            context.QueryService(
+                KEELS2_SOURCE2_RUNTIME_SERVICE_NAME,
+                KEELS2_SOURCE2_RUNTIME_API_VERSION,
+                &runtime) != KEEL_RESULT_OK || !runtime)
+        {
+            return false;
+        }
+        const auto* runtime_api = static_cast<const KeelSource2RuntimeApi*>(runtime);
+        if (runtime_api->size != sizeof(KeelSource2RuntimeApi) ||
+            runtime_api->api_version != KEELS2_SOURCE2_RUNTIME_API_VERSION ||
+            !runtime_api->server_command || !runtime_api->client_console_print ||
+            !runtime_api->find_user_message)
         {
             return false;
         }
@@ -309,7 +337,39 @@ private:
                 named_server_,
                 keels2::source2::Factory::server,
                 "Source2Server001") ||
-            named_server_.Raw() != server_.Raw())
+            named_server_.Raw() != server_.Raw() ||
+            service_.Query(
+                keels2::source2::Factory::filesystem,
+                "VFileSystem017",
+                named_filesystem_) != KEEL_RESULT_OK ||
+            !ValidateNamedInterface(
+                named_filesystem_,
+                keels2::source2::Factory::filesystem,
+                "VFileSystem017") ||
+            service_.Query(
+                keels2::source2::Factory::physics,
+                "VPhysics2_Interface_001",
+                named_physics_) != KEEL_RESULT_OK ||
+            !ValidateNamedInterface(
+                named_physics_,
+                keels2::source2::Factory::physics,
+                "VPhysics2_Interface_001") ||
+            service_.Query(
+                keels2::source2::Factory::network,
+                "NetworkSystemVersion001",
+                named_network_) != KEEL_RESULT_OK ||
+            !ValidateNamedInterface(
+                named_network_,
+                keels2::source2::Factory::network,
+                "NetworkSystemVersion001") ||
+            service_.Query(
+                keels2::source2::Factory::server_service,
+                "NetworkServerService_001",
+                named_server_service_) != KEEL_RESULT_OK ||
+            !ValidateNamedInterface(
+                named_server_service_,
+                keels2::source2::Factory::server_service,
+                "NetworkServerService_001"))
         {
             return false;
         }
@@ -442,27 +502,78 @@ private:
                    &info) == KEEL_RESULT_INCOMPATIBLE && !info.instance;
     }
 
-    void CheckCommand(const keels2::CommandInvocation&)
+    void CheckCommand(const keels2::CommandInvocation& invocation)
     {
         if (!context_)
         {
             return;
         }
-        const bool valid = ValidateInterfaces() && ValidateNamedInterfaces();
+#if defined(KEELS2_SOURCE2_LIVE)
+        std::int32_t slot{};
+        const char* slot_argument = invocation.Size() == 2 ? invocation[1] : nullptr;
+        const std::string_view slot_text = slot_argument ? slot_argument : "";
+        const auto parsed = std::from_chars(
+            slot_text.data(),
+            slot_text.data() + slot_text.size(),
+            slot);
+        if (parsed.ec != std::errc{} || parsed.ptr != slot_text.data() + slot_text.size() ||
+            slot < 0)
+        {
+            context_->Log(KEEL_LOG_ERROR, "usage: s2_check <connected-client-slot>");
+            return;
+        }
+        std::uint32_t message_id{};
+        const KeelResult server_command = runtime_.ServerCommand(
+            "echo [KeelS2 Live] server command passed\n");
+        const KeelResult client_print = runtime_.ClientConsolePrint(
+            slot,
+            "[KeelS2 Live] client console print passed\n");
+        const KeelResult user_message = runtime_.FindUserMessage(
+            "CCSUsrMsg_SayText2",
+            message_id);
+        const bool valid = ValidateInterfaces() && ValidateNamedInterfaces() &&
+            server_command == KEEL_RESULT_OK && client_print == KEEL_RESULT_OK &&
+            user_message == KEEL_RESULT_OK && message_id == 306;
+        const std::string result = valid
+            ? "Source 2 live runtime validation passed message_id=306"
+            : "Source 2 live runtime validation failed server=" +
+                std::to_string(server_command) + " client=" +
+                std::to_string(client_print) + " user_message=" +
+                std::to_string(user_message) + " message_id=" +
+                std::to_string(message_id);
+        context_->Log(valid ? KEEL_LOG_INFO : KEEL_LOG_ERROR, result.c_str());
+#else
+        static_cast<void>(invocation);
+        std::uint32_t message_id{99};
+        const bool valid = ValidateInterfaces() && ValidateNamedInterfaces() &&
+            runtime_.ServerCommand(nullptr) == KEEL_RESULT_INVALID_ARGUMENT &&
+            runtime_.ClientConsolePrint(-1, "invalid") == KEEL_RESULT_INVALID_ARGUMENT &&
+            runtime_.FindUserMessage("invalid name", message_id) ==
+                KEEL_RESULT_INVALID_ARGUMENT && message_id == 0 &&
+            runtime_.ServerCommand("echo runtime") == KEEL_RESULT_NOT_FOUND &&
+            runtime_.ClientConsolePrint(0, "runtime") == KEEL_RESULT_NOT_FOUND &&
+            runtime_.FindUserMessage("CS_UM_SayText2", message_id) ==
+                KEEL_RESULT_NOT_FOUND && message_id == 0;
         context_->Log(
             valid ? KEEL_LOG_INFO : KEEL_LOG_ERROR,
             valid
                 ? "Source 2 interface gateway runtime validation passed"
                 : "Source 2 interface gateway runtime validation failed");
+#endif
     }
 
     keels2::Context* context_{};
     keels2::source2::Service service_;
+    keels2::source2::Runtime runtime_;
     keels2::source2::Interface server_;
     keels2::source2::Interface game_clients_;
     keels2::source2::Interface cvar_;
     keels2::source2::Interface named_engine_;
     keels2::source2::Interface named_server_;
+    keels2::source2::Interface named_filesystem_;
+    keels2::source2::Interface named_physics_;
+    keels2::source2::Interface named_network_;
+    keels2::source2::Interface named_server_service_;
     keels2::Command command_;
 };
 

@@ -8,6 +8,15 @@
 namespace keels2::cs2
 {
 
+struct CompatibilityTarget
+{
+    const char* name;
+    const char* module;
+    const char* pattern;
+    std::int64_t offset;
+    std::uint32_t occurrence;
+};
+
 struct CompatibilityProfile
 {
     const char* id;
@@ -88,6 +97,8 @@ struct CompatibilityProfile
     const char* entity_system_module;
     std::uint32_t game_resource_validation_slot;
     std::uint32_t game_entity_system_offset;
+    const CompatibilityTarget* targets;
+    std::uint32_t target_count;
 };
 
 const CompatibilityProfile* FindCompatibilityProfile(

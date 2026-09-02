@@ -14,6 +14,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <vector>
 
 #if defined(_WIN32)
 #define NOMINMAX
@@ -574,6 +575,20 @@ private:
             return;
         }
 
+        std::vector<KeelHostCompatibilityTargetInfo> targets;
+        targets.reserve(profile_->target_count);
+        for (std::uint32_t index{}; index < profile_->target_count; ++index)
+        {
+            const auto& target = profile_->targets[index];
+            targets.push_back({
+                sizeof(KeelHostCompatibilityTargetInfo),
+                target.occurrence,
+                target.offset,
+                target.name,
+                target.module,
+                target.pattern
+            });
+        }
         const KeelHostCompatibilityInfo compatibility{
             sizeof(KeelHostCompatibilityInfo),
             profile_->id,
@@ -648,7 +663,10 @@ private:
             profile_->game_resource_module,
             profile_->entity_system_module,
             profile_->game_resource_validation_slot,
-            profile_->game_entity_system_offset
+            profile_->game_entity_system_offset,
+            static_cast<std::uint32_t>(targets.size()),
+            0,
+            targets.empty() ? nullptr : targets.data()
         };
         const KeelHostStartInfo info{
             sizeof(KeelHostStartInfo),

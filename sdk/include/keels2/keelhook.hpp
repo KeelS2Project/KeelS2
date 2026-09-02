@@ -682,6 +682,11 @@ public:
         return *this && (frame_->flags & KH_FRAME_ORIGINAL_CALLED) != 0;
     }
 
+    bool Recalled() const noexcept
+    {
+        return *this && (frame_->flags & KH_FRAME_RECALLED) != 0;
+    }
+
     template <typename Type>
         requires (!std::is_reference_v<Type>)
     std::optional<std::remove_cvref_t<Type>> Argument(std::size_t index) const
@@ -944,6 +949,11 @@ public:
         return frame_.TargetHandle();
     }
 
+    KeelHookFrame* Raw() const noexcept
+    {
+        return frame_.Raw();
+    }
+
     template <typename Class>
     Class* Instance() const noexcept
     {
@@ -1097,7 +1107,7 @@ struct CallbackDispatch<Return(Arguments...), Method, CallbackMethod>
             (frame->phase != KH_PHASE_PRE && frame->phase != KH_PHASE_POST) ||
             frame->argument_count != argument_count ||
             (argument_count != 0 && !frame->arguments) ||
-            (frame->flags & ~KH_FRAME_ORIGINAL_CALLED) != 0 ||
+            (frame->flags & ~(KH_FRAME_ORIGINAL_CALLED | KH_FRAME_RECALLED)) != 0 ||
             !ValidValue<Return>(frame->result))
         {
             return KH_ACTION_CONTINUE;
@@ -1367,6 +1377,15 @@ public:
         return result;
     }
 
+    static TargetSpec Profile(const char* name) noexcept
+    {
+        TargetSpec result;
+        result.value_.source = KH_TARGET_PROFILE;
+        result.value_.mechanism = KH_MECHANISM_DETOUR;
+        result.value_.symbol = name;
+        return result;
+    }
+
     const KeelHookTargetSpec& Raw() const noexcept
     {
         return value_;
@@ -1601,6 +1620,22 @@ public:
         return *this ? handle_ : 0;
     }
 
+    KeelResult SetEnabled(bool enabled) noexcept
+    {
+        const std::shared_ptr<detail::TargetState> target = target_;
+        const std::shared_ptr<keels2::detail::ContextState> context =
+            target ? target->context : nullptr;
+        if (!handle_ || !target || !context || !target->api ||
+            !target->api->set_callback_enabled)
+        {
+            return KEEL_RESULT_NOT_READY;
+        }
+        return target->api->set_callback_enabled(
+            context->plugin,
+            handle_,
+            enabled ? KEEL_TRUE : KEEL_FALSE);
+    }
+
     KeelResult Reset() noexcept
     {
         if (!target_)
@@ -1752,7 +1787,8 @@ public:
         if (!api || api->size != sizeof(KeelHookApi) ||
             api->api_version != KEELHOOK_API_VERSION || !api->resolve_target ||
             !api->release_target || !api->add_callback || !api->remove_callback ||
-            !api->resolve_virtual_target)
+            !api->resolve_virtual_target || !api->call_original || !api->recall ||
+            !api->set_callback_enabled)
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
@@ -1766,6 +1802,36 @@ public:
         return context_ &&
             context_->accepting_resources.load(std::memory_order_acquire) &&
             context_->api && api_;
+    }
+
+    KeelResult CallOriginal(Frame& frame) const noexcept
+    {
+        return *this && frame
+            ? api_->call_original(context_->plugin, frame.Raw())
+            : KEEL_RESULT_NOT_READY;
+    }
+
+    template <typename Return>
+    KeelResult CallOriginal(Call<Return>& call) const noexcept
+    {
+        return *this && call.Raw()
+            ? api_->call_original(context_->plugin, call.Raw())
+            : KEEL_RESULT_NOT_READY;
+    }
+
+    KeelResult Recall(Frame& frame) const noexcept
+    {
+        return *this && frame
+            ? api_->recall(context_->plugin, frame.Raw())
+            : KEEL_RESULT_NOT_READY;
+    }
+
+    template <typename Return>
+    KeelResult Recall(Call<Return>& call) const noexcept
+    {
+        return *this && call.Raw()
+            ? api_->recall(context_->plugin, call.Raw())
+            : KEEL_RESULT_NOT_READY;
     }
 
     template <typename Signature>
@@ -1957,6 +2023,43 @@ public:
         return AddCallback(target, spec, output);
     }
 
+    template <typename Signature, typename CallbackMethod, typename Owner>
+    KeelResult AddMethodCallback(
+        const Target& target,
+        CallbackMethod callback_method,
+        Callback& output,
+        Phase phase,
+        std::int32_t priority,
+        Owner& owner) const
+    {
+        static_assert(std::is_member_function_pointer_v<CallbackMethod>);
+        static_assert(detail::CallbackCompatibility<
+            Signature,
+            MethodSignatureOf<CallbackMethod>>::value);
+        static_assert(std::is_base_of_v<
+            MethodClassOf<CallbackMethod>,
+            std::remove_cvref_t<Owner>>);
+        using Binding = detail::BoundTypedCallback<
+            Signature,
+            true,
+            CallbackMethod,
+            Owner>;
+        auto binding = std::make_shared<Binding>(owner, callback_method);
+        const KeelHookCallbackSpec spec{
+            sizeof(KeelHookCallbackSpec),
+            static_cast<std::uint32_t>(phase),
+            priority,
+            0,
+            &Binding::Dispatch,
+            binding.get()
+        };
+        return AddCallback(
+            target,
+            spec,
+            output,
+            std::move(binding));
+    }
+
     template <typename TargetMethod, typename CallbackMethod, typename Owner>
     KeelResult AddMethodCallback(
         const Target& target,
@@ -2059,6 +2162,41 @@ public:
         result = AddMethodCallback(
             hook.target_,
             target_method,
+            callback_method,
+            hook.callback_,
+            phase,
+            priority,
+            owner);
+        if (result != KEEL_RESULT_OK)
+        {
+            static_cast<void>(hook.target_.Reset());
+            return result;
+        }
+        output = std::move(hook);
+        return KEEL_RESULT_OK;
+    }
+
+    template <typename Signature, typename CallbackMethod, typename Owner>
+    KeelResult AddMethodHook(
+        const TargetSpec& spec,
+        CallbackMethod callback_method,
+        Hook& output,
+        Phase phase,
+        std::int32_t priority,
+        Owner& owner)
+    {
+        if (!output.Empty())
+        {
+            return KEEL_RESULT_ALREADY_EXISTS;
+        }
+        Hook hook;
+        KeelResult result = ResolveMethod<Signature>(spec, hook.target_);
+        if (result != KEEL_RESULT_OK)
+        {
+            return result;
+        }
+        result = AddMethodCallback<Signature>(
+            hook.target_,
             callback_method,
             hook.callback_,
             phase,

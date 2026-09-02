@@ -3,14 +3,15 @@
 #include "keelhook_service.h"
 #include "lifecycle_service.h"
 #include "plugin_service.h"
+#include "plugin_manifest_validation.h"
+#include "published_service_registry.h"
 #include "schema_entity_service.h"
 #include "source2_callbacks_service.h"
 
 #include <algorithm>
 #include <charconv>
-#include <cctype>
 #include <cstring>
-#include <system_error>
+#include <utility>
 
 namespace keels2::host
 {
@@ -241,10 +242,37 @@ PluginRecord* Host::DiscoverPlugin(
     plugins_.push_back(std::move(plugin));
 
     std::string error;
-    if (!record->library.Open(path, error))
+    std::error_code image_error;
+    const std::filesystem::path runtime_directory =
+        plugin_directory_ / ".runtime" / std::to_string(record->handle);
+    std::filesystem::create_directories(runtime_directory, image_error);
+    if (image_error)
+    {
+        record->diagnostic =
+            "could not create plugin runtime directory: " + image_error.message();
+        Write(KEEL_LOG_ERROR, record->diagnostic);
+        return record;
+    }
+    record->transient_path = runtime_directory / path.filename();
+    std::filesystem::copy_file(
+        path,
+        record->transient_path,
+        std::filesystem::copy_options::overwrite_existing,
+        image_error);
+    if (image_error)
+    {
+        record->diagnostic = "could not stage plugin image: " + image_error.message();
+        record->transient_path.clear();
+        image_error.clear();
+        std::filesystem::remove(runtime_directory, image_error);
+        Write(KEEL_LOG_ERROR, record->diagnostic + ": " + path.string());
+        return record;
+    }
+    if (!record->library.Open(record->transient_path, error))
     {
         record->diagnostic = "could not load module: " + error;
         Write(KEEL_LOG_ERROR, record->diagnostic + ": " + path.string());
+        ClosePluginImage(*record);
         return record;
     }
 
@@ -258,7 +286,7 @@ PluginRecord* Host::DiscoverPlugin(
         record->state = PluginState::invalid;
         record->diagnostic = "required plugin exports are missing";
         Write(KEEL_LOG_ERROR, "plugin query was rejected: " + path.string() + ": " + record->diagnostic);
-        record->library.Close();
+        ClosePluginImage(*record);
         return record;
     }
 
@@ -284,38 +312,15 @@ PluginRecord* Host::DiscoverPlugin(
         {
             manifest_succeeded = false;
             manifest_succeeded = manifest(&host_query, &manifest_info) == KEEL_TRUE;
-            if (manifest_succeeded && manifest_info.size == sizeof(KeelPluginManifest) &&
-                manifest_info.manifest_version == KEELS2_PLUGIN_MANIFEST_VERSION &&
-                manifest_info.reserved == 0 && manifest_info.dependency_count <= 64 &&
-                (manifest_info.dependency_count == 0 || manifest_info.dependencies))
+            std::vector<ValidatedPluginDependency> validated;
+            if (manifest_succeeded && ValidatePluginManifest(manifest_info, validated))
             {
-                dependencies.reserve(manifest_info.dependency_count);
-                for (std::uint32_t index{}; index < manifest_info.dependency_count; ++index)
+                dependencies.reserve(validated.size());
+                for (auto& dependency : validated)
                 {
-                    const KeelPluginDependency& dependency = manifest_info.dependencies[index];
-                    std::array<std::uint32_t, 3> parsed{};
-                    if (dependency.size != sizeof(KeelPluginDependency) ||
-                        (dependency.requirement != KEELS2_PLUGIN_DEPENDENCY_EXACT &&
-                            dependency.requirement != KEELS2_PLUGIN_DEPENDENCY_AT_LEAST) ||
-                        !ValidPluginName(dependency.name) ||
-                        !ValidMetadataText(dependency.version, 63, false) ||
-                        !ParseSemanticVersion(dependency.version, parsed))
-                    {
-                        manifest_succeeded = false;
-                        break;
-                    }
-                    const bool duplicate = std::any_of(
-                        dependencies.begin(), dependencies.end(), [&](const auto& existing) {
-                            return EqualInsensitive(existing.name, dependency.name);
-                        });
-                    if (duplicate)
-                    {
-                        manifest_succeeded = false;
-                        break;
-                    }
                     dependencies.push_back({
-                        dependency.name,
-                        dependency.version,
+                        std::move(dependency.name),
+                        std::move(dependency.version),
                         dependency.requirement
                     });
                 }
@@ -345,7 +350,7 @@ PluginRecord* Host::DiscoverPlugin(
             KEEL_LOG_ERROR,
             "plugin query was rejected: " + path.string() + ": " + record->diagnostic
         );
-        record->library.Close();
+        ClosePluginImage(*record);
         return record;
     }
 
@@ -363,7 +368,7 @@ PluginRecord* Host::DiscoverPlugin(
         record->selectable = true;
         Write(KEEL_LOG_ERROR, "plugin dependency was rejected: " + record->name + ": " +
             record->diagnostic);
-        record->library.Close();
+        ClosePluginImage(*record);
         return record;
     }
     const auto duplicate = std::find_if(plugins_.begin(), plugins_.end(), [record](const auto& candidate) {
@@ -379,7 +384,7 @@ PluginRecord* Host::DiscoverPlugin(
             "plugin friendly name conflict \"" + record->name + "\": " +
                 (*duplicate)->path.filename().string() + " and " + path.filename().string()
         );
-        record->library.Close();
+        ClosePluginImage(*record);
         return record;
     }
 
@@ -431,6 +436,7 @@ PluginRecord* Host::StartPlugin(
         KeelResult convar_release = KEEL_RESULT_OK;
         KeelResult lifecycle_release = KEEL_RESULT_OK;
         KeelResult plugin_service_release = KEEL_RESULT_OK;
+        KeelResult published_service_release = KEEL_RESULT_OK;
         KeelResult source2_callbacks_release = KEEL_RESULT_OK;
         KeelResult schema_entities_release = KEEL_RESULT_OK;
         KeelResult release = KEEL_RESULT_OK;
@@ -438,6 +444,12 @@ PluginRecord* Host::StartPlugin(
         {
             state_lock.unlock();
             plugin_service_release = plugin_service_->ReleasePlugin(record->handle);
+            state_lock.lock();
+        }
+        if (published_services_)
+        {
+            state_lock.unlock();
+            published_service_release = published_services_->ReleasePlugin(record->handle);
             state_lock.lock();
         }
         if (convars_)
@@ -473,6 +485,7 @@ PluginRecord* Host::StartPlugin(
         RemoveCommandsOwnedBy(record->handle);
         record->state = PluginState::error;
         if (plugin_service_release != KEEL_RESULT_OK ||
+            published_service_release != KEEL_RESULT_OK ||
             source2_callbacks_release != KEEL_RESULT_OK || convar_release != KEEL_RESULT_OK ||
             schema_entities_release != KEEL_RESULT_OK ||
             lifecycle_release != KEEL_RESULT_OK || release != KEEL_RESULT_OK)
@@ -498,7 +511,7 @@ PluginRecord* Host::StartPlugin(
         Write(KEEL_LOG_ERROR, "plugin load was rejected: " + record->name);
         record->load = nullptr;
         record->unload = nullptr;
-        record->library.Close();
+        ClosePluginImage(*record);
         load_order_.erase(
             std::remove(load_order_.begin(), load_order_.end(), record->handle),
             load_order_.end());
@@ -582,6 +595,11 @@ bool Host::HasRunningDependent(const PluginRecord& plugin, std::string& dependen
             return true;
         }
     }
+    if (published_services_ &&
+        published_services_->HasLeasedPublication(plugin.handle, dependent))
+    {
+        return true;
+    }
     dependent.clear();
     return false;
 }
@@ -594,7 +612,7 @@ void Host::RejectUnstartedPlugin(PluginRecord& plugin, std::string diagnostic)
     plugin.diagnostic = std::move(diagnostic);
     plugin.load = nullptr;
     plugin.unload = nullptr;
-    plugin.library.Close();
+    ClosePluginImage(plugin);
     Write(KEEL_LOG_ERROR, "plugin dependency was rejected: " + plugin.name + ": " +
         plugin.diagnostic);
 }
@@ -713,25 +731,25 @@ void Host::LoadPluginCommand(
     LoadPlugin(path, state_lock);
 }
 
-void Host::UnloadPluginCommand(
+bool Host::UnloadPluginCommand(
     std::string_view selector,
     std::unique_lock<std::recursive_mutex>& state_lock)
 {
     PluginRecord* plugin = SelectPlugin(selector);
     if (!plugin)
     {
-        return;
+        return false;
     }
     if (plugin->state != PluginState::loaded && plugin->state != PluginState::paused)
     {
         Write(KEEL_LOG_ERROR, "plugin [" + PluginDisplayId(plugin) + "] is not loaded");
-        return;
+        return false;
     }
     PluginTransition transition(*plugin);
     if (!transition)
     {
         Write(KEEL_LOG_ERROR, "plugin transition is already active: " + plugin->name);
-        return;
+        return false;
     }
     std::string dependent;
     if (HasRunningDependent(*plugin, dependent))
@@ -740,7 +758,7 @@ void Host::UnloadPluginCommand(
             KEEL_LOG_ERROR,
             "plugin unload is blocked by running dependent " + dependent + ": " + plugin->name
         );
-        return;
+        return false;
     }
 
     const KeelPluginHandle handle = plugin->handle;
@@ -760,7 +778,7 @@ void Host::UnloadPluginCommand(
             SetCommandsOwnedEnabled(handle, true);
             source2_callbacks_->Activate(handle);
             Write(KEEL_LOG_ERROR, "plugin unload is busy in a Source 2 callback: " + name);
-            return;
+            return false;
         }
     }
     if (was_running && lifecycle_)
@@ -772,7 +790,7 @@ void Host::UnloadPluginCommand(
         {
             RestorePluginDispatch(*plugin);
             Write(KEEL_LOG_ERROR, "plugin unload is busy in a lifecycle callback: " + name);
-            return;
+            return false;
         }
     }
     if (was_running && convars_)
@@ -784,7 +802,7 @@ void Host::UnloadPluginCommand(
         {
             RestorePluginDispatch(*plugin);
             Write(KEEL_LOG_ERROR, "plugin unload is busy in a ConVar callback: " + name);
-            return;
+            return false;
         }
     }
     if (was_running && plugin_service_)
@@ -796,7 +814,7 @@ void Host::UnloadPluginCommand(
         {
             RestorePluginDispatch(*plugin);
             Write(KEEL_LOG_ERROR, "plugin unload is busy in a plugin event callback: " + name);
-            return;
+            return false;
         }
     }
     if (was_running && keelhook_)
@@ -808,7 +826,7 @@ void Host::UnloadPluginCommand(
         {
             RestorePluginDispatch(*plugin);
             Write(KEEL_LOG_ERROR, "plugin unload is busy in KeelHook: " + name);
-            return;
+            return false;
         }
     }
     if (keelhook_)
@@ -833,7 +851,7 @@ void Host::UnloadPluginCommand(
                     ? "plugin unload is busy in KeelHook: " + name
                     : "plugin unload could not restore KeelHook resources: " + name
             );
-            return;
+            return false;
         }
     }
     if (lifecycle_)
@@ -846,7 +864,7 @@ void Host::UnloadPluginCommand(
             plugin->cleanup_pending = true;
             plugin->diagnostic = "lifecycle cleanup is incomplete; plugin is quarantined";
             Write(KEEL_LOG_ERROR, "plugin unload could not release lifecycle resources: " + name);
-            return;
+            return false;
         }
     }
     if (source2_callbacks_)
@@ -859,7 +877,7 @@ void Host::UnloadPluginCommand(
             plugin->cleanup_pending = true;
             plugin->diagnostic = "Source 2 callback cleanup is incomplete; plugin is quarantined";
             Write(KEEL_LOG_ERROR, "plugin unload could not release Source 2 callbacks: " + name);
-            return;
+            return false;
         }
     }
     if (convars_)
@@ -872,7 +890,7 @@ void Host::UnloadPluginCommand(
             plugin->cleanup_pending = true;
             plugin->diagnostic = "ConVar cleanup is incomplete; plugin is quarantined";
             Write(KEEL_LOG_ERROR, "plugin unload could not release ConVar resources: " + name);
-            return;
+            return false;
         }
     }
     if (schema_entities_)
@@ -887,7 +905,7 @@ void Host::UnloadPluginCommand(
             Write(
                 KEEL_LOG_ERROR,
                 "plugin unload could not release schema and entity resources: " + name);
-            return;
+            return false;
         }
     }
     if (plugin_service_)
@@ -900,7 +918,19 @@ void Host::UnloadPluginCommand(
             plugin->cleanup_pending = true;
             plugin->diagnostic = "plugin event cleanup is incomplete; plugin is quarantined";
             Write(KEEL_LOG_ERROR, "plugin unload could not release plugin event resources: " + name);
-            return;
+            return false;
+        }
+    }
+    if (published_services_)
+    {
+        state_lock.unlock();
+        const KeelResult release = published_services_->ReleasePlugin(handle);
+        state_lock.lock();
+        if (release != KEEL_RESULT_OK)
+        {
+            RestorePluginDispatch(*plugin);
+            Write(KEEL_LOG_ERROR, "plugin unload is blocked by a published service lease: " + name);
+            return false;
         }
     }
     RemoveCommandsOwnedBy(handle);
@@ -919,7 +949,7 @@ void Host::UnloadPluginCommand(
     }
     plugin->load = nullptr;
     plugin->unload = nullptr;
-    plugin->library.Close();
+    ClosePluginImage(*plugin);
     KeelPluginSnapshot snapshot{};
     FillPluginSnapshot(*plugin, snapshot);
     snapshot.state = KEELS2_PLUGIN_STATE_UNKNOWN;
@@ -932,6 +962,146 @@ void Host::UnloadPluginCommand(
         state_lock.lock();
     }
     Write(KEEL_LOG_INFO, "plugin unloaded: [" + display_id + "] " + name);
+    return true;
+}
+
+void Host::ReloadPluginCommand(
+    std::string_view selector,
+    std::unique_lock<std::recursive_mutex>& state_lock)
+{
+    PluginRecord* plugin = SelectPlugin(selector);
+    if (!plugin)
+    {
+        return;
+    }
+    if (plugin->state != PluginState::loaded && plugin->state != PluginState::paused)
+    {
+        Write(KEEL_LOG_ERROR, "plugin [" + PluginDisplayId(plugin) + "] is not loaded");
+        return;
+    }
+    std::string dependent;
+    if (HasRunningDependent(*plugin, dependent))
+    {
+        Write(
+            KEEL_LOG_ERROR,
+            "plugin reload is blocked by running dependent " + dependent + ": " + plugin->name);
+        return;
+    }
+
+    const std::filesystem::path logical_path = plugin->path;
+    const std::filesystem::path source_path = plugin->transient_path.empty()
+        ? plugin->path
+        : plugin->transient_path;
+    const std::string original_name = plugin->name;
+    const bool was_paused = plugin->state == PluginState::paused;
+    const std::string unload_selector = PluginDisplayId(plugin);
+    const KeelPluginHandle old_handle = plugin->handle;
+
+    const std::filesystem::path reload_directory =
+        plugin_directory_ / ".reload" / std::to_string(old_handle);
+    std::error_code error;
+    std::filesystem::create_directories(reload_directory, error);
+    if (error)
+    {
+        Write(KEEL_LOG_ERROR, "plugin reload could not create its rollback directory: " + error.message());
+        return;
+    }
+    const std::filesystem::path backup = reload_directory / logical_path.filename();
+    std::filesystem::copy_file(
+        source_path,
+        backup,
+        std::filesystem::copy_options::overwrite_existing,
+        error);
+    if (error)
+    {
+        Write(KEEL_LOG_ERROR, "plugin reload could not create a rollback image: " + error.message());
+        return;
+    }
+
+    if (!UnloadPluginCommand(unload_selector, state_lock))
+    {
+        std::filesystem::remove(backup, error);
+        std::filesystem::remove(reload_directory, error);
+        return;
+    }
+
+    PluginRecord* candidate = LoadPlugin(logical_path, state_lock);
+    const bool candidate_ready = candidate && candidate->state == PluginState::loaded &&
+        EqualInsensitive(candidate->name, original_name);
+    if (candidate_ready)
+    {
+        if (was_paused)
+        {
+            static_cast<void>(PausePlugin(candidate->handle, state_lock, false));
+        }
+        std::filesystem::remove(backup, error);
+        std::filesystem::remove(reload_directory, error);
+        Write(KEEL_LOG_INFO, "plugin reloaded transactionally: " + candidate->name);
+        return;
+    }
+
+    if (candidate)
+    {
+        const KeelPluginHandle candidate_handle = candidate->handle;
+        if (candidate->state == PluginState::loaded || candidate->state == PluginState::paused)
+        {
+            static_cast<void>(UnloadPluginCommand(PluginDisplayId(candidate), state_lock));
+        }
+        else if (!candidate->cleanup_pending && !candidate->library.IsOpen())
+        {
+            RemovePluginRecord(candidate_handle);
+        }
+    }
+
+    PluginRecord* rollback = LoadPlugin(backup, state_lock);
+    if (rollback && rollback->state == PluginState::loaded &&
+        EqualInsensitive(rollback->name, original_name))
+    {
+        rollback->path = logical_path;
+        std::filesystem::remove(backup, error);
+        std::filesystem::remove(reload_directory, error);
+        if (was_paused)
+        {
+            static_cast<void>(PausePlugin(rollback->handle, state_lock, false));
+        }
+        Write(KEEL_LOG_WARNING, "plugin reload failed; previous image restored: " + rollback->name);
+        return;
+    }
+
+    Write(KEEL_LOG_ERROR, "plugin reload and rollback both failed: " + original_name);
+}
+
+void Host::RetryPluginCommand(
+    std::string_view selector,
+    std::unique_lock<std::recursive_mutex>& state_lock)
+{
+    PluginRecord* plugin = SelectPlugin(selector);
+    if (!plugin)
+    {
+        return;
+    }
+    if (plugin->state != PluginState::error && plugin->state != PluginState::invalid)
+    {
+        Write(KEEL_LOG_ERROR, "plugin [" + PluginDisplayId(plugin) + "] is not failed");
+        return;
+    }
+    if (plugin->cleanup_pending || plugin->library.IsOpen())
+    {
+        Write(KEEL_LOG_ERROR, "plugin retry is blocked until native cleanup completes: " + plugin->name);
+        return;
+    }
+    const std::filesystem::path path = plugin->path;
+    const KeelPluginHandle handle = plugin->handle;
+    RemovePluginRecord(handle);
+    PluginRecord* retried = LoadPlugin(path, state_lock);
+    if (retried && retried->state == PluginState::loaded)
+    {
+        Write(KEEL_LOG_INFO, "plugin retry succeeded: " + retried->name);
+    }
+    else
+    {
+        Write(KEEL_LOG_ERROR, "plugin retry failed: " + path.filename().string());
+    }
 }
 
 void Host::PausePluginCommand(
@@ -1172,6 +1342,20 @@ void Host::FillPluginSnapshot(
     CopySnapshotText(snapshot.diagnostic, plugin.diagnostic);
 }
 
+void Host::ClosePluginImage(PluginRecord& plugin) noexcept
+{
+    plugin.library.Close();
+    if (plugin.transient_path.empty())
+    {
+        return;
+    }
+    std::error_code error;
+    const std::filesystem::path runtime_directory = plugin.transient_path.parent_path();
+    std::filesystem::remove(plugin.transient_path, error);
+    plugin.transient_path.clear();
+    std::filesystem::remove(runtime_directory, error);
+}
+
 void Host::RemovePluginRecord(KeelPluginHandle handle)
 {
     load_order_.erase(std::remove(load_order_.begin(), load_order_.end(), handle), load_order_.end());
@@ -1325,37 +1509,26 @@ std::size_t Host::PluginCommandCount(KeelPluginHandle owner) const
     }));
 }
 
+std::string Host::ResourceOwnerLabel(KeelPluginHandle owner) const
+{
+    if (owner == 0)
+    {
+        return "host";
+    }
+    const PluginRecord* plugin = PluginByHandle(owner);
+    return plugin
+        ? plugin->name + " [" + std::to_string(owner) + "]"
+        : "plugin [" + std::to_string(owner) + "]";
+}
+
 bool Host::ValidMetadataText(const char* text, std::size_t maximum, bool allow_empty)
 {
-    if (!text)
-    {
-        return allow_empty;
-    }
-    const std::string_view value(text);
-    if (value.empty())
-    {
-        return allow_empty;
-    }
-    if (value.size() > maximum || std::isspace(static_cast<unsigned char>(value.front())) ||
-        std::isspace(static_cast<unsigned char>(value.back())))
-    {
-        return false;
-    }
-    return std::none_of(value.begin(), value.end(), [](unsigned char character) {
-        return std::iscntrl(character) != 0;
-    });
+    return keels2::host::ValidMetadataText(text, maximum, allow_empty);
 }
 
 bool Host::ValidPluginName(const char* name)
 {
-    if (!ValidMetadataText(name, 127, false))
-    {
-        return false;
-    }
-    const std::string_view value(name);
-    return !std::all_of(value.begin(), value.end(), [](unsigned char character) {
-        return std::isdigit(character) != 0;
-    });
+    return keels2::host::ValidPluginName(name);
 }
 
 bool Host::EqualInsensitive(std::string_view left, std::string_view right)
@@ -1440,30 +1613,7 @@ bool Host::ParseSemanticVersion(
     std::string_view version,
     std::array<std::uint32_t, 3>& output) noexcept
 {
-    output = {};
-    std::size_t begin{};
-    for (std::size_t component{}; component < output.size(); ++component)
-    {
-        const std::size_t end = component + 1 == output.size()
-            ? version.size()
-            : version.find('.', begin);
-        if (end == std::string_view::npos || end == begin)
-        {
-            return false;
-        }
-        const char* first = version.data() + begin;
-        const char* last = version.data() + end;
-        const auto result = std::from_chars(first, last, output[component]);
-        if (result.ec != std::errc{} || result.ptr != last)
-        {
-            return false;
-        }
-        if (component + 1 != output.size())
-        {
-            begin = end + 1;
-        }
-    }
-    return begin <= version.size() && version.find('.', begin) == std::string_view::npos;
+    return keels2::host::ParseSemanticVersion(version, output);
 }
 
 bool Host::DependencyVersionMatches(

@@ -1,0 +1,6 @@
+{
+    global:
+        KeelGameAdapter_Query;
+    local:
+        *;
+};

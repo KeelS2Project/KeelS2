@@ -22,6 +22,26 @@ static_assert(sizeof(ConVarRef) <= std::numeric_limits<std::uint32_t>::max());
 static_assert(sizeof(ConVarData) <= std::numeric_limits<std::uint32_t>::max());
 static_assert(sizeof(ConVarObject) <= std::numeric_limits<std::uint32_t>::max());
 
+constexpr std::array linux_damage_targets{
+    CompatibilityTarget{
+        "cs2.base_entity.take_damage",
+        "libserver.so",
+        "55 66 0F EF C0 48 89 E5 41 57 41 56 41 55 49 89 FD 31 FF",
+        0,
+        0
+    }
+};
+
+constexpr std::array windows_damage_targets{
+    CompatibilityTarget{
+        "cs2.base_entity.take_damage",
+        "server.dll",
+        "40 55 53 56 57 41 54 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 4D 8B E0",
+        0,
+        0
+    }
+};
+
 constexpr CompatibilityProfile Profile(
     const char* id,
     const char* game_version,
@@ -30,7 +50,8 @@ constexpr CompatibilityProfile Profile(
     const char* server_module,
     const char* cvar_module,
     const char* engine_module,
-    bool schema_entities)
+    bool schema_entities,
+    bool damage_target = false)
 {
     const char* schema_module = schema_entities
         ? (platform_name[0] == 'w' ? "schemasystem.dll" : "libschemasystem.so")
@@ -113,7 +134,13 @@ constexpr CompatibilityProfile Profile(
         schema_entities ? engine_module : nullptr,
         schema_entities ? server_module : nullptr,
         0,
-        schema_entities ? (platform_name[0] == 'w' ? 88u : 80u) : 0u
+        schema_entities ? (platform_name[0] == 'w' ? 88u : 80u) : 0u,
+        damage_target
+            ? (platform_name[0] == 'w'
+                ? windows_damage_targets.data()
+                : linux_damage_targets.data())
+            : nullptr,
+        damage_target ? 1u : 0u
     };
 }
 
@@ -162,6 +189,16 @@ constexpr std::array profiles{
         "libserver.so",
         "libtier0.so",
         "libengine2.so",
+        true),
+    Profile(
+        "cs2-2000899-linuxsteamrt64-40540568-542cc63d17821e66",
+        "2000899",
+        "linuxsteamrt64",
+        {40540568, 0x542cc63d17821e66ull},
+        "libserver.so",
+        "libtier0.so",
+        "libengine2.so",
+        true,
         true),
     Profile(
         "cs2-2000879-win64-2369e67d8d0e4475a49dc6f4e8c99d28-51",
@@ -216,6 +253,16 @@ constexpr std::array profiles{
         "server.dll",
         "tier0.dll",
         "engine2.dll",
+        true),
+    Profile(
+        "cs2-2000899-win64-33002648-43286dc938300339",
+        "2000899",
+        "win64",
+        {33002648, 0x43286dc938300339ull},
+        "server.dll",
+        "tier0.dll",
+        "engine2.dll",
+        true,
         true)
 };
 

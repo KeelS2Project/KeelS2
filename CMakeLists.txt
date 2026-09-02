@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(KeelS2 VERSION 0.1.0 LANGUAGES C CXX)
+project(KeelS2 VERSION 0.9.0 LANGUAGES C CXX)
 
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
@@ -13,13 +13,6 @@ endif()
 include(CTest)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
-
-set(KEELS2_GAME "cs2" CACHE STRING "Source 2 game adapter")
-set_property(CACHE KEELS2_GAME PROPERTY STRINGS cs2)
-
-if(NOT KEELS2_GAME STREQUAL "cs2")
-    message(FATAL_ERROR "Unsupported game adapter: ${KEELS2_GAME}")
-endif()
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "KeelS2 supports only 64-bit targets")
@@ -37,6 +30,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+option(KEELS2_WARNINGS_AS_ERRORS "Treat KeelS2 warnings as errors" ON)
+set(KEELS2_GAME "cs2" CACHE STRING "Source 2 game adapter")
+if(NOT KEELS2_GAME STREQUAL "cs2")
+    message(FATAL_ERROR "unsupported game adapter: ${KEELS2_GAME}")
+endif()
 
 set(KEELS2_PACKAGE_ROOT "${CMAKE_BINARY_DIR}/package/addons/keels2")
 file(MAKE_DIRECTORY "${KEELS2_PACKAGE_ROOT}")
@@ -110,17 +108,19 @@ endfunction()
 function(keels2_enable_warnings target)
     if(WIN32)
         target_compile_options(${target} PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:/W4>
+            $<$<COMPILE_LANGUAGE:C,CXX>:/W4>
             $<$<COMPILE_LANGUAGE:CXX>:/permissive->
             $<$<COMPILE_LANGUAGE:CXX>:/EHsc>
+            $<$<AND:$<BOOL:${KEELS2_WARNINGS_AS_ERRORS}>,$<COMPILE_LANGUAGE:C,CXX>>:/WX>
         )
     else()
         target_compile_options(${target} PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:-Wall>
-            $<$<COMPILE_LANGUAGE:CXX>:-Wextra>
-            $<$<COMPILE_LANGUAGE:CXX>:-Wpedantic>
-            $<$<COMPILE_LANGUAGE:CXX>:-Wconversion>
-            $<$<COMPILE_LANGUAGE:CXX>:-Wsign-conversion>
+            $<$<COMPILE_LANGUAGE:C,CXX>:-Wall>
+            $<$<COMPILE_LANGUAGE:C,CXX>:-Wextra>
+            $<$<COMPILE_LANGUAGE:C,CXX>:-Wpedantic>
+            $<$<COMPILE_LANGUAGE:C,CXX>:-Wconversion>
+            $<$<COMPILE_LANGUAGE:C,CXX>:-Wsign-conversion>
+            $<$<AND:$<BOOL:${KEELS2_WARNINGS_AS_ERRORS}>,$<COMPILE_LANGUAGE:C,CXX>>:-Werror>
         )
     endif()
 endfunction()
@@ -145,6 +145,16 @@ elseif(MSVC)
 endif()
 include(cmake/KeelS2Plugin.cmake)
 
+add_library(keels2_adapter_sdk INTERFACE)
+add_library(KeelS2::AdapterSDK ALIAS keels2_adapter_sdk)
+set_target_properties(keels2_adapter_sdk PROPERTIES EXPORT_NAME AdapterSDK)
+target_compile_features(keels2_adapter_sdk INTERFACE cxx_std_20)
+target_include_directories(keels2_adapter_sdk INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/sdk/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+include(cmake/KeelS2GameAdapter.cmake)
+
 set(KEELS2_CMAKE_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/KeelS2")
 configure_package_config_file(
     cmake/KeelS2Config.cmake.in
@@ -156,7 +166,7 @@ write_basic_package_version_file(
     VERSION "${PROJECT_VERSION}"
     COMPATIBILITY SameMajorVersion
 )
-install(TARGETS keels2_sdk EXPORT KeelS2SDKTargets)
+install(TARGETS keels2_sdk keels2_adapter_sdk EXPORT KeelS2SDKTargets)
 install(DIRECTORY sdk/include/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 install(
     EXPORT KeelS2SDKTargets
@@ -169,9 +179,11 @@ install(
         "${CMAKE_CURRENT_BINARY_DIR}/KeelS2Config.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/KeelS2ConfigVersion.cmake"
         cmake/KeelS2Plugin.cmake
+        cmake/KeelS2GameAdapter.cmake
         cmake/KeelS2SourceSDK.cmake
     DESTINATION "${KEELS2_CMAKE_INSTALL_DIR}"
 )
+install(FILES LICENSE THIRD_PARTY_NOTICES.md DESTINATION .)
 
 set(ZYDIS_BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
 set(ZYDIS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -181,7 +193,19 @@ set(ZYDIS_BUILD_DOXYGEN OFF CACHE BOOL "" FORCE)
 set(ZYDIS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(ZYDIS_FEATURE_ENCODER OFF CACHE BOOL "" FORCE)
 set(ZYDIS_FEATURE_FORMATTER OFF CACHE BOOL "" FORCE)
+if(DEFINED CMAKE_WARN_DEPRECATED)
+    set(KEELS2_SAVED_WARN_DEPRECATED "${CMAKE_WARN_DEPRECATED}")
+    set(KEELS2_HAD_WARN_DEPRECATED TRUE)
+endif()
+set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/zydis EXCLUDE_FROM_ALL)
+if(KEELS2_HAD_WARN_DEPRECATED)
+    set(CMAKE_WARN_DEPRECATED "${KEELS2_SAVED_WARN_DEPRECATED}" CACHE BOOL "" FORCE)
+else()
+    unset(CMAKE_WARN_DEPRECATED CACHE)
+endif()
+unset(KEELS2_SAVED_WARN_DEPRECATED)
+unset(KEELS2_HAD_WARN_DEPRECATED)
 
 set(KEELS2_DYNCALL_SOURCES
     third_party/dyncall/dyncall/dyncall_vector.c
@@ -348,32 +372,69 @@ endif()
 add_library(keels2_host SHARED
     host/src/convar_service.cpp
     host/src/core_command.cpp
+    host/src/game_adapter_loader.cpp
     host/src/host.cpp
     host/src/keelhook_service.cpp
     host/src/lifecycle_service.cpp
+    host/src/plugin_manifest_validation.cpp
     host/src/plugin_service.cpp
+    host/src/published_service_registry.cpp
     host/src/plugin_manager.cpp
     host/src/schema_entity_service.cpp
+    host/src/service_name_validation.cpp
     host/src/source2_callbacks_service.cpp
-    games/cs2/src/cs2_adapter.cpp
+    host/src/source2_runtime_service.cpp
 )
 target_include_directories(keels2_host PRIVATE
     bootstrap/include
-    games/cs2/include
     host/src
     platform/include
     sdk/include
 )
 target_link_libraries(keels2_host PRIVATE
-    keels2_cs2_compatibility
-    keels2_cs2_native_bridge
     keels2_detour
     keels2_dyncall
     keels2_dyncallback
     keels2_platform
 )
+get_target_property(KEELS2_HOST_SOURCE_CONTRACT keels2_host SOURCES)
+get_target_property(KEELS2_HOST_LINK_CONTRACT keels2_host LINK_LIBRARIES)
+string(TOLOWER "${KEELS2_HOST_SOURCE_CONTRACT};${KEELS2_HOST_LINK_CONTRACT}"
+    KEELS2_HOST_BOUNDARY_CONTRACT)
+if(KEELS2_HOST_BOUNDARY_CONTRACT MATCHES "cs2|games/cs2")
+    message(FATAL_ERROR "generic host target contains a CS2 dependency")
+endif()
 if(MSVC)
     target_link_options(keels2_host PRIVATE /INCREMENTAL:NO)
+endif()
+
+add_library(keels2_game_cs2 SHARED
+    games/cs2/src/cs2_adapter.cpp
+)
+target_include_directories(keels2_game_cs2 PRIVATE
+    games/cs2/include
+    host/src
+    platform/include
+    sdk/include
+)
+target_link_libraries(keels2_game_cs2 PRIVATE
+    keels2_cs2_native_bridge
+    keels2_platform
+)
+target_compile_definitions(keels2_game_cs2 PRIVATE KEELS2_GAME_ADAPTER_BUILD=1)
+set_target_properties(keels2_game_cs2 PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+    OUTPUT_NAME keels2_game_cs2
+)
+keels2_set_output(keels2_game_cs2 "bin/${KEELS2_PLATFORM_DIR}")
+keels2_enable_warnings(keels2_game_cs2)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(keels2_game_cs2 PRIVATE
+        "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/games/cs2/adapter_exports.map"
+        "LINKER:-z,defs"
+        "LINKER:-z,relro,-z,now"
+    )
 endif()
 set_target_properties(keels2_host PROPERTIES
     CXX_VISIBILITY_PRESET hidden
@@ -404,8 +465,53 @@ add_subdirectory(samples/entities)
 keels2_set_output(keels2_entities "plugins/${KEELS2_PLATFORM_DIR}")
 add_subdirectory(samples/hooks)
 keels2_set_output(keels2_hooks "plugins/${KEELS2_PLATFORM_DIR}")
+add_subdirectory(samples/no_damage)
+keels2_set_output(keels2_no_damage "plugins/${KEELS2_PLATFORM_DIR}")
 
 if(BUILD_TESTING)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_subdirectory(samples/adapter)
+
+    add_test(
+        NAME live_packaging_self_test
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/live/package-keels2-live.py"
+            --self-test
+    )
+    add_test(
+        NAME live_runner_self_test
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/live/run-keels2-09-live-gate.py"
+            --self-test
+    )
+
+    add_executable(keels2_game_adapter_loader_test
+        tests/game_adapter_loader.cpp
+        host/src/game_adapter_loader.cpp
+    )
+    target_include_directories(keels2_game_adapter_loader_test PRIVATE
+        host/src
+        platform/include
+        sdk/include
+    )
+    target_link_libraries(keels2_game_adapter_loader_test PRIVATE keels2_platform)
+    keels2_enable_warnings(keels2_game_adapter_loader_test)
+    add_dependencies(keels2_game_adapter_loader_test keels2_game_synthetic)
+    add_test(
+        NAME game_adapter_loader
+        COMMAND keels2_game_adapter_loader_test $<TARGET_FILE_DIR:keels2_game_synthetic>
+    )
+
+    add_test(
+        NAME export_contract
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/export_contract.py"
+            "bootstrap=$<TARGET_FILE:keels2_bootstrap>"
+            "host=$<TARGET_FILE:keels2_host>"
+            "adapter=$<TARGET_FILE:keels2_game_cs2>"
+            "plugin=$<TARGET_FILE:keels2_abi_v4_fixture_plugin>"
+    )
+
     if(WIN32)
         add_executable(keels2_windows_crash_monitor tools/windows_crash_monitor.cpp)
         target_link_libraries(keels2_windows_crash_monitor PRIVATE Dbghelp)
@@ -536,6 +642,18 @@ if(BUILD_TESTING)
     keels2_enable_warnings(keels2_abi_layout)
     add_test(NAME abi_layout COMMAND keels2_abi_layout)
 
+    add_executable(keels2_manifest_fuzz
+        tests/manifest_fuzz.cpp
+        host/src/plugin_manifest_validation.cpp
+        host/src/service_name_validation.cpp
+    )
+    target_include_directories(keels2_manifest_fuzz PRIVATE
+        host/src
+        sdk/include
+    )
+    keels2_enable_warnings(keels2_manifest_fuzz)
+    add_test(NAME manifest_fuzz COMMAND keels2_manifest_fuzz)
+
     add_executable(keels2_plugin_logging tests/plugin_logging.cpp)
     target_include_directories(keels2_plugin_logging PRIVATE sdk/include)
     keels2_enable_warnings(keels2_plugin_logging)
@@ -549,6 +667,16 @@ if(BUILD_TESTING)
         C_EXTENSIONS OFF
     )
     add_test(NAME source2_c_abi COMMAND keels2_source2_c_abi)
+
+    add_executable(keels2_source2_runtime_c_abi tests/source2_runtime_c_abi.c)
+    target_include_directories(keels2_source2_runtime_c_abi PRIVATE sdk/include)
+    set_target_properties(keels2_source2_runtime_c_abi PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED YES
+        C_EXTENSIONS NO
+    )
+    keels2_enable_warnings(keels2_source2_runtime_c_abi)
+    add_test(NAME source2_runtime_c_abi COMMAND keels2_source2_runtime_c_abi)
 
     add_executable(keels2_lifecycle_c_abi tests/lifecycle_c_abi.c)
     target_include_directories(keels2_lifecycle_c_abi PRIVATE sdk/include)
@@ -577,6 +705,16 @@ if(BUILD_TESTING)
     )
     add_test(NAME plugins_c_abi COMMAND keels2_plugins_c_abi)
 
+    add_executable(keels2_services_c_abi tests/services_c_abi.c)
+    target_include_directories(keels2_services_c_abi PRIVATE sdk/include)
+    set_target_properties(keels2_services_c_abi PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED YES
+        C_EXTENSIONS NO
+    )
+    keels2_enable_warnings(keels2_services_c_abi)
+    add_test(NAME services_c_abi COMMAND keels2_services_c_abi)
+
     add_executable(keels2_source2_callbacks_c_abi tests/source2_callbacks_c_abi.c)
     target_include_directories(keels2_source2_callbacks_c_abi PRIVATE sdk/include)
     set_target_properties(keels2_source2_callbacks_c_abi PROPERTIES
@@ -603,6 +741,10 @@ if(BUILD_TESTING)
     target_link_libraries(keels2_compatibility_test PRIVATE keels2_cs2_compatibility)
     keels2_enable_warnings(keels2_compatibility_test)
     add_test(NAME compatibility COMMAND keels2_compatibility_test)
+
+    add_executable(keels2_no_damage_policy tests/no_damage_policy.cpp)
+    keels2_enable_warnings(keels2_no_damage_policy)
+    add_test(NAME no_damage_policy COMMAND keels2_no_damage_policy)
 
     add_executable(keels2_compatibility_review_test tests/compatibility_review.cpp)
     target_include_directories(keels2_compatibility_review_test PRIVATE
@@ -645,6 +787,8 @@ if(BUILD_TESTING)
     target_include_directories(keels2_plugin_contract PRIVATE
         platform/include
         sdk/include
+    )
+    target_include_directories(keels2_plugin_contract SYSTEM PRIVATE
         "${KEELS2_SOURCE_SDK_RESOLVED_ROOT}/public"
         "${KEELS2_SOURCE_SDK_RESOLVED_ROOT}/public/engine"
         "${KEELS2_SOURCE_SDK_RESOLVED_ROOT}/public/mathlib"
@@ -823,6 +967,44 @@ if(BUILD_TESTING)
             --parallel
     )
     set_tests_properties(sdk_out_of_tree_build PROPERTIES DEPENDS sdk_out_of_tree_configure)
+
+    set(KEELS2_STANDALONE_ADAPTER_BUILD_DIR "${CMAKE_BINARY_DIR}/standalone-adapter")
+    set(KEELS2_STANDALONE_ADAPTER_CONFIGURE
+        ${CMAKE_COMMAND}
+        --fresh
+        -S "${CMAKE_CURRENT_SOURCE_DIR}/samples/adapter"
+        -B "${KEELS2_STANDALONE_ADAPTER_BUILD_DIR}"
+        "-DKeelS2_DIR=${KEELS2_SDK_INSTALL_DIR}/${KEELS2_CMAKE_INSTALL_DIR}"
+        "-DKEELS2_SOURCE_SDK_ROOT=${KEELS2_SOURCE_SDK_RESOLVED_ROOT}"
+    )
+    if(CMAKE_GENERATOR)
+        list(APPEND KEELS2_STANDALONE_ADAPTER_CONFIGURE -G "${CMAKE_GENERATOR}")
+    endif()
+    if(CMAKE_GENERATOR_PLATFORM)
+        list(APPEND KEELS2_STANDALONE_ADAPTER_CONFIGURE -A "${CMAKE_GENERATOR_PLATFORM}")
+    endif()
+    if(CMAKE_GENERATOR_TOOLSET)
+        list(APPEND KEELS2_STANDALONE_ADAPTER_CONFIGURE -T "${CMAKE_GENERATOR_TOOLSET}")
+    endif()
+    if(NOT KEELS2_MULTI_CONFIG)
+        list(APPEND KEELS2_STANDALONE_ADAPTER_CONFIGURE
+            "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
+    endif()
+    add_test(
+        NAME sdk_adapter_out_of_tree_configure
+        COMMAND ${KEELS2_STANDALONE_ADAPTER_CONFIGURE}
+    )
+    set_tests_properties(
+        sdk_adapter_out_of_tree_configure PROPERTIES DEPENDS sdk_install)
+    add_test(
+        NAME sdk_adapter_out_of_tree_build
+        COMMAND ${CMAKE_COMMAND}
+            --build "${KEELS2_STANDALONE_ADAPTER_BUILD_DIR}"
+            --config $<CONFIG>
+            --parallel
+    )
+    set_tests_properties(
+        sdk_adapter_out_of_tree_build PROPERTIES DEPENDS sdk_adapter_out_of_tree_configure)
 
     set(KEELS2_STANDALONE_LIFECYCLE_BUILD_DIR "${CMAKE_BINARY_DIR}/standalone-lifecycle")
     set(KEELS2_STANDALONE_LIFECYCLE_CONFIGURE
@@ -1149,12 +1331,12 @@ if(BUILD_TESTING)
     find_package(Threads REQUIRED)
     if(MSVC)
         set(KEELS2_KEELHOOK_TEST_PROFILE "test-fixture-win64")
-        set(KEELS2_KEELHOOK_LIVE_PROFILE "cs2-2000897-win64-33003672-d94e9db0d5b9b5c9")
+        set(KEELS2_KEELHOOK_LIVE_PROFILE "cs2-2000899-win64-33002648-43286dc938300339")
         set(KEELS2_SOURCE2_TEST_CVAR_MODULE "keels2_bootstrap_integration.exe")
         set(KEELS2_SOURCE2_LIVE_CVAR_MODULE "tier0.dll")
     else()
         set(KEELS2_KEELHOOK_TEST_PROFILE "test-fixture-linuxsteamrt64")
-        set(KEELS2_KEELHOOK_LIVE_PROFILE "cs2-2000897-linuxsteamrt64-40541720-9abcbab46e54de8e")
+        set(KEELS2_KEELHOOK_LIVE_PROFILE "cs2-2000899-linuxsteamrt64-40540568-542cc63d17821e66")
         set(KEELS2_SOURCE2_TEST_CVAR_MODULE "keels2_bootstrap_integration")
         set(KEELS2_SOURCE2_LIVE_CVAR_MODULE "libtier0.so")
     endif()
@@ -1216,6 +1398,7 @@ if(BUILD_TESTING)
     target_compile_definitions(keels2_source2_live_plugin PRIVATE
         KEELS2_SOURCE2_EXPECTED_PROFILE="${KEELS2_KEELHOOK_LIVE_PROFILE}"
         KEELS2_SOURCE2_EXPECTED_CVAR_MODULE="${KEELS2_SOURCE2_LIVE_CVAR_MODULE}"
+        KEELS2_SOURCE2_LIVE=1
     )
     set_target_properties(keels2_source2_service_plugin PROPERTIES
         OUTPUT_NAME keels2_source2_service_plugin
@@ -1430,6 +1613,44 @@ if(BUILD_TESTING)
     )
     keels2_enable_warnings(keels2_plugin_runtime_service_plugin)
 
+    add_library(keels2_abi_v4_fixture_plugin SHARED
+        tests/abi_v4_fixture_plugin.c
+    )
+    target_include_directories(keels2_abi_v4_fixture_plugin PRIVATE
+        tests/fixtures/0.9/include
+    )
+    target_compile_definitions(keels2_abi_v4_fixture_plugin PRIVATE
+        KEELS2_PLUGIN_BUILD=1
+    )
+    set_target_properties(keels2_abi_v4_fixture_plugin PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED YES
+        C_EXTENSIONS NO
+        C_VISIBILITY_PRESET hidden
+        PREFIX ""
+        OUTPUT_NAME keels2_abi_v4_fixture_plugin
+    )
+
+    foreach(role provider consumer)
+        add_library(keels2_published_service_${role}_plugin SHARED
+            tests/published_service_${role}_plugin.cpp
+        )
+        target_include_directories(keels2_published_service_${role}_plugin PRIVATE
+            tests/fixtures/0.9/include
+            tests
+        )
+        target_compile_definitions(keels2_published_service_${role}_plugin PRIVATE
+            KEELS2_PLUGIN_BUILD=1
+        )
+        set_target_properties(keels2_published_service_${role}_plugin PROPERTIES
+            CXX_VISIBILITY_PRESET hidden
+            VISIBILITY_INLINES_HIDDEN YES
+            PREFIX ""
+            OUTPUT_NAME keels2_published_service_${role}_plugin
+        )
+        keels2_enable_warnings(keels2_published_service_${role}_plugin)
+    endforeach()
+
     function(keels2_add_dependency_plugin target output_name friendly_name version)
         add_library(${target} SHARED tests/dependency_plugin.cpp)
         target_include_directories(${target} PRIVATE sdk/include)
@@ -1489,6 +1710,8 @@ if(BUILD_TESTING)
         games/cs2/include
         platform/include
         sdk/include
+    )
+    target_include_directories(keels2_bootstrap_integration SYSTEM PRIVATE
         "${KEELS2_SOURCE_SDK_RESOLVED_ROOT}/public"
         "${KEELS2_SOURCE_SDK_RESOLVED_ROOT}/public/engine"
         "${KEELS2_SOURCE_SDK_RESOLVED_ROOT}/public/mathlib"
@@ -1524,9 +1747,11 @@ if(BUILD_TESTING)
         )
     endif()
     target_link_libraries(keels2_bootstrap_integration PRIVATE keels2_platform)
+    add_dependencies(keels2_bootstrap_integration keels2_game_cs2)
     keels2_enable_warnings(keels2_bootstrap_integration)
     set(KEELS2_BOOTSTRAP_SCENARIOS
         success
+        abi_v4_compatibility
         unknown_build
         missing_host
         missing_plugin
@@ -1554,6 +1779,8 @@ if(BUILD_TESTING)
         plugin_runtime_concurrency
         plugin_transition_shutdown_retry
         plugin_dependencies
+        published_services
+        reload_retry
         lifecycle_pre_init
         lifecycle_failed_load
         failed_server_init
@@ -1608,6 +1835,9 @@ if(BUILD_TESTING)
                 $<TARGET_FILE:keels2_schema_entity_service_plugin>
                 $<TARGET_FILE:keels2_schema_entity_fixture>
                 $<TARGET_FILE:keels2_convar_authoring_plugin>
+                $<TARGET_FILE:keels2_published_service_provider_plugin>
+                $<TARGET_FILE:keels2_published_service_consumer_plugin>
+                $<TARGET_FILE:keels2_abi_v4_fixture_plugin>
                 ${CMAKE_BINARY_DIR}/integration-fixture
         )
     endforeach()

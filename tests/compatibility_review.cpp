@@ -7,6 +7,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -348,6 +349,65 @@ int main(int argc, char** argv)
         !HasCode(invalid_report, "profile-trust"))
     {
         return 20;
+    }
+
+    std::ifstream corpus_stream(candidate_path, std::ios::binary);
+    const std::string corpus{
+        std::istreambuf_iterator<char>(corpus_stream),
+        std::istreambuf_iterator<char>()};
+    if (corpus.empty())
+    {
+        return 26;
+    }
+    std::uint64_t fuzz_state = 0x43533250726f6669ull;
+    const auto next_fuzz = [&] {
+        fuzz_state ^= fuzz_state << 13;
+        fuzz_state ^= fuzz_state >> 7;
+        fuzz_state ^= fuzz_state << 17;
+        return fuzz_state;
+    };
+    const std::filesystem::path mutated_path = root / "mutated.tsv";
+    for (std::size_t iteration{}; iteration < 2048; ++iteration)
+    {
+        std::string mutated = corpus;
+        const std::size_t operations = 1 + static_cast<std::size_t>(next_fuzz() % 16u);
+        for (std::size_t operation{}; operation < operations; ++operation)
+        {
+            if (mutated.empty() || (next_fuzz() & 3u) == 0)
+            {
+                const std::size_t position = mutated.empty()
+                    ? 0
+                    : static_cast<std::size_t>(next_fuzz() % (mutated.size() + 1));
+                mutated.insert(
+                    mutated.begin() + static_cast<std::ptrdiff_t>(position),
+                    static_cast<char>(next_fuzz() & 0x7fu));
+            }
+            else if ((next_fuzz() & 3u) == 0)
+            {
+                mutated.erase(static_cast<std::size_t>(next_fuzz() % mutated.size()), 1);
+            }
+            else
+            {
+                mutated[static_cast<std::size_t>(next_fuzz() % mutated.size())] =
+                    static_cast<char>(next_fuzz() & 0x7fu);
+            }
+        }
+        if (!Write(mutated_path, mutated))
+        {
+            return 27;
+        }
+        review::Profile fuzz_profile;
+        review::CaptureRequest fuzz_request;
+        std::vector<review::ModuleInput> fuzz_bindings;
+        review::Report fuzz_profile_report;
+        review::Report fuzz_request_report;
+        review::Report fuzz_binding_report;
+        static_cast<void>(review::ReadProfile(
+            mutated_path, fuzz_profile, fuzz_profile_report));
+        static_cast<void>(review::ReadCaptureRequest(
+            mutated_path, fuzz_request, fuzz_request_report));
+        static_cast<void>(review::ReadBindings(
+            mutated_path, fuzz_bindings, fuzz_binding_report));
     }
 
     const std::filesystem::path pe_server = root / "server.dll";

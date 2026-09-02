@@ -59,6 +59,15 @@ KeelResult KeelCs2_ReadEntityField(
     const KeelCs2SchemaField* field,
     void* value,
     uint32_t value_size);
+KeelResult KeelCs2_ServerCommand(void* engine_server, const char* command);
+KeelResult KeelCs2_ClientConsolePrint(
+    void* engine_server,
+    int32_t slot,
+    const char* message);
+KeelResult KeelCs2_FindUserMessage(
+    void* network_messages,
+    const char* name,
+    uint32_t* message_id);
 
 #ifdef __cplusplus
 }

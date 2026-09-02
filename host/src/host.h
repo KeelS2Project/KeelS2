@@ -24,13 +24,16 @@ namespace keels2::host
 {
 
 class KeelHookService;
+class GameAdapterModule;
 class LifecycleService;
 class ConVarService;
 class PluginService;
 class SchemaEntityService;
 class Source2CallbacksService;
+class Source2RuntimeService;
+class PublishedServiceRegistry;
 
-inline constexpr const char* kHostVersion = "0.1.0-dev";
+inline constexpr const char* kHostVersion = "0.9.0";
 
 #if defined(_WIN32)
 inline constexpr const char* kPlatformName = "win64";
@@ -56,6 +59,15 @@ struct PluginDependencyRecord
     KeelPluginDependencyRequirement requirement{};
 };
 
+struct CompatibilityTargetRecord
+{
+    std::string name;
+    std::string module;
+    std::string pattern;
+    std::int64_t offset{};
+    std::uint32_t occurrence{};
+};
+
 struct PluginRecord
 {
     KeelPluginHandle handle{};
@@ -63,6 +75,7 @@ struct PluginRecord
     KeelPluginLoadFn load{};
     KeelPluginUnloadFn unload{};
     std::filesystem::path path;
+    std::filesystem::path transient_path;
     std::string name;
     std::string author;
     std::string version;
@@ -114,6 +127,8 @@ private:
     friend class PluginService;
     friend class SchemaEntityService;
     friend class Source2CallbacksService;
+    friend class Source2RuntimeService;
+    friend class PublishedServiceRegistry;
 
     Host() = default;
     ~Host();
@@ -129,13 +144,25 @@ private:
     void ShowGame();
     void ShowStatus();
     void ShowCredits();
+    void ShowInspectionMenu();
+    void ShowHookInspection();
+    void ShowInterfaceInspection();
+    void ShowServiceInspection();
+    void ShowResourceInspection();
+    void ShowProfileInspection();
     void ShowPluginList();
     void ShowPluginInfo(std::string_view selector);
     void ShowPluginCommands(const PluginRecord* plugin);
     void LoadPluginCommand(
         std::string_view filename,
         std::unique_lock<std::recursive_mutex>& state_lock);
-    void UnloadPluginCommand(
+    bool UnloadPluginCommand(
+        std::string_view selector,
+        std::unique_lock<std::recursive_mutex>& state_lock);
+    void ReloadPluginCommand(
+        std::string_view selector,
+        std::unique_lock<std::recursive_mutex>& state_lock);
+    void RetryPluginCommand(
         std::string_view selector,
         std::unique_lock<std::recursive_mutex>& state_lock);
     void PausePluginCommand(
@@ -177,6 +204,7 @@ private:
     bool ResolvePluginPath(std::string_view filename, std::filesystem::path& path);
     void RemoveCommandsOwnedBy(KeelPluginHandle owner);
     void SetCommandsOwnedEnabled(KeelPluginHandle owner, bool enabled);
+    void ClosePluginImage(PluginRecord& plugin) noexcept;
     void RemovePluginRecord(KeelPluginHandle handle);
     PluginRecord* PluginByHandle(KeelPluginHandle handle);
     const PluginRecord* PluginByHandle(KeelPluginHandle handle) const;
@@ -184,6 +212,7 @@ private:
     std::size_t PluginDisplayIndex(const PluginRecord* plugin) const;
     std::string PluginDisplayId(const PluginRecord* plugin) const;
     std::size_t PluginCommandCount(KeelPluginHandle owner) const;
+    std::string ResourceOwnerLabel(KeelPluginHandle owner) const;
 
     void PluginLog(KeelPluginHandle plugin, KeelLogLevel level, const char* message);
     KeelResult RegisterCommand(
@@ -298,13 +327,17 @@ private:
     std::string platform_;
     std::string game_version_;
     std::string compatibility_profile_;
-    std::unique_ptr<GameAdapter> adapter_;
+    std::vector<CompatibilityTargetRecord> compatibility_targets_;
+    std::unique_ptr<GameAdapterModule> adapter_module_;
+    GameAdapter* adapter_{};
     std::unique_ptr<KeelHookService> keelhook_;
     std::unique_ptr<LifecycleService> lifecycle_;
     std::unique_ptr<ConVarService> convars_;
     std::unique_ptr<PluginService> plugin_service_;
     std::unique_ptr<SchemaEntityService> schema_entities_;
     std::unique_ptr<Source2CallbacksService> source2_callbacks_;
+    std::unique_ptr<Source2RuntimeService> source2_runtime_;
+    std::unique_ptr<PublishedServiceRegistry> published_services_;
     KeelSource2ApiV1 source2_api_v1_{};
     KeelSource2Api source2_api_{};
     KeelSource2AuthoringApi source2_authoring_api_{};
@@ -317,7 +350,7 @@ private:
     std::vector<KeelPluginHandle> load_order_;
 };
 
-bool BeginGameCommandDispatch() noexcept;
+std::uint32_t BeginGameCommandDispatch() noexcept;
 void EndGameCommandDispatch() noexcept;
 
 }

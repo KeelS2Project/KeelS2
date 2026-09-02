@@ -23,7 +23,11 @@ enum class Capability : KeelSource2Capability
 enum class Factory : KeelSource2Factory
 {
     engine = KEELS2_SOURCE2_FACTORY_ENGINE,
-    server = KEELS2_SOURCE2_FACTORY_SERVER
+    server = KEELS2_SOURCE2_FACTORY_SERVER,
+    filesystem = KEELS2_SOURCE2_FACTORY_FILESYSTEM,
+    physics = KEELS2_SOURCE2_FACTORY_PHYSICS,
+    network = KEELS2_SOURCE2_FACTORY_NETWORK,
+    server_service = KEELS2_SOURCE2_FACTORY_SERVER_SERVICE
 };
 
 enum class Ownership : KeelSource2Ownership

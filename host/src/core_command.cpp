@@ -1,6 +1,11 @@
 #include "host.h"
+#include "convar_service.h"
+#include "keelhook_service.h"
+#include "published_service_registry.h"
 
 #include <algorithm>
+#include <iomanip>
+#include <sstream>
 
 namespace keels2::host
 {
@@ -113,6 +118,28 @@ void Host::DispatchCoreCommand(
                 WriteUsage("keel plugins unload <plugin>");
             }
         }
+        else if (EqualInsensitive(subcommand, "reload"))
+        {
+            if (invocation.argument_count == 3 && invocation.arguments[2])
+            {
+                ReloadPluginCommand(invocation.arguments[2], state_lock);
+            }
+            else
+            {
+                WriteUsage("keel plugins reload <plugin>");
+            }
+        }
+        else if (EqualInsensitive(subcommand, "retry"))
+        {
+            if (invocation.argument_count == 3 && invocation.arguments[2])
+            {
+                RetryPluginCommand(invocation.arguments[2], state_lock);
+            }
+            else
+            {
+                WriteUsage("keel plugins retry <plugin>");
+            }
+        }
         else if (EqualInsensitive(subcommand, "pause"))
         {
             if (invocation.argument_count == 3 && invocation.arguments[2])
@@ -138,6 +165,42 @@ void Host::DispatchCoreCommand(
         else
         {
             Write(KEEL_LOG_ERROR, "unknown or incomplete plugins subcommand; use keel plugins");
+        }
+        return;
+    }
+    if (EqualInsensitive(command, "inspect"))
+    {
+        if (invocation.argument_count == 1)
+        {
+            ShowInspectionMenu();
+        }
+        else if (invocation.argument_count != 2 || !invocation.arguments[1])
+        {
+            WriteUsage("keel inspect [hooks|interfaces|services|resources|profile]");
+        }
+        else if (EqualInsensitive(invocation.arguments[1], "hooks"))
+        {
+            ShowHookInspection();
+        }
+        else if (EqualInsensitive(invocation.arguments[1], "interfaces"))
+        {
+            ShowInterfaceInspection();
+        }
+        else if (EqualInsensitive(invocation.arguments[1], "services"))
+        {
+            ShowServiceInspection();
+        }
+        else if (EqualInsensitive(invocation.arguments[1], "resources"))
+        {
+            ShowResourceInspection();
+        }
+        else if (EqualInsensitive(invocation.arguments[1], "profile"))
+        {
+            ShowProfileInspection();
+        }
+        else
+        {
+            WriteUsage("keel inspect [hooks|interfaces|services|resources|profile]");
         }
         return;
     }
@@ -170,9 +233,141 @@ void Host::ShowMainMenu()
     WriteLine("  plugins - Manage and inspect plugins");
     WriteLine("  game    - List information about the game");
     WriteLine("  status  - Show host and plugin status");
+    WriteLine("  inspect - Inspect native resources and compatibility");
     WriteLine("  credits - About KeelS2");
     WriteLine("  version - Show version information");
     WriteLine("  help    - Show this menu or a command menu");
+}
+
+void Host::ShowInspectionMenu()
+{
+    WriteLine("KeelS2 Inspection Menu");
+    WriteLine("  hooks      - List targets, callbacks, owners, and activity");
+    WriteLine("  interfaces - List resolved Source 2 interfaces");
+    WriteLine("  services   - List built-in and plugin-published services");
+    WriteLine("  resources  - List commands and ConVars with owners");
+    WriteLine("  profile    - Show the active compatibility identity");
+}
+
+void Host::ShowHookInspection()
+{
+    const auto snapshots = keelhook_
+        ? keelhook_->Snapshots()
+        : std::vector<KeelHookService::TargetSnapshot>{};
+    WriteLine("Hook targets: " + std::to_string(snapshots.size()));
+    for (const auto& target : snapshots)
+    {
+        std::ostringstream address;
+        address << "0x" << std::hex << target.address;
+        WriteLine(
+            "  target " + std::to_string(target.handle) + " mechanism=" +
+            std::to_string(target.mechanism) + " address=" + address.str() +
+            " leases=" + std::to_string(target.leases) + " callbacks=" +
+            std::to_string(target.callbacks.size()) + " active=" +
+            std::to_string(target.active) + " module=" + target.module_path);
+        for (const auto& callback : target.callbacks)
+        {
+            WriteLine(
+                "    callback " + std::to_string(callback.handle) + " owner=" +
+                ResourceOwnerLabel(callback.owner) + " phases=" +
+                std::to_string(callback.phases) + " priority=" +
+                std::to_string(callback.priority) + " enabled=" +
+                (callback.enabled ? "yes" : "no") + " active=" +
+                std::to_string(callback.active));
+        }
+    }
+}
+
+void Host::ShowInterfaceInspection()
+{
+    const auto snapshots = adapter_
+        ? adapter_->InterfaceSnapshots()
+        : std::vector<GameInterfaceSnapshot>{};
+    WriteLine("Source 2 interfaces: " + std::to_string(snapshots.size()));
+    for (const auto& interface : snapshots)
+    {
+        WriteLine(
+            "  " + interface.name + " factory=" + std::to_string(interface.factory) +
+            " capability=" + std::to_string(interface.capability) + " owner=host module=" +
+            interface.module + " path=" + interface.module_path);
+    }
+}
+
+void Host::ShowServiceInspection()
+{
+    const std::array builtins{
+        "keels2.source2 v2",
+        "keels2.source2.authoring v1",
+        "keels2.source2.runtime v1",
+        "keels2.source2.callbacks v1",
+        "keels2.lifecycle v1",
+        "keels2.convars v1",
+        "keels2.plugins v1",
+        "keels2.schema v1",
+        "keels2.entities v1",
+        "keels2.services v1",
+        "keelhook v4"
+    };
+    WriteLine("Built-in services: " + std::to_string(builtins.size()));
+    for (const char* service : builtins)
+    {
+        WriteLine("  " + std::string(service) + " owner=host");
+    }
+    const auto published = published_services_
+        ? published_services_->Snapshots()
+        : std::vector<PublishedServiceRegistry::Snapshot>{};
+    WriteLine("Published services: " + std::to_string(published.size()));
+    for (const auto& service : published)
+    {
+        WriteLine(
+            "  " + service.name + " v" + std::to_string(service.version) + " owner=" +
+            ResourceOwnerLabel(service.provider) + " leases=" +
+            std::to_string(service.leases));
+    }
+}
+
+void Host::ShowResourceInspection()
+{
+    std::vector<const CommandRecord*> commands;
+    commands.reserve(commands_.size());
+    for (const auto& [handle, command] : commands_)
+    {
+        static_cast<void>(handle);
+        commands.push_back(command.get());
+    }
+    std::sort(commands.begin(), commands.end(), [](const auto* left, const auto* right) {
+        return left->name < right->name;
+    });
+    WriteLine("Commands: " + std::to_string(commands.size()));
+    for (const CommandRecord* command : commands)
+    {
+        WriteLine(
+            "  " + command->name + " owner=" + ResourceOwnerLabel(command->owner) +
+            " enabled=" +
+            (command->enabled.load(std::memory_order_acquire) ? "yes" : "no"));
+    }
+    const auto convars = convars_
+        ? convars_->Snapshots()
+        : std::vector<ConVarService::Snapshot>{};
+    WriteLine("ConVars: " + std::to_string(convars.size()));
+    for (const auto& convar : convars)
+    {
+        WriteLine(
+            "  " + convar.name + " owner=" + ResourceOwnerLabel(convar.owner) +
+            " handle=" + std::to_string(convar.handle) + " created=" +
+            (convar.created ? "yes" : "no") + " enabled=" +
+            (convar.enabled ? "yes" : "no") + " active=" +
+            std::to_string(convar.active));
+    }
+}
+
+void Host::ShowProfileInspection()
+{
+    WriteLine("Game adapter: " + game_);
+    WriteLine("Server version: " + game_version_);
+    WriteLine("Platform: " + platform_);
+    WriteLine("Compatibility identity: " + compatibility_profile_);
+    WriteLine("Server fingerprint: " + compatibility_profile_);
 }
 
 void Host::ShowPluginsMenu()
@@ -185,6 +380,8 @@ void Host::ShowPluginsMenu()
     WriteLine("  load <file>     - Load a plugin module");
     WriteLine("  pause <plugin>  - Pause a running plugin");
     WriteLine("  resume <plugin> - Resume a paused plugin");
+    WriteLine("  reload <plugin> - Reload a plugin with rollback");
+    WriteLine("  retry <plugin>  - Retry a failed plugin");
     WriteLine("  unload <plugin> - Unload a loaded plugin");
 }
 

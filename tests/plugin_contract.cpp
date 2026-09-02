@@ -199,7 +199,7 @@ int main(int argument_count, char** arguments)
     const CCommandContext context{CT_NO_TARGET, CPlayerSlot{-1}};
     const CCommand invocation{2, invocation_arguments};
     g_callback(&context, &invocation, g_user_data);
-    if (g_log_message != "KeelS2 0.1.0-dev is active. The basic native plugin is responding.")
+    if (g_log_message != "KeelS2 0.9.0 is active. The basic native plugin is responding.")
     {
         return 6;
     }

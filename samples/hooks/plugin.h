@@ -9,7 +9,7 @@ public:
     static constexpr keels2::PluginInfo Info{
         "KeelS2 Hooks Example",
         "KeelS2 Project",
-        "0.8.0",
+        "0.9.0",
         "Typed hooks with Valve method signatures"
     };
 

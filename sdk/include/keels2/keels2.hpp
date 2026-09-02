@@ -7,7 +7,9 @@
 #include <keels2/plugin.hpp>
 #include <keels2/plugins.h>
 #include <keels2/schema.hpp>
+#include <keels2/services.hpp>
 #include <keels2/source2.hpp>
+#include <keels2/source2_runtime.hpp>
 #include <keels2/source2_authoring.h>
 #include <keels2/source2_callbacks.h>
 #include <keels2/source2_hooks.hpp>
@@ -1648,6 +1650,32 @@ protected:
             priority);
     }
 
+    template <typename Signature, typename CallbackMethod>
+    bool HookProfilePre(
+        const char* target_name,
+        CallbackMethod callback_method,
+        int32 priority = 0)
+    {
+        return RegisterProfileHook<Signature>(
+            target_name,
+            callback_method,
+            keels2::kh::Phase::Pre,
+            priority);
+    }
+
+    template <typename Signature, typename CallbackMethod>
+    bool HookProfilePost(
+        const char* target_name,
+        CallbackMethod callback_method,
+        int32 priority = 0)
+    {
+        return RegisterProfileHook<Signature>(
+            target_name,
+            callback_method,
+            keels2::kh::Phase::Post,
+            priority);
+    }
+
     template <typename Value>
     bool FindSchemaField(
         const char* class_name,
@@ -1768,6 +1796,62 @@ private:
                     target_method,
                     callback_method,
                     profile,
+                    hook,
+                    phase,
+                    priority,
+                    *owner) != KEEL_RESULT_OK)
+            {
+                return false;
+            }
+            hooks_.push_back(std::move(hook));
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    template <typename Signature, typename CallbackMethod>
+    bool RegisterProfileHook(
+        const char* target_name,
+        CallbackMethod callback_method,
+        keels2::kh::Phase phase,
+        int32 priority)
+    {
+        static_assert(std::is_member_function_pointer_v<CallbackMethod>);
+        static_assert(keels2::kh::detail::CallbackCompatibility<
+            Signature,
+            keels2::kh::MethodSignatureOf<CallbackMethod>>::value);
+        using Owner = keels2::kh::MethodClassOf<CallbackMethod>;
+        static_assert(std::is_base_of_v<Plugin, Owner>);
+        if (!target_name || !target_name[0] ||
+            !hooks_accepting_.load(std::memory_order_acquire))
+        {
+            return false;
+        }
+        Owner* owner = dynamic_cast<Owner*>(this);
+        if (!owner)
+        {
+            return false;
+        }
+        try
+        {
+            std::scoped_lock lock(hooks_mutex_);
+            if (!hooks_accepting_.load(std::memory_order_acquire))
+            {
+                return false;
+            }
+            hooks_.reserve(hooks_.size() + 1);
+            keels2::kh::Service service;
+            if (service.Connect(context_) != KEEL_RESULT_OK)
+            {
+                return false;
+            }
+            keels2::kh::Hook hook;
+            if (service.AddMethodHook<Signature>(
+                    keels2::kh::TargetSpec::Profile(target_name),
+                    callback_method,
                     hook,
                     phase,
                     priority,

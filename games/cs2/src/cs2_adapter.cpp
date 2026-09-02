@@ -58,24 +58,30 @@ private:
     class EngineCommandCallback final : public cs2::ICommandCallback
     {
     public:
-        EngineCommandCallback(GameCommandCallback callback, void* user_data)
-            : callback_(callback), user_data_(user_data)
+        EngineCommandCallback(
+            const GameAdapterHostApi& host,
+            GameCommandCallback callback,
+            void* user_data)
+            : host_(host), callback_(callback), user_data_(user_data)
         {
         }
 
         void CommandCallback(const void* context, const void* command) override
         {
-            if (!BeginGameCommandDispatch())
+            if (!host_.begin_command_dispatch || !host_.end_command_dispatch ||
+                !host_.begin_command_dispatch())
             {
                 return;
             }
             struct DispatchScope
             {
+                void (*end)() noexcept;
+
                 ~DispatchScope()
                 {
-                    EndGameCommandDispatch();
+                    end();
                 }
-            } scope;
+            } scope{host_.end_command_dispatch};
 
             GameCommandInvocation invocation{};
             invocation.context = context;
@@ -107,16 +113,17 @@ private:
         }
 
     private:
+        GameAdapterHostApi host_{};
         GameCommandCallback callback_;
         void* user_data_;
     };
 
     struct CommandEntry
     {
-        CommandEntry(const GameCommandSpec& spec)
+        CommandEntry(const GameAdapterHostApi& host, const GameCommandSpec& spec)
             : name(spec.name),
               description(spec.description ? spec.description : ""),
-              callback(spec.callback, spec.user_data)
+              callback(host, spec.callback, spec.user_data)
         {
         }
 
@@ -167,6 +174,11 @@ private:
     };
 
 public:
+    explicit Cs2Adapter(const GameAdapterHostApi& host)
+        : host_(host)
+    {
+    }
+
     const char* Name() const override
     {
         return "cs2";
@@ -666,15 +678,15 @@ public:
         const char* interface_name,
         KeelSource2InterfaceInfo& info) override
     {
-        if ((factory != KEELS2_SOURCE2_FACTORY_ENGINE &&
-                factory != KEELS2_SOURCE2_FACTORY_SERVER) ||
+        if ((factory < KEELS2_SOURCE2_FACTORY_ENGINE ||
+                factory > KEELS2_SOURCE2_FACTORY_SERVER_SERVICE) ||
             !ValidInterfaceName(interface_name))
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
-        KeelCreateInterfaceFn interface_factory = factory == KEELS2_SOURCE2_FACTORY_ENGINE
-            ? engine_factory_
-            : server_factory_;
+        KeelCreateInterfaceFn interface_factory = factory == KEELS2_SOURCE2_FACTORY_SERVER
+            ? server_factory_
+            : engine_factory_;
         if (!interface_factory || compatibility_profile_.empty())
         {
             return KEEL_RESULT_NOT_READY;
@@ -718,6 +730,91 @@ public:
         };
         const auto position = named_interfaces_.emplace(std::move(key), std::move(entry)).first;
         return DescribeInterface(position->second, info);
+    }
+
+    KeelResult ServerCommand(const char* command, std::string& error) override
+    {
+        KeelSource2InterfaceInfo info{};
+        const KeelResult query = QueryNamedInterface(
+            KEELS2_SOURCE2_FACTORY_ENGINE,
+            "Source2EngineToServer001",
+            info);
+        if (query != KEEL_RESULT_OK)
+        {
+            error = "Source2EngineToServer001 is unavailable";
+            return query;
+        }
+        return KeelCs2_ServerCommand(info.instance, command);
+    }
+
+    std::vector<GameInterfaceSnapshot> InterfaceSnapshots() const override
+    {
+        std::vector<GameInterfaceSnapshot> output;
+        const auto append = [&](const InterfaceEntry& entry) {
+            if (entry.instance)
+            {
+                output.push_back({
+                    entry.capability,
+                    entry.factory,
+                    entry.name,
+                    entry.module,
+                    entry.module_path
+                });
+            }
+        };
+        append(server_);
+        append(game_clients_);
+        append(cvar_interface_);
+        append(engine_service_);
+        append(schema_system_);
+        append(game_resource_);
+        for (const auto& [key, entry] : named_interfaces_)
+        {
+            static_cast<void>(key);
+            append(entry);
+        }
+        std::sort(output.begin(), output.end(), [](const auto& left, const auto& right) {
+            return left.name != right.name
+                ? left.name < right.name
+                : left.factory < right.factory;
+        });
+        return output;
+    }
+
+    KeelResult ClientConsolePrint(
+        std::int32_t slot,
+        const char* message,
+        std::string& error) override
+    {
+        KeelSource2InterfaceInfo info{};
+        const KeelResult query = QueryNamedInterface(
+            KEELS2_SOURCE2_FACTORY_ENGINE,
+            "Source2EngineToServer001",
+            info);
+        if (query != KEEL_RESULT_OK)
+        {
+            error = "Source2EngineToServer001 is unavailable";
+            return query;
+        }
+        return KeelCs2_ClientConsolePrint(info.instance, slot, message);
+    }
+
+    KeelResult FindUserMessage(
+        const char* name,
+        std::uint32_t& message_id,
+        std::string& error) override
+    {
+        KeelSource2InterfaceInfo info{};
+        const KeelResult query = QueryNamedInterface(
+            KEELS2_SOURCE2_FACTORY_NETWORK,
+            "NetworkMessagesVersion001",
+            info);
+        if (query != KEEL_RESULT_OK)
+        {
+            error = "NetworkMessagesVersion001 is unavailable";
+            return query;
+        }
+        return KeelCs2_FindUserMessage(info.instance, name, &message_id);
     }
 
     KeelResult EnableLifecycleEvent(
@@ -1029,7 +1126,7 @@ public:
             return false;
         }
 
-        auto entry = std::make_unique<CommandEntry>(spec);
+        auto entry = std::make_unique<CommandEntry>(host_, spec);
         cs2::CommandCreation creation{};
         creation.name = entry->name.c_str();
         creation.help = entry->description.c_str();
@@ -3141,6 +3238,7 @@ private:
         return KH_ACTION_CONTINUE;
     }
 
+    GameAdapterHostApi host_{};
     InterfaceEntry server_;
     InterfaceEntry game_clients_;
     InterfaceEntry cvar_interface_;
@@ -3210,9 +3308,58 @@ private:
     std::vector<std::unique_ptr<CommandEntry>> retired_commands_;
 };
 
-std::unique_ptr<GameAdapter> CreateGameAdapter()
+namespace
 {
-    return std::make_unique<Cs2Adapter>();
+
+GameAdapter* CreateAdapter(const GameAdapterHostApi* host)
+{
+    if (!host || host->size != sizeof(GameAdapterHostApi) ||
+        host->abi_version != kGameAdapterAbiVersion ||
+        !host->begin_command_dispatch || !host->end_command_dispatch)
+    {
+        return nullptr;
+    }
+    try
+    {
+        return new Cs2Adapter(*host);
+    }
+    catch (...)
+    {
+        return nullptr;
+    }
 }
 
+void DestroyAdapter(GameAdapter* adapter)
+{
+    delete adapter;
+}
+
+}
+
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT std::uint32_t KeelGameAdapter_Query(
+    std::uint32_t abi_version,
+    keels2::host::GameAdapterProvider* provider)
+{
+    if (abi_version != keels2::host::kGameAdapterAbiVersion || !provider ||
+        provider->size != sizeof(keels2::host::GameAdapterProvider) ||
+        provider->abi_version != keels2::host::kGameAdapterAbiVersion)
+    {
+        return 0;
+    }
+#if defined(_WIN32)
+    constexpr const char* platform = "win64";
+#else
+    constexpr const char* platform = "linuxsteamrt64";
+#endif
+    *provider = {
+        sizeof(keels2::host::GameAdapterProvider),
+        keels2::host::kGameAdapterAbiVersion,
+        "cs2",
+        platform,
+        &keels2::host::CreateAdapter,
+        &keels2::host::DestroyAdapter
+    };
+    return 1;
 }

@@ -11,7 +11,7 @@ public:
     static constexpr keels2::PluginInfo Info{
         "KeelS2 Lifecycle Example",
         "KeelS2 Project",
-        "0.1.0-dev",
+        "0.9.0",
         "Observes Source 2 frame and client lifecycle events"
     };
 

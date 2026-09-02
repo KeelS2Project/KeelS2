@@ -8,6 +8,10 @@ _Static_assert(sizeof(KeelSource2ApiV1) == 16, "v1 API size");
 _Static_assert(sizeof(KeelSource2Api) == 24, "API size");
 _Static_assert(KEELS2_SOURCE2_API_VERSION_1 == 1, "v1 API version");
 _Static_assert(KEELS2_SOURCE2_API_VERSION == 2, "API version");
+_Static_assert(KEELS2_SOURCE2_FACTORY_FILESYSTEM == 3, "filesystem factory");
+_Static_assert(KEELS2_SOURCE2_FACTORY_PHYSICS == 4, "physics factory");
+_Static_assert(KEELS2_SOURCE2_FACTORY_NETWORK == 5, "network factory");
+_Static_assert(KEELS2_SOURCE2_FACTORY_SERVER_SERVICE == 6, "server service factory");
 _Static_assert(offsetof(KeelSource2InterfaceInfo, instance) == 24, "instance offset");
 _Static_assert(
     offsetof(KeelSource2InterfaceInfo, compatibility_profile) == 56,

@@ -9,7 +9,7 @@ public:
     static constexpr keels2::PluginInfo Info{
         "KeelS2 Source 2 Sample",
         "KeelS2 Project",
-        "0.7.0",
+        "0.9.0",
         "Source 2 lifecycle, commands, events, and ConVars"
     };
 

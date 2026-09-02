@@ -9,7 +9,7 @@ public:
     static constexpr keels2::PluginInfo Info{
         "KeelS2 Runtime Sample",
         "KeelS2 Project",
-        "0.5.0",
+        "0.9.0",
         "Plugin snapshots, dependencies, and managed runtime events"
     };
 
