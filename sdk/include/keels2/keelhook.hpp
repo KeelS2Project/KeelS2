@@ -1258,7 +1258,7 @@ std::optional<std::uint32_t> VirtualMethodIndex(Pointer method) noexcept
     {
         return std::nullopt;
     }
-    return byte_offset / sizeof(void*);
+    return static_cast<std::uint32_t>(byte_offset / sizeof(void*));
 #elif (defined(__GNUC__) || defined(__clang__)) && defined(__x86_64__)
     struct Representation
     {
