@@ -56,9 +56,12 @@ void AppendShutdownTrace(std::string_view event, std::string_view detail) noexce
     line[length++] = '\n';
 
 #if defined(_WIN32)
-    const wchar_t* path = _wgetenv(L"KEELS2_SHUTDOWN_TRACE_FILE");
-    if (!path || path[0] == L'\0')
+    wchar_t* path{};
+    std::size_t path_size{};
+    if (_wdupenv_s(&path, &path_size, L"KEELS2_SHUTDOWN_TRACE_FILE") != 0 ||
+        !path || path[0] == L'\0')
     {
+        std::free(path);
         return;
     }
     const HANDLE file = CreateFileW(
@@ -69,6 +72,7 @@ void AppendShutdownTrace(std::string_view event, std::string_view detail) noexce
         OPEN_ALWAYS,
         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH,
         nullptr);
+    std::free(path);
     if (file == INVALID_HANDLE_VALUE)
     {
         return;

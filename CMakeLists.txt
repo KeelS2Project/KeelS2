@@ -556,6 +556,7 @@ if(BUILD_TESTING)
         keels2_keelhook_backend_target
     )
     if(MSVC)
+        target_compile_options(keels2_keelhook_backend PRIVATE /wd4200)
         target_link_options(keels2_keelhook_backend PRIVATE /INCREMENTAL:NO)
     endif()
     keels2_enable_warnings(keels2_keelhook_backend)
@@ -589,6 +590,10 @@ if(BUILD_TESTING)
     )
     target_include_directories(keels2_keelhook_authoring PRIVATE tests)
     target_link_libraries(keels2_keelhook_authoring PRIVATE KeelS2::SDK)
+    target_compile_definitions(keels2_keelhook_authoring PRIVATE STATIC_TIER0)
+    if(MSVC)
+        target_compile_definitions(keels2_keelhook_authoring PRIVATE TIER0_DLL_EXPORT)
+    endif()
     keels2_enable_warnings(keels2_keelhook_authoring)
     add_test(NAME keelhook_authoring COMMAND keels2_keelhook_authoring)
 
@@ -656,6 +661,9 @@ if(BUILD_TESTING)
 
     add_executable(keels2_plugin_logging tests/plugin_logging.cpp)
     target_include_directories(keels2_plugin_logging PRIVATE sdk/include)
+    if(MSVC)
+        target_compile_options(keels2_plugin_logging PRIVATE /wd4702)
+    endif()
     keels2_enable_warnings(keels2_plugin_logging)
     add_test(NAME plugin_logging COMMAND keels2_plugin_logging)
 
@@ -801,11 +809,13 @@ if(BUILD_TESTING)
         RAD_TELEMETRY_DISABLED
         X64BITS
         PLATFORM_64BITS
+        STATIC_TIER0
     )
     if(MSVC)
         target_compile_definitions(keels2_plugin_contract PRIVATE
             COMPILER_MSVC
             COMPILER_MSVC64
+            TIER0_DLL_EXPORT
             WIN32
             WIN64
         )
@@ -838,7 +848,13 @@ if(BUILD_TESTING)
     )
     target_include_directories(keels2_authoring_contract_plugin PRIVATE sdk/include)
     target_link_libraries(keels2_authoring_contract_plugin PRIVATE KeelS2::SDK)
-    target_compile_definitions(keels2_authoring_contract_plugin PRIVATE KEELS2_PLUGIN_BUILD=1)
+    target_compile_definitions(keels2_authoring_contract_plugin PRIVATE
+        KEELS2_PLUGIN_BUILD=1
+        STATIC_TIER0
+    )
+    if(MSVC)
+        target_compile_definitions(keels2_authoring_contract_plugin PRIVATE TIER0_DLL_EXPORT)
+    endif()
     set_target_properties(keels2_authoring_contract_plugin PROPERTIES
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN YES
@@ -1239,6 +1255,9 @@ if(BUILD_TESTING)
 
     add_library(keels2_fake_server SHARED tests/fake_server.cpp)
     target_include_directories(keels2_fake_server PRIVATE bootstrap/include)
+    if(MSVC)
+        target_compile_options(keels2_fake_server PRIVATE /wd4996)
+    endif()
     set_target_properties(keels2_fake_server PROPERTIES
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN YES
@@ -1448,6 +1467,9 @@ if(BUILD_TESTING)
     foreach(target IN ITEMS keels2_lifecycle_service_plugin keels2_lifecycle_live_plugin)
         target_include_directories(${target} PRIVATE sdk/include)
         target_compile_definitions(${target} PRIVATE KEELS2_PLUGIN_BUILD=1)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /wd4996)
+        endif()
         set_target_properties(${target} PROPERTIES
             CXX_VISIBILITY_PRESET hidden
             VISIBILITY_INLINES_HIDDEN YES
@@ -1574,6 +1596,9 @@ if(BUILD_TESTING)
     add_library(keels2_convar_service_plugin SHARED tests/convar_service_plugin.cpp)
     target_include_directories(keels2_convar_service_plugin PRIVATE sdk/include)
     target_compile_definitions(keels2_convar_service_plugin PRIVATE KEELS2_PLUGIN_BUILD=1)
+    if(MSVC)
+        target_compile_options(keels2_convar_service_plugin PRIVATE /wd4996)
+    endif()
     set_target_properties(keels2_convar_service_plugin PROPERTIES
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN YES
