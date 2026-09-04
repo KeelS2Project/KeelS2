@@ -1813,6 +1813,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "[KeelHook Peer Fixture] shared typed lease reset and reuse passed") &&
             Contains(messages, "[KeelHook Peer Fixture] shared typed callbacks dispatched independently") &&
             Contains(messages, "plugin unload is busy in KeelHook: KeelHook Target Fixture") &&
+            Contains(messages, "object lifetimes, reference returns, and vafmt forwarding passed") &&
             Contains(messages, "detour, virtual scopes, aggregate calls, ordering, recursion, action semantics, explicit control, and concurrency passed") &&
             Contains(messages, "plugin paused: [01] KeelHook Target Fixture") &&
             Contains(messages, "plugin resumed: [01] KeelHook Target Fixture") &&
@@ -1824,7 +1825,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "concurrent unload probe armed") &&
             Contains(messages, "concurrent callback retained host API access during unload") &&
             Count(messages, "plugin loaded:") == 2 && Count(messages, "plugin unloaded:") == 2 &&
-            Count(messages, "KeelHook: target is already managed with an incompatible prototype") == 1 &&
+            Count(messages, "KeelHook: target is already managed with an incompatible prototype") == 2 &&
             !Contains(messages, "automatic target-owner cleanup failed");
     }
     if (scenario == "keelhook_shutdown_retry")

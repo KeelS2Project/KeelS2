@@ -923,7 +923,8 @@ KeelResult Host::QueryService(
             ? published_services_->Query(plugin, name, version, service)
             : KEEL_RESULT_NOT_FOUND;
     }
-    if (version != KEELHOOK_API_VERSION && version != KEELHOOK_API_VERSION_3)
+    if (version != KEELHOOK_API_VERSION && version != KEELHOOK_API_VERSION_4 &&
+        version != KEELHOOK_API_VERSION_3)
     {
         return KEEL_RESULT_INCOMPATIBLE;
     }
@@ -935,9 +936,18 @@ KeelResult Host::QueryService(
         plugin,
         owner->transient_path.empty() ? owner->path : owner->transient_path,
         owner->state == PluginState::loaded && !owner->loading);
-    *service = version == KEELHOOK_API_VERSION
-        ? static_cast<const void*>(&keelhook_->Api())
-        : static_cast<const void*>(&keelhook_->ApiV3());
+    if (version == KEELHOOK_API_VERSION)
+    {
+        *service = static_cast<const void*>(&keelhook_->Api());
+    }
+    else if (version == KEELHOOK_API_VERSION_4)
+    {
+        *service = static_cast<const void*>(&keelhook_->ApiV4());
+    }
+    else
+    {
+        *service = static_cast<const void*>(&keelhook_->ApiV3());
+    }
     return KEEL_RESULT_OK;
 }
 

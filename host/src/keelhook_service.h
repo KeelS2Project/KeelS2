@@ -43,6 +43,7 @@ public:
     KeelHookService& operator=(const KeelHookService&) = delete;
 
     const KeelHookApi& Api() const noexcept;
+    const KeelHookApiV4& ApiV4() const noexcept;
     const KeelHookApiV3& ApiV3() const noexcept;
     void Authorize(KeelPluginHandle plugin, const std::filesystem::path& path, bool active);
     void Activate(KeelPluginHandle plugin);

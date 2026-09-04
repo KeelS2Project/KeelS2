@@ -695,6 +695,16 @@ if(BUILD_TESTING)
     )
     add_test(NAME lifecycle_c_abi COMMAND keels2_lifecycle_c_abi)
 
+    add_executable(keels2_keelhook_c_abi tests/keelhook_c_abi.c)
+    target_include_directories(keels2_keelhook_c_abi PRIVATE sdk/include)
+    set_target_properties(keels2_keelhook_c_abi PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED YES
+        C_EXTENSIONS OFF
+    )
+    keels2_enable_warnings(keels2_keelhook_c_abi)
+    add_test(NAME keelhook_c_abi COMMAND keels2_keelhook_c_abi)
+
     add_executable(keels2_convar_c_abi tests/convar_c_abi.c)
     target_include_directories(keels2_convar_c_abi PRIVATE sdk/include)
     set_target_properties(keels2_convar_c_abi PROPERTIES

@@ -161,6 +161,26 @@ struct ReferenceOwner
     const std::int32_t* address{};
 };
 
+struct ReferenceResultOwner
+{
+    keels2::kh::Action Observe(
+        keels2::kh::Call<std::int32_t&>& call,
+        bool choose)
+    {
+        ++calls;
+        observed = call.Result();
+        selected = choose;
+        return call.SetResult(replacement)
+            ? keels2::kh::Action::Override
+            : keels2::kh::Action::Continue;
+    }
+
+    int calls{};
+    bool selected{};
+    std::int32_t* observed{};
+    std::int32_t replacement{91};
+};
+
 struct SlotOwner
 {
     void Observe(CPlayerSlot& slot)
@@ -797,6 +817,11 @@ using ReferenceDispatch = keels2::kh::detail::TypedCallback<
     false,
     &ReferenceOwner::Observe,
     ReferenceOwner>;
+using ReferenceResultDispatch = keels2::kh::detail::TypedCallback<
+    std::int32_t&(bool),
+    false,
+    &ReferenceResultOwner::Observe,
+    ReferenceResultOwner>;
 using SlotDispatch = keels2::kh::detail::TypedCallback<
     void(CPlayerSlot),
     false,
@@ -902,6 +927,21 @@ bool CheckMethodAndReferences()
     if (ReferenceDispatch::Dispatch(&reference_frame, &reference_owner) !=
             KH_ACTION_CONTINUE ||
         reference_owner.calls != 1 || reference_owner.address != &referenced)
+    {
+        return false;
+    }
+
+    ReferenceResultOwner result_owner;
+    std::array result_arguments{Boolean(true)};
+    KeelHookFrame result_frame = Frame(
+        KH_PHASE_POST,
+        result_arguments,
+        Pointer(&referenced));
+    if (ReferenceResultDispatch::Dispatch(&result_frame, &result_owner) !=
+            KH_ACTION_OVERRIDE ||
+        result_owner.calls != 1 || !result_owner.selected ||
+        result_owner.observed != &referenced ||
+        result_frame.result.scalar.pointer != &result_owner.replacement)
     {
         return false;
     }
@@ -1102,10 +1142,25 @@ bool CheckVirtualIndexes()
         &IServerGameClients::ClientCommand>();
     const auto client_disconnect = keels2::kh::VirtualIndex<
         &IServerGameClients::ClientDisconnect>();
+    using AdjustedMethod = std::int32_t (KeelHookVirtualFixtureMultiple::*)(std::int32_t);
+    const AdjustedMethod adjusted_method = static_cast<AdjustedMethod>(
+        &KeelHookVirtualFixtureSecondary::Adjusted);
+    const auto adjusted = keels2::kh::VirtualInfo(adjusted_method);
+    const std::int64_t expected_adjustment = KeelHookVirtualFixtureSecondaryOffset();
+    const auto adjusted_spec = keels2::kh::VirtualTargetSpec::Shared(
+        KeelHookVirtualFixtureMultipleInstance(),
+        0,
+        "test",
+        expected_adjustment,
+        8);
     return first && *first == 0 && second && *second == 1 && aggregate && *aggregate == 2 &&
         game_frame && *game_frame == 19 && client_connect && *client_connect == 12 &&
         client_command && *client_command == 17 &&
-        client_disconnect && *client_disconnect == 16;
+        client_disconnect && *client_disconnect == 16 && adjusted && adjusted->index == 0 &&
+        adjusted->this_adjustment == expected_adjustment && adjusted->vtable_offset == 0 &&
+        expected_adjustment > 0 &&
+        adjusted_spec.Raw().this_adjustment == expected_adjustment &&
+        adjusted_spec.Raw().vtable_offset == 8;
 }
 
 }

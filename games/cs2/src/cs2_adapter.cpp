@@ -909,7 +909,9 @@ public:
             0,
             0,
             instance,
-            compatibility_profile_.c_str()
+            compatibility_profile_.c_str(),
+            0,
+            0
         };
         KeelHookTargetHandle target{};
         KeelResult result = hooks.resolve_virtual_target(owner, &target_spec, prototype, &target);
@@ -2303,7 +2305,9 @@ private:
             0,
             0,
             instance,
-            compatibility_profile_.c_str()
+            compatibility_profile_.c_str(),
+            0,
+            0
         };
         KeelHookTargetHandle target{};
         KeelResult result = source2_hooks_api_->resolve_virtual_target(

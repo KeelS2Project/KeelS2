@@ -24,6 +24,28 @@ struct AbiPair
     float second;
 };
 
+struct AbiObject
+{
+    AbiObject() noexcept = default;
+
+    AbiObject(const AbiObject& other) noexcept
+        : value(other.value)
+    {
+    }
+
+    AbiObject& operator=(const AbiObject& other) noexcept
+    {
+        value = other.value;
+        return *this;
+    }
+
+    ~AbiObject() noexcept
+    {
+    }
+
+    std::int32_t value{};
+};
+
 template <>
 struct keels2::kh::AggregateTraits<AbiPair>
 {
@@ -40,7 +62,8 @@ static_assert(KEELS2_HOST_ABI_VERSION == 12);
 static_assert(KEELS2_PLUGIN_ABI_VERSION == 4);
 static_assert(KEELS2_PLUGIN_MANIFEST_VERSION == 1);
 static_assert(KEELHOOK_API_VERSION_3 == 3);
-static_assert(KEELHOOK_API_VERSION == 4);
+static_assert(KEELHOOK_API_VERSION_4 == 4);
+static_assert(KEELHOOK_API_VERSION == 5);
 static_assert(KEELS2_SOURCE2_API_VERSION_1 == 1);
 static_assert(KEELS2_SOURCE2_API_VERSION == 2);
 static_assert(KEELS2_SOURCE2_RUNTIME_API_VERSION == 1);
@@ -83,12 +106,16 @@ static_assert(sizeof(KeelHookScalar) == 16);
 static_assert(sizeof(KeelHookValue) == 24);
 static_assert(sizeof(KeelHookAggregateField) == 24);
 static_assert(sizeof(KeelHookAggregate) == 24);
-static_assert(sizeof(KeelHookPrototype) == 48);
+static_assert(sizeof(KeelHookObject) == 56);
+static_assert(sizeof(KeelHookPrototypeV4) == 48);
+static_assert(sizeof(KeelHookPrototype) == 64);
 static_assert(sizeof(KeelHookTargetSpec) == 72);
-static_assert(sizeof(KeelHookVirtualTargetSpec) == 40);
+static_assert(sizeof(KeelHookVirtualTargetSpecV4) == 40);
+static_assert(sizeof(KeelHookVirtualTargetSpec) == 56);
 static_assert(sizeof(KeelHookFrame) == 56);
 static_assert(sizeof(KeelHookCallbackSpec) == 32);
 static_assert(sizeof(KeelHookApiV3) == 48);
+static_assert(sizeof(KeelHookApiV4) == 72);
 static_assert(sizeof(KeelHookApi) == 72);
 static_assert(sizeof(KeelLifecycleGameFrame) == 16);
 static_assert(sizeof(KeelLifecycleClientConnected) == 48);
@@ -128,9 +155,19 @@ static_assert(offsetof(KeelServicesApi, publish) == 8);
 static_assert(offsetof(KeelServicesApi, release) == 24);
 static_assert(offsetof(KeelHookFrame, arguments) == 24);
 static_assert(offsetof(KeelHookFrame, result) == 32);
+static_assert(offsetof(KeelHookObject, identity) == 16);
+static_assert(offsetof(KeelHookObject, destroy) == 48);
+static_assert(offsetof(KeelHookPrototype, return_object) == 48);
+static_assert(offsetof(KeelHookPrototype, argument_objects) == 56);
+static_assert(offsetof(KeelHookVirtualTargetSpec, this_adjustment) == 40);
+static_assert(offsetof(KeelHookVirtualTargetSpec, vtable_offset) == 48);
 static_assert(offsetof(KeelHookApiV3, resolve_target) == 8);
 static_assert(offsetof(KeelHookApiV3, remove_callback) == 32);
 static_assert(offsetof(KeelHookApiV3, resolve_virtual_target) == 40);
+static_assert(offsetof(KeelHookApiV4, resolve_target) == 8);
+static_assert(offsetof(KeelHookApiV4, call_original) == 48);
+static_assert(offsetof(KeelHookApiV4, recall) == 56);
+static_assert(offsetof(KeelHookApiV4, set_callback_enabled) == 64);
 static_assert(offsetof(KeelHookApi, resolve_target) == 8);
 static_assert(offsetof(KeelHookApi, call_original) == 48);
 static_assert(offsetof(KeelHookApi, recall) == 56);
@@ -201,11 +238,16 @@ static_assert(std::is_standard_layout_v<KeelHookScalar>);
 static_assert(std::is_standard_layout_v<KeelHookValue>);
 static_assert(std::is_standard_layout_v<KeelHookAggregateField>);
 static_assert(std::is_standard_layout_v<KeelHookAggregate>);
+static_assert(std::is_standard_layout_v<KeelHookObject>);
+static_assert(std::is_standard_layout_v<KeelHookPrototypeV4>);
 static_assert(std::is_standard_layout_v<KeelHookPrototype>);
 static_assert(std::is_standard_layout_v<KeelHookTargetSpec>);
+static_assert(std::is_standard_layout_v<KeelHookVirtualTargetSpecV4>);
 static_assert(std::is_standard_layout_v<KeelHookVirtualTargetSpec>);
 static_assert(std::is_standard_layout_v<KeelHookFrame>);
 static_assert(std::is_standard_layout_v<KeelHookCallbackSpec>);
+static_assert(std::is_standard_layout_v<KeelHookApiV3>);
+static_assert(std::is_standard_layout_v<KeelHookApiV4>);
 static_assert(std::is_standard_layout_v<KeelHookApi>);
 static_assert(std::is_standard_layout_v<KeelLifecycleGameFrame>);
 static_assert(std::is_standard_layout_v<KeelLifecycleClientConnected>);
@@ -252,6 +294,25 @@ static_assert(
 static_assert(
     keels2::kh::Prototype<AbiPair(AbiPair)>::value.argument_aggregates[0]->field_count == 2);
 static_assert(keels2::kh::Prototype<AbiPair(AbiPair)>::value.fixed_argument_count == 1);
+static_assert(keels2::kh::ManagedObject<AbiObject>);
+static_assert(keels2::kh::Prototype<AbiObject(AbiObject)>::value.return_aggregate == nullptr);
+static_assert(
+    keels2::kh::Prototype<AbiObject(AbiObject)>::value.return_object->byte_size ==
+    sizeof(AbiObject));
+static_assert(
+    keels2::kh::Prototype<AbiObject(AbiObject)>::value.argument_objects[0] ==
+    keels2::kh::Prototype<AbiObject(AbiObject)>::value.return_object);
+static_assert(keels2::kh::Prototype<std::int32_t&(bool)>::value.return_type == KH_VALUE_POINTER);
+static_assert(keels2::kh::VafmtPrototype<std::int32_t(std::int32_t)>::value.argument_count == 2);
+static_assert(
+    keels2::kh::VafmtPrototype<std::int32_t(std::int32_t)>::arguments[1] == KH_VALUE_POINTER);
+static_assert(
+    keels2::kh::VafmtPrototype<std::int32_t(std::int32_t)>::value.flags == KH_PROTOTYPE_VAFMT);
+static_assert(
+    keels2::kh::MethodVafmtPrototype<std::int32_t(std::int32_t)>::value.argument_count == 3);
+static_assert(
+    keels2::kh::MethodVafmtPrototype<std::int32_t(std::int32_t)>::arguments[0] ==
+    KH_VALUE_POINTER);
 
 void CheckMethodResolution(
     keels2::kh::Service& service,
@@ -259,6 +320,17 @@ void CheckMethodResolution(
     keels2::kh::Target& target)
 {
     static_cast<void>(service.ResolveMethod<AbiPair(AbiPair)>(spec, target));
+}
+
+void CheckVafmtResolution(
+    keels2::kh::Service& service,
+    const keels2::kh::TargetSpec& target_spec,
+    const keels2::kh::VirtualTargetSpec& virtual_spec,
+    keels2::kh::Target& target)
+{
+    static_cast<void>(service.ResolveVafmt<std::int32_t(std::int32_t)>(target_spec, target));
+    static_cast<void>(service.ResolveMethodVafmt<std::int32_t(std::int32_t)>(target_spec, target));
+    static_cast<void>(service.ResolveVafmt<std::int32_t(std::int32_t)>(virtual_spec, target));
 }
 
 int main()
