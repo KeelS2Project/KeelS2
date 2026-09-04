@@ -305,7 +305,7 @@ extern "C" KeelResult KeelCs2_FindUserMessage(
     }
     *message_id = 0;
     auto* messages = static_cast<INetworkMessages*>(network_messages);
-    INetworkMessageInternal* message = messages->FindNetworkMessage(name);
+    INetworkMessageInternal* message = messages->FindNetworkMessagePartial(name);
     if (!message)
     {
         return KEEL_RESULT_NOT_FOUND;

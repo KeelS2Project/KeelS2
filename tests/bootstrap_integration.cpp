@@ -2,6 +2,7 @@
 #include <keels2/convar.h>
 #include <keels2/cs2/cvar_abi.h>
 #include <igameevents.h>
+#include <networksystem/inetworkserializer.h>
 #include <playerslot.h>
 #include <keels2/lifecycle.h>
 #include <keels2/platform/dynamic_library.h>
@@ -1168,6 +1169,53 @@ std::uint32_t g_transient_interface_queries{};
 void* g_schema_system_interface{};
 void* g_game_resource_interface{};
 
+std::byte g_user_message{};
+struct NetworkMessageInfoFixture
+{
+    int categories{};
+    IProtobufBinding* binding{};
+    std::array<std::byte, sizeof(CUtlString)> group{};
+    NetworkMessageId message_id{118};
+    NetworkGroupId group_id{};
+    std::uint8_t flags{};
+    int first_unknown{};
+    int second_unknown{};
+    bool redispatch{};
+};
+static_assert(
+    offsetof(NetworkMessageInfoFixture, message_id) ==
+    offsetof(NetMessageInfo_t, m_MessageId));
+NetworkMessageInfoFixture g_user_message_info{};
+
+NetMessageInfo_t* GetNetworkMessageInfoFixture(void*, INetworkMessageInternal* message)
+{
+    return message == reinterpret_cast<INetworkMessageInternal*>(&g_user_message)
+        ? reinterpret_cast<NetMessageInfo_t*>(&g_user_message_info)
+        : nullptr;
+}
+
+INetworkMessageInternal* FindNetworkMessageFixture(void*, const char*)
+{
+    return nullptr;
+}
+
+INetworkMessageInternal* FindNetworkMessagePartialFixture(void*, const char* name)
+{
+    return name && std::strcmp(name, "SayText2") == 0
+        ? reinterpret_cast<INetworkMessageInternal*>(&g_user_message)
+        : nullptr;
+}
+
+std::array<void*, 15> g_network_messages_vtable = [] {
+    std::array<void*, 15> table{};
+    table[0] = FunctionAddress(&NamedInterfaceFixture);
+    table[12] = FunctionAddress(&GetNetworkMessageInfoFixture);
+    table[13] = FunctionAddress(&FindNetworkMessageFixture);
+    table[14] = FunctionAddress(&FindNetworkMessagePartialFixture);
+    return table;
+}();
+RawInterface g_network_messages{g_network_messages_vtable.data()};
+
 std::array<void*, 8> g_loop_vtable = [] {
     std::array<void*, 8> table{};
     table[0] = FunctionAddress(&LoopInitFixture);
@@ -1268,6 +1316,10 @@ void* EngineFactory(const char* name, int* return_code)
     else if (name && std::strcmp(name, "NetworkSystemVersion001") == 0)
     {
         result = &g_named_interface;
+    }
+    else if (name && std::strcmp(name, "NetworkMessagesVersion001") == 0)
+    {
+        result = &g_network_messages;
     }
     else if (name && std::strcmp(name, "TransientService001") == 0 &&
         ++g_transient_interface_queries > 1)
@@ -2845,7 +2897,7 @@ int main(int argument_count, char** arguments)
     }
     if (source2_service)
     {
-        if (!g_cvar.Dispatch({"s2_check"}) ||
+        if (!g_cvar.Dispatch({"s2_check", "0"}) ||
             !g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
             g_cvar.HasActive("s2_check") || g_cvar.ActiveCount() != 1 ||
             g_cvar.unregister_count != 1)

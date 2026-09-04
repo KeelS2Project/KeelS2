@@ -61,6 +61,7 @@ struct alignas(KEELHOOK_MAX_AGGREGATE_ALIGNMENT) KeelHookFixtureObject
     }
 
     std::int32_t value{};
+    std::array<std::int32_t, 3> alignment{};
     static inline std::atomic<std::int32_t> live{};
     static inline std::atomic<std::uint32_t> copies{};
     static inline std::atomic<std::uint32_t> assignments{};
@@ -74,7 +75,7 @@ extern "C" KEELS2_PLUGIN_EXPORT std::int32_t KeelHookPauseFixtureTarget(
 extern "C" KEELS2_PLUGIN_EXPORT std::int32_t KeelHookControlFixtureTarget(
     std::int32_t left,
     std::int32_t right);
-extern "C" KEELS2_PLUGIN_EXPORT KeelHookFixtureObject KeelHookObjectFixtureTarget(
+KEELS2_PLUGIN_EXPORT KeelHookFixtureObject KeelHookObjectFixtureTarget(
     KeelHookFixtureObject value);
 extern "C" KEELS2_PLUGIN_EXPORT std::int32_t& KeelHookReferenceFixtureTarget(bool alternate);
 extern "C" KEELS2_PLUGIN_EXPORT std::int32_t KeelHookVafmtFixtureTarget(
@@ -1735,7 +1736,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KEELHOOK_NOINLINE std::int32_t KeelHookControlFi
     return left * 10 + right;
 }
 
-extern "C" KEELS2_PLUGIN_EXPORT KEELHOOK_NOINLINE KeelHookFixtureObject
+KEELS2_PLUGIN_EXPORT KEELHOOK_NOINLINE KeelHookFixtureObject
 KeelHookObjectFixtureTarget(KeelHookFixtureObject value)
 {
     g_object_original_calls.fetch_add(1, std::memory_order_relaxed);
@@ -2006,6 +2007,18 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+#if defined(KEELHOOK_FIXTURE_PROFILE_TARGET)
+    profile_target.symbol = "fixture.absent.target";
+    rejected = {};
+    if (g_hook->resolve_target(
+            plugin,
+            &profile_target,
+            &prototype,
+            &rejected) != KEEL_RESULT_NOT_FOUND || rejected)
+    {
+        return KEEL_FALSE;
+    }
+#endif
     profile_target.module = "invalid";
     if (g_hook->resolve_target(
             plugin,

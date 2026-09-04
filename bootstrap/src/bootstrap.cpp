@@ -575,6 +575,17 @@ private:
             return;
         }
 
+        std::vector<std::string> target_modules;
+        target_modules.reserve(profile_->target_count);
+        for (std::uint32_t index{}; index < profile_->target_count; ++index)
+        {
+            const auto& target = profile_->targets[index];
+            target_modules.emplace_back(
+                std::strcmp(target.module, profile_->server_module) == 0
+                    ? real_server_path_.string()
+                    : target.module);
+        }
+
         std::vector<KeelHostCompatibilityTargetInfo> targets;
         targets.reserve(profile_->target_count);
         for (std::uint32_t index{}; index < profile_->target_count; ++index)
@@ -585,7 +596,7 @@ private:
                 target.occurrence,
                 target.offset,
                 target.name,
-                target.module,
+                target_modules[index].c_str(),
                 target.pattern
             });
         }

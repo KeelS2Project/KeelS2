@@ -42,6 +42,26 @@ constexpr std::array windows_damage_targets{
     }
 };
 
+constexpr std::array linux_fixture_targets{
+    CompatibilityTarget{
+        "fixture.absent.target",
+        "libserver.so",
+        "DE AD BE EF FA CE C0 DE BA AD F0 0D",
+        0,
+        0
+    }
+};
+
+constexpr std::array windows_fixture_targets{
+    CompatibilityTarget{
+        "fixture.absent.target",
+        "server.dll",
+        "DE AD BE EF FA CE C0 DE BA AD F0 0D",
+        0,
+        0
+    }
+};
+
 constexpr CompatibilityProfile Profile(
     const char* id,
     const char* game_version,
@@ -301,6 +321,8 @@ const CompatibilityProfile& FixtureCompatibilityProfile(const char* platform_nam
         profile.schema_module = "keels2_schema_entity_fixture.so";
         profile.game_resource_module = "keels2_schema_entity_fixture.so";
         profile.entity_system_module = "keels2_schema_entity_fixture.so";
+        profile.targets = linux_fixture_targets.data();
+        profile.target_count = static_cast<std::uint32_t>(linux_fixture_targets.size());
         return profile;
     }();
     static const CompatibilityProfile windows_profile = [] {
@@ -316,6 +338,8 @@ const CompatibilityProfile& FixtureCompatibilityProfile(const char* platform_nam
         profile.schema_module = "keels2_schema_entity_fixture.dll";
         profile.game_resource_module = "keels2_schema_entity_fixture.dll";
         profile.entity_system_module = "keels2_schema_entity_fixture.dll";
+        profile.targets = windows_fixture_targets.data();
+        profile.target_count = static_cast<std::uint32_t>(windows_fixture_targets.size());
         return profile;
     }();
     return platform_name && std::strcmp(platform_name, "win64") == 0 ? windows_profile : linux_profile;

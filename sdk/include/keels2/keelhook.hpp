@@ -391,11 +391,11 @@ struct ObjectMetadata
         }
     }
 
-    static void Destroy(void* value) noexcept
+    static void Destroy(void* object) noexcept
     {
-        if (value)
+        if (object)
         {
-            std::destroy_at(static_cast<Plain*>(value));
+            std::destroy_at(static_cast<Plain*>(object));
         }
     }
 

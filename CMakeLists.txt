@@ -556,7 +556,9 @@ if(BUILD_TESTING)
         keels2_keelhook_backend_target
     )
     if(MSVC)
-        target_compile_options(keels2_keelhook_backend PRIVATE /wd4200)
+        target_compile_options(keels2_keelhook_backend PRIVATE
+            $<$<COMPILE_LANGUAGE:C,CXX>:/wd4200>
+        )
         target_link_options(keels2_keelhook_backend PRIVATE /INCREMENTAL:NO)
     endif()
     keels2_enable_warnings(keels2_keelhook_backend)
@@ -1390,6 +1392,7 @@ if(BUILD_TESTING)
     endforeach()
     target_compile_definitions(keels2_keelhook_target_plugin PRIVATE
         KEELHOOK_FIXTURE_PROFILE="${KEELS2_KEELHOOK_TEST_PROFILE}"
+        KEELHOOK_FIXTURE_PROFILE_TARGET=1
     )
     target_compile_definitions(keels2_keelhook_live_target_plugin PRIVATE
         KEELHOOK_FIXTURE_PROFILE="${KEELS2_KEELHOOK_LIVE_PROFILE}"
@@ -1747,6 +1750,8 @@ if(BUILD_TESTING)
         sdk/include
     )
     target_include_directories(keels2_bootstrap_integration SYSTEM PRIVATE
+        "${CMAKE_BINARY_DIR}/_keels2/source-sdk/${KEELS2_SOURCE_SDK_REVISION}/generated"
+        "${KEELS2_SOURCE_SDK_RESOLVED_ROOT}/thirdparty/protobuf-3.21.8/src"
         "${KEELS2_SOURCE_SDK_RESOLVED_ROOT}/public"
         "${KEELS2_SOURCE_SDK_RESOLVED_ROOT}/public/engine"
         "${KEELS2_SOURCE_SDK_RESOLVED_ROOT}/public/mathlib"

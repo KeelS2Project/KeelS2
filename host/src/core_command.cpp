@@ -259,11 +259,21 @@ void Host::ShowHookInspection()
     {
         std::ostringstream address;
         address << "0x" << std::hex << target.address;
+        std::ostringstream closure;
+        closure << "0x" << std::hex << target.closure;
+        std::ostringstream slot;
+        slot << "0x" << std::hex << target.virtual_slot;
+        std::ostringstream installed;
+        installed << "0x" << std::hex << target.installed_address;
         WriteLine(
             "  target " + std::to_string(target.handle) + " mechanism=" +
             std::to_string(target.mechanism) + " address=" + address.str() +
             " leases=" + std::to_string(target.leases) + " callbacks=" +
-            std::to_string(target.callbacks.size()) + " active=" +
+            std::to_string(target.callbacks.size()) + " bindings=" +
+            std::to_string(target.bindings) + " physical=" +
+            (target.physical_enabled ? "enabled" : "disabled") + " integrity=" +
+            (target.physical_intact ? "intact" : "changed") + " closure=" + closure.str() +
+            " slot=" + slot.str() + " installed=" + installed.str() + " active=" +
             std::to_string(target.active) + " module=" + target.module_path);
         for (const auto& callback : target.callbacks)
         {
@@ -276,6 +286,7 @@ void Host::ShowHookInspection()
                 std::to_string(callback.active));
         }
     }
+    WriteLine("Hook inspection complete");
 }
 
 void Host::ShowInterfaceInspection()

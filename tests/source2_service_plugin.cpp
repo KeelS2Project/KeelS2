@@ -508,9 +508,8 @@ private:
         {
             return;
         }
-#if defined(KEELS2_SOURCE2_LIVE)
         std::int32_t slot{};
-        const char* slot_argument = invocation.Size() == 2 ? invocation[1] : nullptr;
+        const char* slot_argument = invocation.Size() == 1 ? invocation[0] : nullptr;
         const std::string_view slot_text = slot_argument ? slot_argument : "";
         const auto parsed = std::from_chars(
             slot_text.data(),
@@ -522,6 +521,7 @@ private:
             context_->Log(KEEL_LOG_ERROR, "usage: s2_check <connected-client-slot>");
             return;
         }
+#if defined(KEELS2_SOURCE2_LIVE)
         std::uint32_t message_id{};
         const KeelResult server_command = runtime_.ServerCommand(
             "echo [KeelS2 Live] server command passed\n");
@@ -529,13 +529,13 @@ private:
             slot,
             "[KeelS2 Live] client console print passed\n");
         const KeelResult user_message = runtime_.FindUserMessage(
-            "CCSUsrMsg_SayText2",
+            "SayText2",
             message_id);
         const bool valid = ValidateInterfaces() && ValidateNamedInterfaces() &&
             server_command == KEEL_RESULT_OK && client_print == KEEL_RESULT_OK &&
-            user_message == KEEL_RESULT_OK && message_id == 306;
+            user_message == KEEL_RESULT_OK && message_id == 118;
         const std::string result = valid
-            ? "Source 2 live runtime validation passed message_id=306"
+            ? "Source 2 live runtime validation passed message_id=118"
             : "Source 2 live runtime validation failed server=" +
                 std::to_string(server_command) + " client=" +
                 std::to_string(client_print) + " user_message=" +
@@ -543,17 +543,17 @@ private:
                 std::to_string(message_id);
         context_->Log(valid ? KEEL_LOG_INFO : KEEL_LOG_ERROR, result.c_str());
 #else
-        static_cast<void>(invocation);
         std::uint32_t message_id{99};
-        const bool valid = ValidateInterfaces() && ValidateNamedInterfaces() &&
+        const bool valid = slot == 0 && ValidateInterfaces() && ValidateNamedInterfaces() &&
             runtime_.ServerCommand(nullptr) == KEEL_RESULT_INVALID_ARGUMENT &&
             runtime_.ClientConsolePrint(-1, "invalid") == KEEL_RESULT_INVALID_ARGUMENT &&
             runtime_.FindUserMessage("invalid name", message_id) ==
                 KEEL_RESULT_INVALID_ARGUMENT && message_id == 0 &&
             runtime_.ServerCommand("echo runtime") == KEEL_RESULT_NOT_FOUND &&
             runtime_.ClientConsolePrint(0, "runtime") == KEEL_RESULT_NOT_FOUND &&
-            runtime_.FindUserMessage("CS_UM_SayText2", message_id) ==
-                KEEL_RESULT_NOT_FOUND && message_id == 0;
+            runtime_.FindUserMessage("missing", message_id) == KEEL_RESULT_NOT_FOUND &&
+            message_id == 0 && runtime_.FindUserMessage("SayText2", message_id) ==
+                KEEL_RESULT_OK && message_id == 118;
         context_->Log(
             valid ? KEEL_LOG_INFO : KEEL_LOG_ERROR,
             valid

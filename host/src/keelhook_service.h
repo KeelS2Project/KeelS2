@@ -31,8 +31,14 @@ public:
         KeelHookTargetHandle handle{};
         KeelHookMechanism mechanism{};
         std::uintptr_t address{};
+        std::uintptr_t closure{};
+        std::uintptr_t virtual_slot{};
+        std::uintptr_t installed_address{};
         std::string module_path;
         std::size_t leases{};
+        std::size_t bindings{};
+        bool physical_enabled{};
+        bool physical_intact{};
         std::uint32_t active{};
         std::vector<CallbackSnapshot> callbacks;
     };

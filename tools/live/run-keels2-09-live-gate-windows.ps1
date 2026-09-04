@@ -4,7 +4,8 @@ param(
     [int]$ClientSlot = 0,
     [int]$Port = 27035,
     [string]$Map = "de_dust2",
-    [switch]$SkipGameplay
+    [switch]$SkipGameplay,
+    [switch]$VerboseServerOutput
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,5 +19,6 @@ $Arguments = @(
 )
 if ($BuildId) { $Arguments += @("--build-id", $BuildId) }
 if ($SkipGameplay) { $Arguments += "--skip-gameplay" }
+if ($VerboseServerOutput) { $Arguments += "--verbose-server-output" }
 & python @Arguments
 exit $LASTEXITCODE

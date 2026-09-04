@@ -3997,15 +3997,34 @@ KeelHookService::Implementation::Snapshots() const
     output.reserve(targets_.size());
     for (const auto& [handle, target] : targets_)
     {
-        KeelHookService::TargetSnapshot snapshot{
-            handle,
-            target->key.mechanism,
-            reinterpret_cast<std::uintptr_t>(target->address),
-            target->module_path.string(),
-            target->leases.size(),
-            target->active.load(std::memory_order_acquire),
-            {}
-        };
+        KeelHookService::TargetSnapshot snapshot;
+        snapshot.handle = handle;
+        snapshot.mechanism = target->key.mechanism;
+        snapshot.address = reinterpret_cast<std::uintptr_t>(target->address);
+        snapshot.module_path = target->module_path.string();
+        snapshot.leases = target->leases.size();
+        snapshot.bindings = target->bindings.size();
+        snapshot.active = target->active.load(std::memory_order_acquire);
+        {
+            std::scoped_lock physical_lock(target->physical_mutex);
+            snapshot.closure = reinterpret_cast<std::uintptr_t>(target->closure);
+            snapshot.virtual_slot = reinterpret_cast<std::uintptr_t>(target->virtual_slot);
+            snapshot.physical_enabled = PhysicalEnabled(*target);
+            snapshot.physical_intact = snapshot.physical_enabled;
+            if (target->key.mechanism == KH_MECHANISM_VIRTUAL && target->virtual_slot)
+            {
+                std::atomic_ref<void*> slot(*target->virtual_slot);
+                void* installed = slot.load(std::memory_order_acquire);
+                snapshot.installed_address = reinterpret_cast<std::uintptr_t>(installed);
+                void* expected = snapshot.physical_enabled ? target->closure : target->address;
+                snapshot.physical_intact = installed == expected;
+            }
+            else if (target->key.mechanism == KH_MECHANISM_VIRTUAL_INSTANCE &&
+                target->instance_table)
+            {
+                snapshot.physical_intact = target->instance_table->table->Intact();
+            }
+        }
         snapshot.callbacks.reserve(target->callbacks.size());
         for (const auto& callback : target->callbacks)
         {

@@ -16,6 +16,7 @@ import tempfile
 import threading
 import time
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 
@@ -23,11 +24,15 @@ class GateFailure(RuntimeError):
     pass
 
 
+ACTION_TIMEOUT = 600.0
+
+
 class Transcript:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, echo: bool):
         self.path = path
         self.lock = threading.Condition()
         self.text = ""
+        self.echo = echo
 
     def append(self, data: bytes) -> None:
         value = data.decode("utf-8", errors="replace")
@@ -35,15 +40,29 @@ class Transcript:
             self.text += value
             with self.path.open("a", encoding="utf-8", newline="") as handle:
                 handle.write(value)
+            if self.echo:
+                sys.stdout.write(value)
+                sys.stdout.flush()
             self.lock.notify_all()
-        sys.stdout.write(value)
-        sys.stdout.flush()
+
+    def set_echo(self, enabled: bool) -> bool:
+        with self.lock:
+            previous = self.echo
+            self.echo = enabled
+            return previous
 
     def position(self) -> int:
         with self.lock:
             return len(self.text)
 
-    def wait(self, marker: str, after: int, timeout: float, process: subprocess.Popen[bytes]) -> None:
+    def wait(
+        self,
+        marker: str,
+        after: int,
+        timeout: float,
+        process: subprocess.Popen[bytes],
+        fail_on_timeout: bool = True,
+    ) -> bool:
         deadline = time.monotonic() + timeout
         with self.lock:
             while marker not in self.text[after:]:
@@ -52,8 +71,11 @@ class Transcript:
                         f"server exited with status {process.returncode} while waiting for: {marker}")
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise GateFailure(f"timed out waiting for: {marker}")
+                    if fail_on_timeout:
+                        raise GateFailure(f"timed out waiting for: {marker}")
+                    return False
                 self.lock.wait(min(remaining, 0.25))
+        return True
 
 
 class Server:
@@ -133,6 +155,28 @@ class Server:
     def expect(self, command: str, marker: str, timeout: float = 30.0) -> None:
         position = self.send(command)
         self.transcript.wait(marker, position, timeout, self.process)
+
+    def poll(
+        self,
+        command: str,
+        marker: str,
+        timeout: float = 30.0,
+        interval: float = 0.5,
+    ) -> None:
+        position = self.transcript.position()
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise GateFailure(f"timed out waiting for: {marker}")
+            self.send(command)
+            if self.transcript.wait(
+                    marker,
+                    position,
+                    min(interval, remaining),
+                    self.process,
+                    False):
+                return
 
     def stop(self) -> int | None:
         if self.process.poll() is None:
@@ -272,15 +316,32 @@ def stage(fixture_root: Path, plugin_root: Path, source: str, target: str) -> Pa
     return target_path
 
 
-def checkpoint(message: str) -> None:
+@contextmanager
+def action(
+    transcript: Transcript,
+    number: int,
+    title: str,
+    instructions: tuple[str, ...],
+):
+    previous_echo = transcript.set_echo(False)
     print()
-    print(message)
+    print("=" * 78)
+    print(f"ACTION REQUIRED {number}/4: {title}")
+    print("=" * 78)
+    for index, instruction in enumerate(instructions, 1):
+        print(f"  {index}. {instruction}")
+    print()
+    print("No Enter key is needed. The runner will continue as soon as it detects completion.")
+    sys.stdout.flush()
+    completed = False
     try:
-        response = input("Press Enter when this is complete, or type abort: ").strip().lower()
-    except EOFError as error:
-        raise GateFailure("interactive gameplay input ended") from error
-    if response == "abort":
-        raise GateFailure("operator aborted the live gate")
+        yield
+        completed = True
+    finally:
+        if completed:
+            print(f"ACTION {number}/4: PASS")
+            sys.stdout.flush()
+        transcript.set_echo(previous_echo)
 
 
 def archive_evidence(source: Path, output: Path, platform_key: str) -> None:
@@ -368,7 +429,14 @@ def run_gate(args: argparse.Namespace) -> int:
     work = Path(tempfile.mkdtemp(prefix="keels2-live-gate-"))
     evidence = work / evidence_name
     evidence.mkdir()
-    transcript = Transcript(evidence / "server.log")
+    transcript = Transcript(evidence / "server.log", args.verbose_server_output)
+    print("KeelS2 0.9 live gate")
+    print(f"Server: {server_root}")
+    print(f"Client port: {args.port}")
+    if args.verbose_server_output:
+        print("Dedicated-server output is visible except while an action is required.")
+    else:
+        print("Dedicated-server output is hidden here and preserved in the evidence archive.")
     result: dict[str, object] = {
         "schema": 1,
         "build_id": actual_build,
@@ -432,15 +500,21 @@ def run_gate(args: argparse.Namespace) -> int:
         command.extend([
             "-dedicated", "-console", "-usercon", "-insecure", "-nobots",
             "-port", str(args.port), "+game_type", "0", "+game_mode", "0",
+            "+sv_hibernate_when_empty", "0", "+sv_cheats", "1",
             "+map", args.map,
         ])
+        print()
+        print("AUTOMATED PHASE 1/3: Starting CS2 and validating KeelS2")
         server = Server(command, server_root / "game", transcript)
         start = 0
         transcript.wait(
             f"selected compatibility profile: {config['profile']}", start, 180, server.process)
         transcript.wait("host started for cs2", start, 180, server.process)
+        server.expect("keel inspect hooks", "Hook inspection complete")
         transcript.wait("Source 2 interface gateway load validation passed", start, 60, server.process)
         transcript.wait("schema field resolution passed", start, 60, server.process)
+        transcript.wait("64 player server started", start, 60, server.process)
+        server.expect("keel inspect hooks", "Hook inspection complete")
         transcript.wait("[Lifecycle Test] live GameFrame observed", start, 60, server.process)
         transcript.wait("versioned service consumed", start, 60, server.process)
         transcript.wait("resolver and incompatible-prototype checks passed", start, 60, server.process)
@@ -450,8 +524,11 @@ def run_gate(args: argparse.Namespace) -> int:
         server.expect("keel inspect interfaces", "Source 2 interfaces")
         server.expect("keel inspect services", "Built-in services")
         server.expect("keel inspect resources", "Commands:")
-        server.expect("keel inspect hooks", "Hook targets:")
+        server.expect("keel inspect hooks", "Hook inspection complete")
+        print("AUTOMATED PHASE 1/3: PASS")
 
+        print()
+        print("AUTOMATED PHASE 2/3: Exercising reload, dependency, and KeelHook behavior")
         shutil.copy2(fixture_root / ("basic" + extension), retry_path)
         server.expect(
             'keel plugins retry "Failing Test Plugin"',
@@ -507,11 +584,14 @@ def run_gate(args: argparse.Namespace) -> int:
         server.expect(
             'keel plugins unload "KeelHook Target Fixture"',
             "automatic target-owner cleanup passed before module unload")
+        print("AUTOMATED PHASE 2/3: PASS")
 
         if args.skip_gameplay:
             result["operator_gate_passed"] = True
             raise GateFailure("operator gate passed, but --skip-gameplay leaves the live gate incomplete")
 
+        print()
+        print("AUTOMATED PHASE 3/3: Preparing live-client validation")
         server.expect("keel_schema_entity_live snapshot", "entity snapshot captured")
         callback_files = (
             ("callback_observer" + extension, "08_callback_observer" + extension, "KeelS2 0.5E Observer"),
@@ -527,27 +607,144 @@ def run_gate(args: argparse.Namespace) -> int:
             f'keel plugins load "{Path(no_damage_target).stem}"',
             "ready target=cs2.base_entity.take_damage policy=direct-player-weapons")
 
-        checkpoint(
-            "Connect a real client. The first attempt must be rejected with the KeelS2 priority "
-            "message; reconnect and wait until the player is fully in-game.")
-        server.expect(f"s2_check {args.client_slot}", "Source 2 live runtime validation passed message_id=306")
-        server.expect("keel_schema_entity_live capture", "entity creation, lookup, and typed read passed")
-        server.send("bot_add_t")
+        connection_position = transcript.position()
+        with action(transcript, 1, "Connect twice", (
+            f"Connect to 127.0.0.1:{args.port} and allow the intentional rejection.",
+            "Reconnect to the same address.",
+            "Join Counter-Terrorists and wait until you are alive in-game.",
+        )):
+            transcript.wait(
+                "NETWORK_DISCONNECT_REJECTED_BY_GAME",
+                connection_position,
+                ACTION_TIMEOUT,
+                server.process)
+            print("  DETECTED: intentional first-connection rejection")
+            transcript.wait(
+                "SIGNONSTATE_FULL",
+                connection_position,
+                ACTION_TIMEOUT,
+                server.process)
+            transcript.wait(
+                f"verb=jointeam argument=3 slot={args.client_slot}",
+                connection_position,
+                ACTION_TIMEOUT,
+                server.process)
+        server.expect(f"s2_check {args.client_slot}", "Source 2 live runtime validation passed message_id=118")
+        server.poll(
+            "keel_schema_entity_live capture",
+            "entity creation, lookup, and typed read passed",
+            60)
+        server.send("mp_limitteams 0")
+        server.send("mp_autoteambalance 0")
+        server.send("mp_friendlyfire 1")
+        server.send("mp_freezetime 0")
+        server.send("sv_cheats 1")
         server.send("bot_stop 1")
-        checkpoint(
-            "From the connected client, send `say keels2_blocked`, shoot the stationary bot and "
-            "confirm its health does not fall, then take fall or world damage and confirm that damage does apply.")
-        server.expect("keel_no_damage_status", "status ready=true")
-        checkpoint("Disconnect the client and wait until the server reports the departure.")
-        server.expect("keel_schema_entity_live stale", "entity destruction invalidation passed")
-        checkpoint("Reconnect the same client and wait until the replacement player is fully in-game.")
-        server.expect("keel_schema_entity_live replacement", "replacement entity validation passed")
+        server.send("bot_zombie 1")
+        bot_position = server.send("bot_add_t")
+        target_bot_position = server.send("bot_add_ct")
+        server.send("mp_warmup_end")
+        transcript.wait("<BOT><TERRORIST>", bot_position, 90, server.process)
+        transcript.wait("<BOT><CT>", target_bot_position, 90, server.process)
+        transcript.wait("event=round_start", bot_position, 90, server.process)
+
+        status_position = server.send("keel_no_damage_status")
+        transcript.wait("status ready=true", status_position, 30, server.process)
+        baseline_damage = damage_result(transcript.text)
+        if not baseline_damage:
+            raise GateFailure("could not read the initial damage-hook counters")
+        baseline_passthrough = (
+            baseline_damage["non_player_source"] +
+            baseline_damage["self"] +
+            baseline_damage["unrelated"])
+        command_rejection = (
+            "[05E Decision A] ClientCommand priority=20 verb=keels2_blocked "
+            f"argument= slot={args.client_slot} decision=reject")
+        gameplay_position = transcript.position()
+        reported: set[str] = set()
+        with action(transcript, 2, "Run the gameplay probes", (
+            "Open the CS2 developer console.",
+            "Enter exactly: cmd keels2_blocked",
+            "Close the console and shoot the stationary CT bot near your spawn once.",
+            "Open the console and enter: hurtme 10",
+            "Wait here; the runner verifies all three results automatically.",
+        )):
+            deadline = time.monotonic() + ACTION_TIMEOUT
+            while True:
+                status_position = server.send("keel_no_damage_status")
+                transcript.wait("status ready=true", status_position, 10, server.process)
+                current_damage = damage_result(transcript.text)
+                if not current_damage:
+                    raise GateFailure("could not read the damage-hook counters")
+                if current_damage["result_errors"] != 0:
+                    raise GateFailure("the damage hook could not set its superseding result")
+                command_ok = command_rejection in transcript.text[gameplay_position:]
+                blocked_ok = current_damage["blocked"] > baseline_damage["blocked"]
+                passthrough = (
+                    current_damage["non_player_source"] +
+                    current_damage["self"] +
+                    current_damage["unrelated"])
+                passthrough_ok = passthrough > baseline_passthrough
+                checks = (
+                    ("command", command_ok, "client-command rejection"),
+                    ("blocked", blocked_ok, "player weapon damage blocked"),
+                    ("passthrough", passthrough_ok, "self damage passed through"),
+                )
+                for key, passed, label in checks:
+                    if passed and key not in reported:
+                        reported.add(key)
+                        print(f"  DETECTED: {label}")
+                if command_ok and blocked_ok and passthrough_ok:
+                    break
+                if time.monotonic() >= deadline:
+                    missing = [label for _, passed, label in checks if not passed]
+                    raise GateFailure(
+                        "timed out waiting for gameplay probes: " + ", ".join(missing))
+                time.sleep(1)
+
+        disconnect_position = transcript.position()
+        with action(transcript, 3, "Disconnect", (
+            "Disconnect the client from the server.",
+            "Remain disconnected while the runner validates the retired entity handle.",
+        )):
+            transcript.wait(
+                "SIGNONSTATE_FULL -> SIGNONSTATE_NONE",
+                disconnect_position,
+                ACTION_TIMEOUT,
+                server.process)
+        server.poll(
+            "keel_schema_entity_live stale",
+            "entity destruction invalidation passed",
+            60)
+
+        reconnect_position = transcript.position()
+        with action(transcript, 4, "Reconnect", (
+            f"Reconnect to 127.0.0.1:{args.port}.",
+            "Join Counter-Terrorists and wait until you are alive in-game.",
+        )):
+            transcript.wait(
+                "SIGNONSTATE_FULL",
+                reconnect_position,
+                ACTION_TIMEOUT,
+                server.process)
+            transcript.wait(
+                f"verb=jointeam argument=3 slot={args.client_slot}",
+                reconnect_position,
+                ACTION_TIMEOUT,
+                server.process)
+        server.poll(
+            "keel_schema_entity_live replacement",
+            "replacement entity validation passed",
+            60)
         next_map = "de_inferno" if args.map != "de_inferno" else "de_dust2"
         map_position = server.send(f"changelevel {next_map}")
         transcript.wait("map epoch invalidation passed", map_position, 180, server.process)
         transcript.wait("LevelShutdown", map_position, 180, server.process)
         transcript.wait("LevelInit", map_position, 180, server.process)
-        server.expect("keel_schema_entity_live world", "post-reload world lookup and typed read passed", 90)
+        server.poll(
+            "keel_schema_entity_live world",
+            "post-reload world lookup and typed read passed",
+            90)
 
         for name in (
             "KeelS2 0.5E Decision B",
@@ -564,16 +761,28 @@ def run_gate(args: argparse.Namespace) -> int:
         text = transcript.text
         required = (
             "[05E Observer] ClientConnect priority=50",
-            "[05E Decision A] ClientConnect priority=20",
-            "[05E Decision B] ClientConnect priority=20",
-            "decision=reject",
-            "[05E Decision A] ClientCommand priority=20",
-            "decision=reject",
+            "[05E Observer] ClientCommand priority=50 verb=keels2_blocked "
+            f"argument= slot={args.client_slot} decision=accept",
+            command_rejection,
+            "[05E Decision B] ClientCommand priority=20 verb=keels2_blocked "
+            f"argument= slot={args.client_slot} decision=accept",
             "event=round_start",
             "dispatch benchmark ns/call: no-hook=",
             "concurrent callback retained host API access during unload",
         )
         missing = [marker for marker in required if marker not in text]
+        connection_patterns = (
+            (
+                "Decision A connection rejection",
+                r"\[05E Decision A\] ClientConnect priority=20 [^\r\n]* decision=reject",
+            ),
+            (
+                "Decision B connection rejection",
+                r"\[05E Decision B\] ClientConnect priority=20 [^\r\n]* decision=reject",
+            ),
+        )
+        missing.extend(
+            label for label, pattern in connection_patterns if not re.search(pattern, text))
         damage = damage_result(text)
         if missing:
             raise GateFailure(f"required live markers were not observed: {missing}")
@@ -586,6 +795,7 @@ def run_gate(args: argparse.Namespace) -> int:
         result["operator_gate_passed"] = True
         result["gameplay_gate_passed"] = True
         result["passed"] = True
+        print("AUTOMATED PHASE 3/3: PASS")
     except Exception as error:
         failure = str(error)
         result["failure"] = failure
@@ -611,6 +821,8 @@ def run_gate(args: argparse.Namespace) -> int:
             "Source 2 live runtime validation failed",
             "map epoch invalidation failed",
             "profile-backed damage hook registration failed",
+            "Convar 'bot_stop' is cheat protected, change ignored",
+            "Convar 'bot_zombie' is cheat protected, change ignored",
             "unsupported cs2 server module",
             "could not load host",
         )
@@ -676,6 +888,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=27035)
     parser.add_argument("--map", default="de_dust2")
     parser.add_argument("--skip-gameplay", action="store_true")
+    parser.add_argument("--verbose-server-output", action="store_true")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
