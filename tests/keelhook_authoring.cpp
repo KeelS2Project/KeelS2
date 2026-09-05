@@ -1143,8 +1143,21 @@ bool CheckVirtualIndexes()
     const auto client_disconnect = keels2::kh::VirtualIndex<
         &IServerGameClients::ClientDisconnect>();
     using AdjustedMethod = std::int32_t (KeelHookVirtualFixtureMultiple::*)(std::int32_t);
-    const AdjustedMethod adjusted_method = static_cast<AdjustedMethod>(
+    AdjustedMethod adjusted_method = static_cast<AdjustedMethod>(
         &KeelHookVirtualFixtureSecondary::Adjusted);
+#if defined(_MSC_VER) && defined(_M_X64)
+    static_assert(sizeof(AdjustedMethod) == sizeof(void*) * 2);
+    std::array<std::uint8_t, sizeof(AdjustedMethod)> adjusted_representation{};
+    adjusted_representation.fill(0xA5);
+    std::memcpy(
+        adjusted_representation.data(),
+        &adjusted_method,
+        sizeof(void*) + sizeof(std::int32_t));
+    std::memcpy(
+        &adjusted_method,
+        adjusted_representation.data(),
+        sizeof(adjusted_method));
+#endif
     const auto adjusted = keels2::kh::VirtualInfo(adjusted_method);
     const std::int64_t expected_adjustment = KeelHookVirtualFixtureSecondaryOffset();
     const auto adjusted_spec = keels2::kh::VirtualTargetSpec::Shared(

@@ -1528,18 +1528,6 @@ std::optional<VirtualMethodInfo> VirtualMethod(Pointer method) noexcept
     {
         return std::nullopt;
     }
-    if constexpr (sizeof(Pointer) == sizeof(void*) * 2)
-    {
-        std::int32_t virtual_offset{};
-        std::memcpy(
-            &virtual_offset,
-            representation.data() + sizeof(void*) + sizeof(std::int32_t),
-            sizeof(virtual_offset));
-        if (virtual_offset != 0)
-        {
-            return std::nullopt;
-        }
-    }
     const auto* code = reinterpret_cast<const std::uint8_t*>(thunk);
     if (code[0] == 0xE9)
     {
