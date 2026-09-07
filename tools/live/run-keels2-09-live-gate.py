@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import datetime as dt
 import hashlib
 import json
@@ -78,21 +79,218 @@ class Transcript:
         return True
 
 
+if os.name == "nt":
+    from ctypes import wintypes
+
+    class ConsoleCharacter(ctypes.Union):
+        _fields_ = [
+            ("UnicodeChar", wintypes.WCHAR),
+            ("AsciiChar", wintypes.CHAR),
+        ]
+
+    class ConsoleKeyEvent(ctypes.Structure):
+        _fields_ = [
+            ("KeyDown", wintypes.BOOL),
+            ("RepeatCount", wintypes.WORD),
+            ("VirtualKeyCode", wintypes.WORD),
+            ("VirtualScanCode", wintypes.WORD),
+            ("Character", ConsoleCharacter),
+            ("ControlKeyState", wintypes.DWORD),
+        ]
+
+    class ConsoleEvent(ctypes.Union):
+        _fields_ = [("KeyEvent", ConsoleKeyEvent)]
+
+    class ConsoleInputRecord(ctypes.Structure):
+        _fields_ = [
+            ("EventType", wintypes.WORD),
+            ("Event", ConsoleEvent),
+        ]
+
+
+class WindowsConsoleInput:
+    def __init__(self, target_pid: int):
+        if os.name != "nt":
+            raise GateFailure("Windows console input is unavailable on this platform")
+        self.target_pid = target_pid
+
+    def inject(self, command: str) -> None:
+        if os.name != "nt":
+            raise GateFailure("Windows console input is unavailable on this platform")
+        target_pid = self.target_pid
+        self.kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.kernel32.FreeConsole.argtypes = []
+        self.kernel32.FreeConsole.restype = wintypes.BOOL
+        self.kernel32.AttachConsole.argtypes = [wintypes.DWORD]
+        self.kernel32.AttachConsole.restype = wintypes.BOOL
+        self.kernel32.CreateFileW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        self.kernel32.CreateFileW.restype = wintypes.HANDLE
+        self.kernel32.WriteConsoleInputW.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(ConsoleInputRecord),
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        self.kernel32.WriteConsoleInputW.restype = wintypes.BOOL
+        self.kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        self.kernel32.CloseHandle.restype = wintypes.BOOL
+        self.user32 = ctypes.WinDLL("user32", use_last_error=True)
+        self.user32.VkKeyScanW.argtypes = [wintypes.WCHAR]
+        self.user32.VkKeyScanW.restype = wintypes.SHORT
+        self.user32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
+        self.user32.MapVirtualKeyW.restype = wintypes.UINT
+
+        self.kernel32.FreeConsole()
+        deadline = time.monotonic() + 5
+        while not self.kernel32.AttachConsole(target_pid):
+            error = ctypes.get_last_error()
+            if time.monotonic() >= deadline:
+                raise GateFailure(
+                    f"could not attach to Windows server console for PID {target_pid}: "
+                    f"{ctypes.WinError(error)}")
+            time.sleep(0.05)
+
+        console = self.kernel32.CreateFileW(
+            "CONIN$", 0xC0000000, 0x00000003, None, 3, 0, None)
+        invalid = ctypes.c_void_p(-1).value
+        if not console or console == invalid:
+            error = ctypes.get_last_error()
+            self.kernel32.FreeConsole()
+            raise GateFailure(f"could not open Windows server console input: {ctypes.WinError(error)}")
+
+        try:
+            text = command + "\r"
+            events = (ConsoleInputRecord * (len(text) * 2))()
+            for index, character in enumerate(text):
+                if character == "\r":
+                    virtual_key = 0x0D
+                    control_state = 0
+                else:
+                    translated = self.user32.VkKeyScanW(character)
+                    if translated == -1:
+                        raise GateFailure(
+                            f"Windows console cannot translate command character: {character!r}")
+                    virtual_key = translated & 0xFF
+                    modifiers = (translated >> 8) & 0xFF
+                    control_state = 0
+                    if modifiers & 1:
+                        control_state |= 0x0010
+                    if modifiers & 2:
+                        control_state |= 0x0008
+                    if modifiers & 4:
+                        control_state |= 0x0002
+                scan_code = self.user32.MapVirtualKeyW(virtual_key, 0)
+                if not scan_code:
+                    raise GateFailure(
+                        f"Windows console cannot map command character: {character!r}")
+                for state in range(2):
+                    event = events[index * 2 + state]
+                    event.EventType = 0x0001
+                    event.Event.KeyEvent.KeyDown = state == 0
+                    event.Event.KeyEvent.RepeatCount = 1
+                    event.Event.KeyEvent.VirtualKeyCode = virtual_key
+                    event.Event.KeyEvent.VirtualScanCode = scan_code
+                    event.Event.KeyEvent.Character.UnicodeChar = character
+                    event.Event.KeyEvent.ControlKeyState = control_state
+            written = wintypes.DWORD()
+            if not self.kernel32.WriteConsoleInputW(
+                    console, events, len(events), ctypes.byref(written)):
+                raise GateFailure(
+                    f"could not write Windows server console input: "
+                    f"{ctypes.WinError(ctypes.get_last_error())}")
+            if written.value != len(events):
+                raise GateFailure("Windows server console input was only partially written")
+        finally:
+            self.kernel32.CloseHandle(console)
+            self.kernel32.FreeConsole()
+
+    def send(self, command: str) -> None:
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "--windows-console-inject",
+                    str(self.target_pid),
+                    command,
+                ],
+                text=True,
+                capture_output=True,
+                timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise GateFailure("Windows server console input helper timed out") from error
+        if result.returncode != 0:
+            message = result.stderr.strip() or result.stdout.strip()
+            raise GateFailure(message or "Windows server console input helper failed")
+
+    @classmethod
+    def verify(cls, cwd: Path) -> None:
+        shell = os.environ.get("ComSpec") or os.environ.get("COMSPEC")
+        if not shell:
+            system_root = os.environ.get("SystemRoot") or os.environ.get("SYSTEMROOT")
+            if not system_root:
+                raise GateFailure("could not locate cmd.exe for the Windows console self-test")
+            shell = str(Path(system_root) / "System32" / "cmd.exe")
+        startup = subprocess.STARTUPINFO()
+        startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startup.wShowWindow = 0
+        process = subprocess.Popen(
+            [shell, "/d", "/q"],
+            cwd=cwd,
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+            startupinfo=startup,
+        )
+        marker = cwd / f"keels2_console_test_{os.getpid()}_{time.time_ns()}.tmp"
+        try:
+            cls(process.pid).send(f"copy nul {marker.name}")
+            deadline = time.monotonic() + 5
+            while not marker.is_file():
+                if process.poll() is not None:
+                    raise GateFailure(
+                        f"Windows console self-test exited with status {process.returncode}")
+                if time.monotonic() >= deadline:
+                    raise GateFailure("Windows console self-test command was not executed")
+                time.sleep(0.05)
+            cls(process.pid).send("exit")
+            status = process.wait(10)
+            if status != 0:
+                raise GateFailure(f"Windows console self-test exited with status {status}")
+        finally:
+            marker.unlink(missing_ok=True)
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(5)
+
+
 class Server:
     def __init__(self, command: list[str], cwd: Path, transcript: Transcript):
         self.transcript = transcript
         self.master: int | None = None
-        self.process: subprocess.Popen[bytes]
+        self.console_input: WindowsConsoleInput | None = None
         if os.name == "nt":
             self.process = subprocess.Popen(
                 command,
                 cwd=cwd,
-                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 bufsize=0,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
             )
+            self.console_input = WindowsConsoleInput(self.process.pid)
             if self.process.stdout is None:
                 raise GateFailure("could not capture the Windows server console")
             self.reader = threading.Thread(
@@ -142,14 +340,12 @@ class Server:
         if self.process.poll() is not None:
             raise GateFailure(f"server exited with status {self.process.returncode}")
         position = self.transcript.position()
-        data = (command + "\n").encode("utf-8")
-        if self.master is not None:
-            os.write(self.master, data)
+        if self.console_input is not None:
+            self.console_input.send(command)
         else:
-            if self.process.stdin is None:
-                raise GateFailure("Windows server console input is unavailable")
-            self.process.stdin.write(data)
-            self.process.stdin.flush()
+            if self.master is None:
+                raise GateFailure("server console input is unavailable")
+            os.write(self.master, (command + "\n").encode("utf-8"))
         return position
 
     def expect(self, command: str, marker: str, timeout: float = 30.0) -> None:
@@ -331,7 +527,7 @@ def action(
     for index, instruction in enumerate(instructions, 1):
         print(f"  {index}. {instruction}")
     print()
-    print("No Enter key is needed. The runner will continue as soon as it detects completion.")
+    print("Do not press Enter in PowerShell. Complete the steps in CS2 and the runner advances automatically.")
     sys.stdout.flush()
     completed = False
     try:
@@ -399,6 +595,11 @@ def self_test() -> None:
         archive_evidence(evidence, temporary / "evidence.zip", "windows-x86_64")
         if not (temporary / "evidence.tar.gz").is_file() or not (temporary / "evidence.zip").is_file():
             raise GateFailure("evidence archive self-test failed")
+
+        if os.name == "nt":
+            if ctypes.sizeof(ConsoleKeyEvent) != 16 or ctypes.sizeof(ConsoleInputRecord) != 20:
+                raise GateFailure("Windows console input structure layout self-test failed")
+            WindowsConsoleInput.verify(temporary)
     print("KeelS2 live runner self-test: PASS")
 
 
@@ -443,6 +644,7 @@ def run_gate(args: argparse.Namespace) -> int:
         "profile": config["profile"],
         "platform": platform_key,
         "revision": config["revision"],
+        "command_transport": "attached-process-console" if platform_key == "windows-x86_64" else "pty",
         "started_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "passed": False,
     }
@@ -505,15 +707,29 @@ def run_gate(args: argparse.Namespace) -> int:
         ])
         print()
         print("AUTOMATED PHASE 1/3: Starting CS2 and validating KeelS2")
+        if platform_key == "windows-x86_64":
+            print("Windows process-console transport: verifying")
+            WindowsConsoleInput.verify(bundle)
+            print("Windows process-console transport: PASS")
+        print("CS2 startup: launching server")
         server = Server(command, server_root / "game", transcript)
         start = 0
+        print("CS2 startup: waiting for the compatibility profile")
         transcript.wait(
             f"selected compatibility profile: {config['profile']}", start, 180, server.process)
+        print("CS2 startup: compatibility profile selected")
         transcript.wait("host started for cs2", start, 180, server.process)
-        server.expect("keel inspect hooks", "Hook inspection complete")
+        print("CS2 startup: KeelS2 host ready")
         transcript.wait("Source 2 interface gateway load validation passed", start, 60, server.process)
         transcript.wait("schema field resolution passed", start, 60, server.process)
         transcript.wait("64 player server started", start, 60, server.process)
+        print("CS2 startup: game server ready")
+        if platform_key == "windows-x86_64":
+            print("Windows command channel: verifying")
+            server.expect(
+                "echo KEELS2_WINDOWS_COMMAND_CHANNEL_READY",
+                "KEELS2_WINDOWS_COMMAND_CHANNEL_READY")
+            print("Windows command channel: ready")
         server.expect("keel inspect hooks", "Hook inspection complete")
         transcript.wait("[Lifecycle Test] live GameFrame observed", start, 60, server.process)
         transcript.wait("versioned service consumed", start, 60, server.process)
@@ -658,46 +874,57 @@ def run_gate(args: argparse.Namespace) -> int:
             baseline_damage["self"] +
             baseline_damage["unrelated"])
         command_rejection = (
-            "[05E Decision A] ClientCommand priority=20 verb=keels2_blocked "
-            f"argument= slot={args.client_slot} decision=reject")
+            "[05E Decision A] ClientCommand priority=20 verb=jointeam "
+            f"argument=2 slot={args.client_slot} decision=reject")
         gameplay_position = transcript.position()
         reported: set[str] = set()
         with action(transcript, 2, "Run the gameplay probes", (
             "Open the CS2 developer console.",
-            "Enter exactly: cmd keels2_blocked",
+            "Enter exactly: jointeam 2, then press Enter. You should remain Counter-Terrorist.",
             "Close the console and shoot the stationary CT bot near your spawn once.",
-            "Open the console and enter: hurtme 10",
+            "Open the console, enter exactly: hurtme 10, then press Enter.",
             "Wait here; the runner verifies all three results automatically.",
         )):
             deadline = time.monotonic() + ACTION_TIMEOUT
+            next_waiting_report = time.monotonic() + 30
+            current_damage = baseline_damage
+            blocked_ok = False
+            passthrough_ok = False
             while True:
-                status_position = server.send("keel_no_damage_status")
-                transcript.wait("status ready=true", status_position, 10, server.process)
-                current_damage = damage_result(transcript.text)
-                if not current_damage:
-                    raise GateFailure("could not read the damage-hook counters")
-                if current_damage["result_errors"] != 0:
-                    raise GateFailure("the damage hook could not set its superseding result")
+                if not blocked_ok or not passthrough_ok:
+                    status_position = server.send("keel_no_damage_status")
+                    transcript.wait("status ready=true", status_position, 10, server.process)
+                    current_damage = damage_result(transcript.text)
+                    if not current_damage:
+                        raise GateFailure("could not read the damage-hook counters")
+                    if current_damage["result_errors"] != 0:
+                        raise GateFailure("the damage hook could not set its superseding result")
+                    blocked_ok = current_damage["blocked"] > baseline_damage["blocked"]
+                    passthrough = (
+                        current_damage["non_player_source"] +
+                        current_damage["self"] +
+                        current_damage["unrelated"])
+                    passthrough_ok = passthrough > baseline_passthrough
                 command_ok = command_rejection in transcript.text[gameplay_position:]
-                blocked_ok = current_damage["blocked"] > baseline_damage["blocked"]
-                passthrough = (
-                    current_damage["non_player_source"] +
-                    current_damage["self"] +
-                    current_damage["unrelated"])
-                passthrough_ok = passthrough > baseline_passthrough
                 checks = (
                     ("command", command_ok, "client-command rejection"),
                     ("blocked", blocked_ok, "player weapon damage blocked"),
                     ("passthrough", passthrough_ok, "self damage passed through"),
                 )
+                changed = False
                 for key, passed, label in checks:
                     if passed and key not in reported:
                         reported.add(key)
                         print(f"  DETECTED: {label}")
+                        changed = True
                 if command_ok and blocked_ok and passthrough_ok:
                     break
-                if time.monotonic() >= deadline:
-                    missing = [label for _, passed, label in checks if not passed]
+                missing = [label for _, passed, label in checks if not passed]
+                now = time.monotonic()
+                if changed or now >= next_waiting_report:
+                    print("  WAITING: " + ", ".join(missing))
+                    next_waiting_report = now + 30
+                if now >= deadline:
                     raise GateFailure(
                         "timed out waiting for gameplay probes: " + ", ".join(missing))
                 time.sleep(1)
@@ -761,11 +988,11 @@ def run_gate(args: argparse.Namespace) -> int:
         text = transcript.text
         required = (
             "[05E Observer] ClientConnect priority=50",
-            "[05E Observer] ClientCommand priority=50 verb=keels2_blocked "
-            f"argument= slot={args.client_slot} decision=accept",
+            "[05E Observer] ClientCommand priority=50 verb=jointeam "
+            f"argument=2 slot={args.client_slot} decision=accept",
             command_rejection,
-            "[05E Decision B] ClientCommand priority=20 verb=keels2_blocked "
-            f"argument= slot={args.client_slot} decision=accept",
+            "[05E Decision B] ClientCommand priority=20 verb=jointeam "
+            f"argument=2 slot={args.client_slot} decision=accept",
             "event=round_start",
             "dispatch benchmark ns/call: no-hook=",
             "concurrent callback retained host API access during unload",
@@ -868,19 +1095,34 @@ def run_gate(args: argparse.Namespace) -> int:
         try:
             archive_evidence(evidence, archive, platform_key)
         except Exception as error:
+            failure = f"could not create evidence archive: {error}"
+            result["failure"] = failure
+            result["passed"] = False
+            (evidence / "result.json").write_text(
+                json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             print(f"Evidence directory: {evidence}")
-            print(f"FAIL: could not create evidence archive: {error}")
-            return 1
-        digest = sha256(archive)
-        print()
-        print(f"Evidence archive: {archive}")
-        print(f"SHA-256: {digest}")
-        print("PASS" if result.get("passed") else f"FAIL: {failure or 'gate failed'}")
-        shutil.rmtree(work)
+            print(f"FAIL: {failure}")
+        else:
+            digest = sha256(archive)
+            print()
+            print(f"Evidence archive: {archive}")
+            print(f"SHA-256: {digest}")
+            print("PASS" if result.get("passed") else f"FAIL: {failure or 'gate failed'}")
+            shutil.rmtree(work)
     return 0 if result.get("passed") else 1
 
 
 def main() -> int:
+    if len(sys.argv) == 4 and sys.argv[1] == "--windows-console-inject":
+        try:
+            target_pid = int(sys.argv[2])
+            if target_pid <= 0:
+                raise GateFailure("Windows server console PID is invalid")
+            WindowsConsoleInput(target_pid).inject(sys.argv[3])
+            return 0
+        except (GateFailure, OSError, ValueError) as error:
+            print(f"FAIL: {error}", file=sys.stderr)
+            return 1
     parser = argparse.ArgumentParser()
     parser.add_argument("server_root", nargs="?")
     parser.add_argument("--build-id")

@@ -109,9 +109,8 @@ public:
     {
         const char* verb = command.ArgC() > 0 ? command[0] : "";
         const char* argument = command.ArgC() > 1 ? command[1] : "";
-        const bool blocked_probe = std::strcmp(verb, "keels2_blocked") == 0 ||
-            (std::strcmp(verb, "say") == 0 &&
-                std::strcmp(argument, "keels2_blocked") == 0);
+        const bool blocked_probe = std::strcmp(verb, "jointeam") == 0 &&
+            std::strcmp(argument, "2") == 0;
         const bool block = KEELS2_LIVE_CALLBACK_REJECTION == 1 &&
             blocked_probe;
         const std::string message =
