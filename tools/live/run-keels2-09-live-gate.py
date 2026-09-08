@@ -808,7 +808,6 @@ def run_gate(args: argparse.Namespace) -> int:
 
         print()
         print("AUTOMATED PHASE 3/3: Preparing live-client validation")
-        server.expect("keel_schema_entity_live snapshot", "entity snapshot captured")
         callback_files = (
             ("callback_observer" + extension, "08_callback_observer" + extension, "KeelS2 0.5E Observer"),
             ("callback_decision_a" + extension, "09_callback_decision_a" + extension, "KeelS2 0.5E Decision A"),
@@ -846,10 +845,6 @@ def run_gate(args: argparse.Namespace) -> int:
                 ACTION_TIMEOUT,
                 server.process)
         server.expect(f"s2_check {args.client_slot}", "Source 2 live runtime validation passed message_id=118")
-        server.poll(
-            "keel_schema_entity_live capture",
-            "entity creation, lookup, and typed read passed",
-            60)
         server.send("mp_limitteams 0")
         server.send("mp_autoteambalance 0")
         server.send("mp_friendlyfire 1")
@@ -857,12 +852,17 @@ def run_gate(args: argparse.Namespace) -> int:
         server.send("sv_cheats 1")
         server.send("bot_stop 1")
         server.send("bot_zombie 1")
+        server.expect("keel_schema_entity_live snapshot", "entity snapshot captured")
         bot_position = server.send("bot_add_t")
         target_bot_position = server.send("bot_add_ct")
         server.send("mp_warmup_end")
         transcript.wait("<BOT><TERRORIST>", bot_position, 90, server.process)
         transcript.wait("<BOT><CT>", target_bot_position, 90, server.process)
         transcript.wait("event=round_start", bot_position, 90, server.process)
+        server.poll(
+            "keel_schema_entity_live capture",
+            "entity creation, lookup, and typed read passed",
+            60)
 
         status_position = server.send("keel_no_damage_status")
         transcript.wait("status ready=true", status_position, 30, server.process)
@@ -932,17 +932,21 @@ def run_gate(args: argparse.Namespace) -> int:
         disconnect_position = transcript.position()
         with action(transcript, 3, "Disconnect", (
             "Disconnect the client from the server.",
-            "Remain disconnected while the runner validates the retired entity handle.",
+            "Once detected, the runner removes its probe bots automatically.",
+            "Remain disconnected while it validates the retired entity handle.",
         )):
             transcript.wait(
                 "SIGNONSTATE_FULL -> SIGNONSTATE_NONE",
                 disconnect_position,
                 ACTION_TIMEOUT,
                 server.process)
+        print("AUTOMATED: Removing probe bots and validating their retired entity handles")
+        server.send("bot_kick all")
         server.poll(
             "keel_schema_entity_live stale",
             "entity destruction invalidation passed",
             60)
+        print("AUTOMATED: Retired entity handle validation PASS")
 
         reconnect_position = transcript.position()
         with action(transcript, 4, "Reconnect", (

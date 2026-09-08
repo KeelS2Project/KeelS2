@@ -2,6 +2,9 @@
 
 #include <string.h>
 
+#include <utility>
+#include <vector>
+
 namespace
 {
 
@@ -32,7 +35,12 @@ public:
 
     void Unload() override
     {
-        LogMessage(!health_ && !retained_
+        bool candidates_invalid = true;
+        for (const auto& candidate : candidates_)
+        {
+            candidates_invalid = candidates_invalid && !candidate.Valid();
+        }
+        LogMessage(!health_ && !retained_ && candidates_invalid
             ? "schema and entity views invalidated before unload"
             : "schema or entity view remained active during unload");
     }
@@ -95,6 +103,7 @@ private:
 
     void Snapshot()
     {
+        candidates_.clear();
         retained_.Reset();
         original_index_ = -1;
         original_handle_ = KEELS2_INVALID_SOURCE2_ENTITY_HANDLE;
@@ -111,6 +120,7 @@ private:
 
     void Capture()
     {
+        candidates_.clear();
         for (int index = 0; index < 4096; index++)
         {
             keels2::Entity entity;
@@ -124,13 +134,16 @@ private:
             keels2::Entity same;
             const uint32 source2_handle = entity.Source2Handle();
             if (!FindEntity(CEntityHandle(source2_handle), same) || !entity.Same(same) ||
-                !FindEntity(index, retained_))
+                same.Index() != index)
             {
+                candidates_.clear();
                 LogError("created entity handle lookup failed");
                 return;
             }
-            original_index_ = index;
-            original_handle_ = source2_handle;
+            candidates_.push_back(std::move(entity));
+        }
+        if (!candidates_.empty())
+        {
             LogMessage("entity creation, lookup, and typed read passed");
             return;
         }
@@ -139,14 +152,27 @@ private:
 
     void Stale()
     {
-        int32 health;
-        keels2::Entity missing;
-        if (original_index_ >= 0 &&
-            original_handle_ != KEELS2_INVALID_SOURCE2_ENTITY_HANDLE &&
-            !retained_.Valid() && !retained_.Read(health_, health) &&
-            !retained_.Same(retained_) &&
-            !FindEntity(CEntityHandle(original_handle_), missing))
+        int destroyed_index = -1;
+        uint32 destroyed_handle = KEELS2_INVALID_SOURCE2_ENTITY_HANDLE;
+        for (auto& candidate : candidates_)
         {
+            int32 health;
+            keels2::Entity missing;
+            if (!candidate.Valid() && !candidate.Read(health_, health) &&
+                !candidate.Same(candidate) &&
+                !FindEntity(CEntityHandle(candidate.Source2Handle()), missing))
+            {
+                destroyed_index = candidate.Index();
+                destroyed_handle = candidate.Source2Handle();
+                break;
+            }
+        }
+        if (destroyed_index >= 0 &&
+            destroyed_handle != KEELS2_INVALID_SOURCE2_ENTITY_HANDLE)
+        {
+            original_index_ = destroyed_index;
+            original_handle_ = destroyed_handle;
+            candidates_.clear();
             LogMessage("entity destruction invalidation passed");
             return;
         }
@@ -197,6 +223,7 @@ private:
     }
 
     keels2::SchemaField<int32> health_;
+    std::vector<keels2::Entity> candidates_;
     keels2::Entity retained_;
     uint32 snapshot_[4096]{};
     int original_index_ = -1;
