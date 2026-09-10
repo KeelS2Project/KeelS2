@@ -187,6 +187,21 @@ int main()
         return 13;
     }
 
+    const auto* current_damage_linux_profile = keels2::cs2::FindCompatibilityProfile(
+        {40540568, 0xeefe3404272fed75ull},
+        "linuxsteamrt64");
+    if (!current_damage_linux_profile ||
+        std::strcmp(current_damage_linux_profile->game_version, "25175329") != 0 ||
+        std::strcmp(
+            current_damage_linux_profile->id,
+            "cs2-25175329-linuxsteamrt64-40540568-eefe3404272fed75") != 0 ||
+        !ValidLifecycleProfile(*current_damage_linux_profile) ||
+        !ValidSchemaEntityProfile(*current_damage_linux_profile) ||
+        !ValidDamageTarget(*current_damage_linux_profile))
+    {
+        return 15;
+    }
+
     const auto* previous_windows_profile = keels2::cs2::FindCompatibilityProfile(
         {32794264, 0x63eca0729c4fd8a9ull},
         "win64");
@@ -288,12 +303,30 @@ int main()
         return 14;
     }
 
+    const auto* current_damage_windows_profile = keels2::cs2::FindCompatibilityProfile(
+        {33002648, 0x859eff2ae36ba752ull},
+        "win64");
+    if (!current_damage_windows_profile ||
+        std::strcmp(current_damage_windows_profile->game_version, "25175329") != 0 ||
+        std::strcmp(
+            current_damage_windows_profile->id,
+            "cs2-25175329-win64-33002648-859eff2ae36ba752") != 0 ||
+        !ValidLifecycleProfile(*current_damage_windows_profile) ||
+        !ValidSchemaEntityProfile(*current_damage_windows_profile) ||
+        !ValidDamageTarget(*current_damage_windows_profile))
+    {
+        return 16;
+    }
+
     if (keels2::cs2::FindCompatibilityProfile(linux_profile->server, "win64") ||
         keels2::cs2::FindCompatibilityProfile(current_linux_profile->server, "win64") ||
         keels2::cs2::FindCompatibilityProfile(next_linux_profile->server, "win64") ||
         keels2::cs2::FindCompatibilityProfile(latest_linux_profile->server, "win64") ||
         keels2::cs2::FindCompatibilityProfile(updated_linux_profile->server, "win64") ||
         keels2::cs2::FindCompatibilityProfile(damage_linux_profile->server, "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            current_damage_linux_profile->server,
+            "win64") ||
         keels2::cs2::FindCompatibilityProfile(windows_profile->server, "linuxsteamrt64") ||
         keels2::cs2::FindCompatibilityProfile(
             current_windows_profile->server,
@@ -309,6 +342,9 @@ int main()
             "linuxsteamrt64") ||
         keels2::cs2::FindCompatibilityProfile(
             damage_windows_profile->server,
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            current_damage_windows_profile->server,
             "linuxsteamrt64") ||
         keels2::cs2::FindCompatibilityProfile(
             {current_linux_profile->server.size + 1, current_linux_profile->server.fnv1a64},
@@ -369,6 +405,22 @@ int main()
             "win64") ||
         keels2::cs2::FindCompatibilityProfile(
             {damage_windows_profile->server.size, damage_windows_profile->server.fnv1a64 + 1},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {current_damage_linux_profile->server.size + 1,
+                current_damage_linux_profile->server.fnv1a64},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {current_damage_linux_profile->server.size,
+                current_damage_linux_profile->server.fnv1a64 + 1},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {current_damage_windows_profile->server.size + 1,
+                current_damage_windows_profile->server.fnv1a64},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {current_damage_windows_profile->server.size,
+                current_damage_windows_profile->server.fnv1a64 + 1},
             "win64") ||
         keels2::cs2::FindCompatibilityProfile({1, 2}, "linuxsteamrt64") ||
         keels2::cs2::FindCompatibilityProfile(linux_profile->server, nullptr))

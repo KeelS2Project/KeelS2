@@ -19,15 +19,15 @@ import zipfile
 from pathlib import Path
 
 
-BUILD_ID = "25000182"
+BUILD_ID = "25175329"
 PROFILES = {
     "linux-x86_64": {
         "label": "linux",
         "directory": "linuxsteamrt64",
         "extension": ".so",
         "size": 40540568,
-        "fnv": "542cc63d17821e66",
-        "profile": "cs2-2000899-linuxsteamrt64-40540568-542cc63d17821e66",
+        "fnv": "eefe3404272fed75",
+        "profile": "cs2-25175329-linuxsteamrt64-40540568-eefe3404272fed75",
         "archive": "tar.gz",
     },
     "windows-x86_64": {
@@ -35,8 +35,8 @@ PROFILES = {
         "directory": "win64",
         "extension": ".dll",
         "size": 33002648,
-        "fnv": "43286dc938300339",
-        "profile": "cs2-2000899-win64-33002648-43286dc938300339",
+        "fnv": "859eff2ae36ba752",
+        "profile": "cs2-25175329-win64-33002648-859eff2ae36ba752",
         "archive": "zip",
     },
 }

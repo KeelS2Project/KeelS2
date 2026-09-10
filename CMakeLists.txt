@@ -79,6 +79,16 @@ configure_file(
     "${KEELS2_PACKAGE_ROOT}/compatibility/cs2-2000897-win64.accepted.tsv"
     COPYONLY
 )
+configure_file(
+    games/cs2/compatibility/cs2-25175329-linuxsteamrt64.accepted.tsv
+    "${KEELS2_PACKAGE_ROOT}/compatibility/cs2-25175329-linuxsteamrt64.accepted.tsv"
+    COPYONLY
+)
+configure_file(
+    games/cs2/compatibility/cs2-25175329-win64.accepted.tsv
+    "${KEELS2_PACKAGE_ROOT}/compatibility/cs2-25175329-win64.accepted.tsv"
+    COPYONLY
+)
 configure_file(LICENSE "${KEELS2_PACKAGE_ROOT}/LICENSE" COPYONLY)
 configure_file(THIRD_PARTY_NOTICES.md "${KEELS2_PACKAGE_ROOT}/THIRD_PARTY_NOTICES.md" COPYONLY)
 
@@ -789,6 +799,8 @@ if(BUILD_TESTING)
             "${CMAKE_CURRENT_SOURCE_DIR}/games/cs2/compatibility/cs2-2000888-win64.accepted.tsv"
             "${CMAKE_CURRENT_SOURCE_DIR}/games/cs2/compatibility/cs2-2000897-linuxsteamrt64.accepted.tsv"
             "${CMAKE_CURRENT_SOURCE_DIR}/games/cs2/compatibility/cs2-2000897-win64.accepted.tsv"
+            "${CMAKE_CURRENT_SOURCE_DIR}/games/cs2/compatibility/cs2-25175329-linuxsteamrt64.accepted.tsv"
+            "${CMAKE_CURRENT_SOURCE_DIR}/games/cs2/compatibility/cs2-25175329-win64.accepted.tsv"
     )
 
     add_executable(keels2_file_fingerprint tests/file_fingerprint.cpp)
@@ -1362,12 +1374,12 @@ if(BUILD_TESTING)
     find_package(Threads REQUIRED)
     if(MSVC)
         set(KEELS2_KEELHOOK_TEST_PROFILE "test-fixture-win64")
-        set(KEELS2_KEELHOOK_LIVE_PROFILE "cs2-2000899-win64-33002648-43286dc938300339")
+        set(KEELS2_KEELHOOK_LIVE_PROFILE "cs2-25175329-win64-33002648-859eff2ae36ba752")
         set(KEELS2_SOURCE2_TEST_CVAR_MODULE "keels2_bootstrap_integration.exe")
         set(KEELS2_SOURCE2_LIVE_CVAR_MODULE "tier0.dll")
     else()
         set(KEELS2_KEELHOOK_TEST_PROFILE "test-fixture-linuxsteamrt64")
-        set(KEELS2_KEELHOOK_LIVE_PROFILE "cs2-2000899-linuxsteamrt64-40540568-542cc63d17821e66")
+        set(KEELS2_KEELHOOK_LIVE_PROFILE "cs2-25175329-linuxsteamrt64-40540568-eefe3404272fed75")
         set(KEELS2_SOURCE2_TEST_CVAR_MODULE "keels2_bootstrap_integration")
         set(KEELS2_SOURCE2_LIVE_CVAR_MODULE "libtier0.so")
     endif()

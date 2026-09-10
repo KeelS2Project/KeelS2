@@ -127,8 +127,7 @@ bool BaselineMatches(const std::filesystem::path& path)
     review::Report report;
     if (!review::ReadProfile(path, profile, report) ||
         profile.status != review::ProfileStatus::accepted || profile.modules.size() != 1 ||
-        profile.interfaces.size() != 4 || profile.slots.size() != 15 ||
-        !profile.patterns.empty())
+        profile.interfaces.size() != 4 || profile.slots.size() != 15)
     {
         return false;
     }
@@ -141,6 +140,36 @@ bool BaselineMatches(const std::filesystem::path& path)
         profile.modules[0].fingerprint != compiled->server)
     {
         return false;
+    }
+    if (profile.patterns.size() != compiled->target_count)
+    {
+        return false;
+    }
+    for (std::uint32_t index{}; index < compiled->target_count; ++index)
+    {
+        const auto& target = compiled->targets[index];
+        const auto pattern = std::find_if(
+            profile.patterns.begin(),
+            profile.patterns.end(),
+            [&](const review::Pattern& value) {
+                return value.key == target.name;
+            });
+        if (pattern == profile.patterns.end())
+        {
+            return false;
+        }
+        const auto module = std::find_if(
+            profile.modules.begin(),
+            profile.modules.end(),
+            [&](const review::Module& value) {
+                return value.role == pattern->module;
+            });
+        if (module == profile.modules.end() || module->name != target.module ||
+            pattern->expression != target.pattern || pattern->occurrence != target.occurrence ||
+            pattern->match_count != 1)
+        {
+            return false;
+        }
     }
     const auto slot = [&](const char* interface_key, const char* method) -> const review::Slot* {
         const auto found = std::find_if(profile.slots.begin(), profile.slots.end(), [&](const review::Slot& value) {
