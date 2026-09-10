@@ -199,7 +199,7 @@ def profile_bundle(
         tool_name = "keels2_compatibility_review.exe"
         run_text = (
             "Expand the ZIP, open PowerShell in this directory, and run:\n"
-            ".\\capture-keels2-cs2-profile-windows.ps1 -ServerRoot C:\\path\\to\\cs2_dedi\n")
+            ".\\capture-keels2-cs2-profile-windows.ps1 -ServerRoot E:\\steamcmd\\servers\\cs2_win\n")
     else:
         script_name = "capture-keels2-cs2-profile-linux.sh"
         tool_name = "keels2_compatibility_review"
@@ -226,7 +226,7 @@ def live_bundle(
     epoch: int,
 ) -> Path:
     profile = PROFILES[key]
-    name = f"keels2-09-{profile['label']}-live-gate-r1-{source_revision}"
+    name = f"keels2-10-{profile['label']}-live-gate-r1-{source_revision}"
     root = output / name
     if root.exists():
         shutil.rmtree(root)
@@ -237,13 +237,13 @@ def live_bundle(
         wrapper = "run-keels2-09-live-gate-windows.ps1"
         run_text = (
             "Expand the ZIP, stop any running server, open PowerShell in this directory, and run:\n"
-            ".\\run-keels2-09-live-gate-windows.ps1 -ServerRoot C:\\path\\to\\cs2_dedi\n")
+            ".\\run-keels2-09-live-gate-windows.ps1 -ServerRoot E:\\steamcmd\\servers\\cs2_win\n")
     else:
         wrapper = "run-keels2-09-live-gate-linux.sh"
         run_text = (
             "Extract the archive, stop any running server, enter this directory, and run:\n"
             "chmod +x run-keels2-09-live-gate-linux.sh\n"
-            "./run-keels2-09-live-gate-linux.sh /path/to/cs2_dedi\n")
+            "./run-keels2-09-live-gate-linux.sh /home/user/servers/cs2_dedi\n")
     copy(repo / "tools" / "live" / wrapper, root / wrapper)
     package_root = build / "package" / "addons" / "keels2"
     payload = root / "payload" / "addons" / "keels2"
@@ -282,6 +282,8 @@ def live_bundle(
 
     gate = {
         "schema": 1,
+        "version": "1.0.0",
+        "factory_probe_required": True,
         "build_id": BUILD_ID,
         "platform": key,
         "platform_label": profile["label"],

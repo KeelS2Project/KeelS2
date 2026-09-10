@@ -51,7 +51,7 @@ public:
     static constexpr keels2::PluginInfo Info{
         "KeelS2 No Player Damage",
         "KeelS2 Project",
-        "0.9.0",
+        "1.0.0",
         "Blocks direct player weapon damage through a profile-backed detour"
     };
 

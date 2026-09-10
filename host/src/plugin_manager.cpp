@@ -1,4 +1,5 @@
 #include "host.h"
+#include "factory_service.h"
 #include "convar_service.h"
 #include "keelhook_service.h"
 #include "lifecycle_service.h"
@@ -210,11 +211,18 @@ void Host::LoadPlugins(
 
 PluginRecord* Host::LoadPlugin(
     const std::filesystem::path& path,
-    std::unique_lock<std::recursive_mutex>& state_lock)
+    std::unique_lock<std::recursive_mutex>& state_lock,
+    std::string_view expected_name,
+    bool activate_factories)
 {
     PluginRecord* record = DiscoverPlugin(path, state_lock);
     if (!record || record->state != PluginState::loading)
     {
+        return record;
+    }
+    if (!expected_name.empty() && !EqualInsensitive(record->name, expected_name))
+    {
+        RejectUnstartedPlugin(*record, "reload candidate has a different plugin name");
         return record;
     }
     std::string diagnostic;
@@ -223,7 +231,7 @@ PluginRecord* Host::LoadPlugin(
         RejectUnstartedPlugin(*record, std::move(diagnostic));
         return record;
     }
-    return StartPlugin(*record, state_lock);
+    return StartPlugin(*record, state_lock, activate_factories);
 }
 
 PluginRecord* Host::DiscoverPlugin(
@@ -397,7 +405,8 @@ PluginRecord* Host::DiscoverPlugin(
 
 PluginRecord* Host::StartPlugin(
     PluginRecord& plugin,
-    std::unique_lock<std::recursive_mutex>& state_lock)
+    std::unique_lock<std::recursive_mutex>& state_lock,
+    bool activate_factories)
 {
     PluginRecord* record = &plugin;
     record->accepting_resources = true;
@@ -440,6 +449,13 @@ PluginRecord* Host::StartPlugin(
         KeelResult source2_callbacks_release = KEEL_RESULT_OK;
         KeelResult schema_entities_release = KEEL_RESULT_OK;
         KeelResult release = KEEL_RESULT_OK;
+        KeelResult factory_release = KEEL_RESULT_OK;
+        if (factories_)
+        {
+            state_lock.unlock();
+            factory_release = factories_->ReleasePlugin(record->handle);
+            state_lock.lock();
+        }
         if (plugin_service_)
         {
             state_lock.unlock();
@@ -484,7 +500,7 @@ PluginRecord* Host::StartPlugin(
         }
         RemoveCommandsOwnedBy(record->handle);
         record->state = PluginState::error;
-        if (plugin_service_release != KEEL_RESULT_OK ||
+        if (factory_release != KEEL_RESULT_OK || plugin_service_release != KEEL_RESULT_OK ||
             published_service_release != KEEL_RESULT_OK ||
             source2_callbacks_release != KEEL_RESULT_OK || convar_release != KEEL_RESULT_OK ||
             schema_entities_release != KEEL_RESULT_OK ||
@@ -519,6 +535,11 @@ PluginRecord* Host::StartPlugin(
     }
 
     record->state = PluginState::loaded;
+    record->factory_dispatch_enabled = activate_factories;
+    if (factories_ && activate_factories)
+    {
+        factories_->Activate(record->handle);
+    }
     SetCommandsOwnedEnabled(record->handle, true);
     if (keelhook_)
     {
@@ -578,8 +599,25 @@ bool Host::DependenciesReady(const PluginRecord& plugin, std::string& diagnostic
     return true;
 }
 
+bool Host::PluginCommandActive(KeelPluginHandle owner) const
+{
+    const auto active = [owner](const CommandRecord& command) {
+        return command.owner == owner && command.active.load(std::memory_order_acquire) != 0;
+    };
+    return std::any_of(commands_.begin(), commands_.end(), [&](const auto& entry) {
+        return active(*entry.second);
+    }) || std::any_of(retired_commands_.begin(), retired_commands_.end(), [&](const auto& command) {
+        return active(*command);
+    });
+}
+
 bool Host::HasRunningDependent(const PluginRecord& plugin, std::string& dependent) const
 {
+    if (PluginCommandActive(plugin.handle))
+    {
+        dependent = "active plugin command callback";
+        return true;
+    }
     for (const auto& candidate : plugins_)
     {
         if (candidate.get() == &plugin || candidate->state != PluginState::loaded)
@@ -594,6 +632,11 @@ bool Host::HasRunningDependent(const PluginRecord& plugin, std::string& dependen
             dependent = candidate->name;
             return true;
         }
+    }
+    if (factories_ && factories_->Pinned(plugin.handle))
+    {
+        dependent = "process-lifetime factory replacement";
+        return true;
     }
     if (published_services_ &&
         published_services_->HasLeasedPublication(plugin.handle, dependent))
@@ -767,6 +810,18 @@ bool Host::UnloadPluginCommand(
     const bool was_running = plugin->state == PluginState::loaded;
     plugin->accepting_resources = false;
     SetCommandsOwnedEnabled(handle, false);
+    if (factories_)
+    {
+        state_lock.unlock();
+        const KeelResult quiescence = factories_->Deactivate(handle);
+        state_lock.lock();
+        if (quiescence != KEEL_RESULT_OK)
+        {
+            RestorePluginDispatch(*plugin);
+            Write(KEEL_LOG_ERROR, "plugin unload is blocked by factory callbacks or process-lifetime replacement: " + name);
+            return false;
+        }
+    }
     if (was_running && source2_callbacks_)
     {
         state_lock.unlock();
@@ -933,6 +988,18 @@ bool Host::UnloadPluginCommand(
             return false;
         }
     }
+    if (factories_)
+    {
+        state_lock.unlock();
+        const KeelResult release = factories_->ReleasePlugin(handle);
+        state_lock.lock();
+        if (release != KEEL_RESULT_OK)
+        {
+            plugin->cleanup_pending = true;
+            plugin->diagnostic = "factory cleanup is incomplete; plugin is retained";
+            return false;
+        }
+    }
     RemoveCommandsOwnedBy(handle);
     if (plugin->unload)
     {
@@ -1025,7 +1092,7 @@ void Host::ReloadPluginCommand(
         return;
     }
 
-    PluginRecord* candidate = LoadPlugin(logical_path, state_lock);
+    PluginRecord* candidate = LoadPlugin(logical_path, state_lock, original_name, !was_paused);
     const bool candidate_ready = candidate && candidate->state == PluginState::loaded &&
         EqualInsensitive(candidate->name, original_name);
     if (candidate_ready)
@@ -1053,7 +1120,7 @@ void Host::ReloadPluginCommand(
         }
     }
 
-    PluginRecord* rollback = LoadPlugin(backup, state_lock);
+    PluginRecord* rollback = LoadPlugin(backup, state_lock, original_name, !was_paused);
     if (rollback && rollback->state == PluginState::loaded &&
         EqualInsensitive(rollback->name, original_name))
     {
@@ -1180,6 +1247,16 @@ KeelResult Host::PausePlugin(
         }
         return result;
     };
+    if (factories_)
+    {
+        state_lock.unlock();
+        const KeelResult result = factories_->Deactivate(target);
+        state_lock.lock();
+        if (result != KEEL_RESULT_OK)
+        {
+            return fail(result, "factory callbacks or process-lifetime replacement");
+        }
+    }
     if (source2_callbacks_)
     {
         state_lock.unlock();
@@ -1288,6 +1365,11 @@ void Host::RestorePluginDispatch(PluginRecord& plugin)
 {
     plugin.accepting_resources = true;
     SetCommandsOwnedEnabled(plugin.handle, true);
+    plugin.factory_dispatch_enabled = true;
+    if (factories_)
+    {
+        factories_->Activate(plugin.handle);
+    }
     if (keelhook_)
     {
         keelhook_->Activate(plugin.handle);

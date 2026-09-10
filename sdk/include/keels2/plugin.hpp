@@ -51,6 +51,11 @@ class Service;
 
 }
 
+namespace factories
+{
+class Service;
+}
+
 namespace services
 {
 
@@ -532,6 +537,7 @@ private:
     friend class schema::Service;
     friend class entities::Service;
     friend class services::Service;
+    friend class factories::Service;
     template <typename Type>
     friend class detail::AbiPluginAdapter;
     template <typename Type>

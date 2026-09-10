@@ -3,6 +3,7 @@ param(
     [string]$BuildId = "",
     [int]$ClientSlot = 0,
     [int]$Port = 27035,
+    [string]$ConnectAddress = "",
     [string]$Map = "de_dust2",
     [switch]$SkipGameplay,
     [switch]$VerboseServerOutput
@@ -17,6 +18,7 @@ $Arguments = @(
     "--port", $Port,
     "--map", $Map
 )
+if ($ConnectAddress) { $Arguments += @("--connect-address", $ConnectAddress) }
 if ($BuildId) { $Arguments += @("--build-id", $BuildId) }
 if ($SkipGameplay) { $Arguments += "--skip-gameplay" }
 if ($VerboseServerOutput) { $Arguments += "--verbose-server-output" }

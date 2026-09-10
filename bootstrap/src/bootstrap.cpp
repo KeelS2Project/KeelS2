@@ -232,7 +232,7 @@ public:
             return nullptr;
         }
 
-        std::scoped_lock lock(mutex_);
+        std::unique_lock lock(mutex_);
         if (!EnsureRealServer())
         {
             if (return_code)
@@ -242,7 +242,10 @@ public:
             return nullptr;
         }
 
-        void* interface_pointer = server_factory_(name, return_code);
+        const auto factory = server_factory_;
+        lock.unlock();
+        void* interface_pointer = factory(name, return_code);
+        lock.lock();
         if (!interface_pointer)
         {
             return nullptr;
@@ -285,8 +288,11 @@ public:
             platform::AppendShutdownTrace("bootstrap disconnect patch restoration begin");
             RestorePatch(disconnect_patch_, "Source2ServerConfig::Disconnect");
             platform::AppendShutdownTrace("bootstrap disconnect patch restoration complete");
-            platform::AppendShutdownTrace("bootstrap host stop begin");
-            StopHost();
+        }
+        platform::AppendShutdownTrace("bootstrap host stop begin");
+        StopHost();
+        {
+            std::scoped_lock lock(mutex_);
             platform::AppendShutdownTrace("bootstrap host stop returned");
             lifecycle_complete_ = true;
             platform::AppendShutdownTrace("bootstrap lifecycle marked complete");
@@ -312,17 +318,15 @@ public:
             init_observed_ = true;
             original = init_patch_.Original<InitFn>();
             RestorePatch(init_patch_, "Source2Server::Init");
-            StartHost();
         }
+        StartHost();
 
         const int result = original ? original(self) : 0;
         if (result == 0)
         {
-            std::scoped_lock lock(mutex_);
             StopHost();
             return 0;
         }
-        std::scoped_lock lock(mutex_);
         if (host_state_ == HostState::running &&
             (!host_complete_startup_ || host_complete_startup_() == 0))
         {
@@ -518,6 +522,7 @@ private:
 
     void StartHost()
     {
+        std::unique_lock lock(mutex_);
         if (host_state_ == HostState::running)
         {
             return;
@@ -689,7 +694,9 @@ private:
             kPlatformName,
             &compatibility
         };
+        lock.unlock();
         const std::uint32_t start_result = host_start_(&info);
+        lock.lock();
         if (start_result == KEELS2_HOST_START_FAILED)
         {
             Log("host rejected startup");
@@ -714,6 +721,7 @@ private:
 
     void StopHost()
     {
+        std::unique_lock lock(mutex_);
         platform::AppendShutdownTrace("bootstrap StopHost entered");
         if (host_state_ != HostState::running && host_state_ != HostState::stopping)
         {
@@ -729,7 +737,10 @@ private:
         while (true)
         {
             platform::AppendShutdownTrace("bootstrap host stop export call begin");
-            const bool stopped = host_stop_() != 0;
+            const auto stop = host_stop_;
+            lock.unlock();
+            const bool stopped = stop() != 0;
+            lock.lock();
             platform::AppendShutdownTrace(
                 stopped
                     ? "bootstrap host stop export reported complete"

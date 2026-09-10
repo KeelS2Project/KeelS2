@@ -1,4 +1,6 @@
 #include "host.h"
+#include "factory_service.h"
+
 #include "convar_service.h"
 #include "game_adapter_loader.h"
 #include "keelhook_service.h"
@@ -15,6 +17,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <stdexcept>
 #include <utility>
 
 #if defined(_WIN32)
@@ -53,8 +56,8 @@ void WaitForDispatchEntries() noexcept
 
 Host& Host::Instance()
 {
-    static Host instance;
-    return instance;
+    static Host* instance = new Host();
+    return *instance;
 }
 
 Host::~Host() = default;
@@ -216,6 +219,12 @@ std::uint32_t Host::Start(const KeelHostStartInfo& info)
         const char* host_name = "libkeels2_host.so";
 #endif
         keelhook_->Authorize(0, bootstrap_directory_ / host_name, true);
+        factories_ = std::make_shared<FactoryService>(
+            *this, *keelhook_, info.engine_factory, info.server_factory);
+        if (!factories_->Initialize())
+        {
+            throw std::runtime_error("managed factory interception could not be initialized");
+        }
         source2_callbacks_ = std::make_unique<Source2CallbacksService>(
             *this,
             *adapter_,
@@ -356,6 +365,17 @@ bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
         command->enabled.store(false, std::memory_order_release);
     }
     state_lock.unlock();
+    const bool factories_stopped = !factories_ || factories_->Shutdown();
+    if (!factories_stopped)
+    {
+        state_lock.lock();
+        if (!cleanup_failure_reported_)
+        {
+            Write(KEEL_LOG_ERROR, "factory replacements or callbacks retain the host until process exit");
+            cleanup_failure_reported_ = true;
+        }
+        return false;
+    }
     WriteShutdownTrace("plugin service shutdown begin");
     const bool plugin_events_stopped = !plugin_service_ || plugin_service_->Shutdown();
     if (!plugin_events_stopped)
@@ -517,6 +537,7 @@ bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
     WriteShutdownTrace("schema and entity service released");
     lifecycle_.reset();
     WriteShutdownTrace("lifecycle service released");
+    factories_.reset();
     keelhook_.reset();
     WriteShutdownTrace("keelhook service released");
     if (adapter_)
@@ -763,6 +784,19 @@ KeelResult Host::QueryService(
     {
         return KEEL_RESULT_NOT_READY;
     }
+    if (std::strcmp(name, KEELS2_FACTORIES_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_FACTORIES_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!factories_)
+        {
+            return KEEL_RESULT_NOT_READY;
+        }
+        *service = &factories_->Api();
+        return KEEL_RESULT_OK;
+    }
     if (std::strcmp(name, KEELS2_SOURCE2_SERVICE_NAME) == 0)
     {
         if (version == KEELS2_SOURCE2_API_VERSION_1)
@@ -982,29 +1016,13 @@ KeelResult Host::QuerySource2NamedInterface(
     const char* interface_name,
     KeelSource2InterfaceInfo* info)
 {
-    std::scoped_lock lock(state_mutex_);
-    if (!info || !interface_name)
+    std::shared_ptr<FactoryService> factories;
     {
-        return KEEL_RESULT_INVALID_ARGUMENT;
+        std::scoped_lock lock(state_mutex_);
+        factories = factories_;
     }
-    const std::uint32_t size = info->size;
-    *info = {};
-    info->size = size;
-    if (size != sizeof(KeelSource2InterfaceInfo))
-    {
-        return KEEL_RESULT_INCOMPATIBLE;
-    }
-    if ((factory < KEELS2_SOURCE2_FACTORY_ENGINE ||
-            factory > KEELS2_SOURCE2_FACTORY_SERVER_SERVICE) || !interface_name[0])
-    {
-        return KEEL_RESULT_INVALID_ARGUMENT;
-    }
-    PluginRecord* owner = PluginByHandle(plugin);
-    if (!accepting_resources_ || !owner || !owner->accepting_resources || !adapter_)
-    {
-        return KEEL_RESULT_NOT_READY;
-    }
-    return adapter_->QueryNamedInterface(factory, interface_name, *info);
+    return factories ? factories->QueryNamed(plugin, factory, interface_name, info)
+        : KEEL_RESULT_NOT_READY;
 }
 
 void Host::DispatchCommand(const GameCommandInvocation& game_invocation, void* user_data)
@@ -1025,6 +1043,17 @@ void Host::DispatchCommand(const GameCommandInvocation& game_invocation, void* u
     if (!command || !command->enabled.load(std::memory_order_acquire))
     {
         return;
+    }
+
+    command->active.fetch_add(1, std::memory_order_acq_rel);
+    struct CommandScope
+    {
+        CommandRecord& command;
+        ~CommandScope() { command.active.fetch_sub(1, std::memory_order_acq_rel); }
+    } command_scope{*command};
+    if (command->owner != 0)
+    {
+        state_lock.unlock();
     }
 
     try

@@ -3,6 +3,7 @@
 
 #include <keels2/convar.h>
 #include <keels2/entities.hpp>
+#include <keels2/factories.hpp>
 #include <keels2/lifecycle.h>
 #include <keels2/plugin.hpp>
 #include <keels2/plugins.h>

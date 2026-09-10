@@ -583,6 +583,15 @@ def self_test() -> None:
         payload.write_bytes(b"abc")
         if fnv1a64(payload) != (3, 0xE71FA2190541574B):
             raise GateFailure("fingerprint self-test failed")
+        fingerprint_config = {"server_size": 3, "server_fnv1a64": "e71fa2190541574b"}
+        validate_fingerprint(fingerprint_config, 3, 0xE71FA2190541574B)
+        for candidate_size, candidate_fnv in ((4, 0xE71FA2190541574B), (3, 0xE71FA2190541574A)):
+            try:
+                validate_fingerprint(fingerprint_config, candidate_size, candidate_fnv)
+            except GateFailure:
+                pass
+            else:
+                raise GateFailure("fingerprint guard failed to reject a changed module")
         status = damage_result(
             "status ready=true seen=2 blocked=1 invalid=0 non_player_victim=0 "
             "non_player_source=1 self=0 unrelated=0 result_errors=0")
@@ -603,6 +612,12 @@ def self_test() -> None:
     print("KeelS2 live runner self-test: PASS")
 
 
+def validate_fingerprint(config: dict, size: int, fnv: int) -> None:
+    if size != int(config["server_size"]) or fnv != int(str(config["server_fnv1a64"]), 16):
+        raise GateFailure(
+            f"server fingerprint changed: size={size} fnv1a64={fnv:016x}; recapture profiles")
+
+
 def run_gate(args: argparse.Namespace) -> int:
     bundle = Path(__file__).resolve().parent
     verify_manifest(bundle)
@@ -619,19 +634,17 @@ def run_gate(args: argparse.Namespace) -> int:
             f"CS2 build changed: bundle={config['build_id']} server={actual_build}; recapture profiles")
     module, _, command = server_paths(server_root, platform_key)
     size, fnv = fnv1a64(module)
-    if size != int(config["server_size"]) or fnv != int(str(config["server_fnv1a64"]), 16):
-        raise GateFailure(
-            f"server fingerprint changed: size={size} fnv1a64={fnv:016x}; recapture profiles")
+    validate_fingerprint(config, size, fnv)
 
     timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     evidence_name = (
-        f"keels2-09-{config['platform_label']}-live-gate-{config['revision']}-"
+        f"keels2-10-{config['platform_label']}-live-gate-{config['revision']}-"
         f"{timestamp}-evidence")
     work = Path(tempfile.mkdtemp(prefix="keels2-live-gate-"))
     evidence = work / evidence_name
     evidence.mkdir()
     transcript = Transcript(evidence / "server.log", args.verbose_server_output)
-    print("KeelS2 0.9 live gate")
+    print("KeelS2 1.0 live gate")
     print(f"Server: {server_root}")
     print(f"Client port: {args.port}")
     if args.verbose_server_output:
@@ -695,9 +708,13 @@ def run_gate(args: argparse.Namespace) -> int:
         with mutated.open("ab") as handle:
             handle.write(b"\0")
         mutated_size, mutated_fnv = fnv1a64(mutated)
-        if mutated_size == size and mutated_fnv == fnv:
-            raise GateFailure("stale-fingerprint mutation did not change the compatibility identity")
-        result["stale_fingerprint_rejected"] = True
+        try:
+            validate_fingerprint(config, mutated_size, mutated_fnv)
+        except GateFailure:
+            result["stale_fingerprint_rejected"] = True
+            result["stale_fingerprint_check"] = "runner preflight guard"
+        else:
+            raise GateFailure("runner fingerprint guard accepted a changed module")
 
         command.extend([
             "-dedicated", "-console", "-usercon", "-insecure", "-nobots",
@@ -741,6 +758,8 @@ def run_gate(args: argparse.Namespace) -> int:
         server.expect("keel inspect services", "Built-in services")
         server.expect("keel inspect resources", "Commands:")
         server.expect("keel inspect hooks", "Hook inspection complete")
+        server.expect("s2_check factories", "managed factory live probes passed")
+        result["factory_gate_passed"] = True
         print("AUTOMATED PHASE 1/3: PASS")
 
         print()
@@ -755,7 +774,7 @@ def run_gate(args: argparse.Namespace) -> int:
                 "plugin reloaded transactionally: KeelS2 Basic")
             if (cycle + 1) % 10 == 0:
                 print(f"Transactional reload cycles: {cycle + 1}/100")
-        server.expect("keel_test hundred_cycle", "KeelS2 0.9.0 is active")
+        server.expect("keel_test hundred_cycle", "KeelS2 1.0.0 is active")
         shutil.copy2(fixture_root / ("failing" + extension), retry_path)
         for _ in range(5):
             server.expect(
@@ -824,7 +843,7 @@ def run_gate(args: argparse.Namespace) -> int:
 
         connection_position = transcript.position()
         with action(transcript, 1, "Connect twice", (
-            f"Connect to 127.0.0.1:{args.port} and allow the intentional rejection.",
+            f"Connect to {args.connect_address or '<reachable-server-address>'}:{args.port} and allow the intentional rejection.",
             "Reconnect to the same address.",
             "Join Counter-Terrorists and wait until you are alive in-game.",
         )):
@@ -950,7 +969,7 @@ def run_gate(args: argparse.Namespace) -> int:
 
         reconnect_position = transcript.position()
         with action(transcript, 4, "Reconnect", (
-            f"Reconnect to 127.0.0.1:{args.port}.",
+            f"Reconnect to {args.connect_address or '<reachable-server-address>'}:{args.port}.",
             "Join Counter-Terrorists and wait until you are alive in-game.",
         )):
             transcript.wait(
@@ -1007,6 +1026,7 @@ def run_gate(args: argparse.Namespace) -> int:
 
         text = transcript.text
         required = (
+            "managed factory live probes passed engine=observed server=export null=replaced original=forwarded removal=restored",
             "[05E Observer] ClientConnect priority=50",
             "[05E Observer] ClientCommand priority=50 verb=jointeam "
             f"argument=2 slot={args.client_slot} decision=accept",
@@ -1066,6 +1086,7 @@ def run_gate(args: argparse.Namespace) -> int:
             "plugin reload and rollback both failed",
             "automatic target-owner cleanup failed",
             "Source 2 live runtime validation failed",
+            "managed factory live probes failed",
             "map epoch invalidation failed",
             "profile-backed damage hook registration failed",
             "Convar 'bot_stop' is cheat protected, change ignored",
@@ -1148,6 +1169,7 @@ def main() -> int:
     parser.add_argument("--build-id")
     parser.add_argument("--client-slot", type=int, default=0)
     parser.add_argument("--port", type=int, default=27035)
+    parser.add_argument("--connect-address", help="server address reachable from the CS2 client")
     parser.add_argument("--map", default="de_dust2")
     parser.add_argument("--skip-gameplay", action="store_true")
     parser.add_argument("--verbose-server-output", action="store_true")

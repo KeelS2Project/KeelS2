@@ -23,6 +23,7 @@
 namespace keels2::host
 {
 
+class FactoryService;
 class KeelHookService;
 class GameAdapterModule;
 class LifecycleService;
@@ -33,7 +34,7 @@ class Source2CallbacksService;
 class Source2RuntimeService;
 class PublishedServiceRegistry;
 
-inline constexpr const char* kHostVersion = "0.9.0";
+inline constexpr const char* kHostVersion = "1.0.0";
 
 #if defined(_WIN32)
 inline constexpr const char* kPlatformName = "win64";
@@ -88,6 +89,7 @@ struct PluginRecord
     bool loading{};
     bool transitioning{};
     bool cleanup_pending{};
+    bool factory_dispatch_enabled{};
 };
 
 struct CommandRecord
@@ -101,6 +103,7 @@ struct CommandRecord
     KeelSource2CommandCallback native_callback{};
     void* user_data{};
     std::atomic<bool> enabled{true};
+    std::atomic<std::uint32_t> active{};
 };
 
 enum class HostState
@@ -121,6 +124,7 @@ public:
     bool CommandDispatchOpen() const noexcept;
 
 private:
+    friend class FactoryService;
     friend class KeelHookService;
     friend class LifecycleService;
     friend class ConVarService;
@@ -191,13 +195,16 @@ private:
         std::unique_lock<std::recursive_mutex>& state_lock);
     PluginRecord* LoadPlugin(
         const std::filesystem::path& path,
-        std::unique_lock<std::recursive_mutex>& state_lock);
+        std::unique_lock<std::recursive_mutex>& state_lock,
+        std::string_view expected_name = {},
+        bool activate_factories = true);
     PluginRecord* DiscoverPlugin(
         const std::filesystem::path& path,
         std::unique_lock<std::recursive_mutex>& state_lock);
     PluginRecord* StartPlugin(
         PluginRecord& record,
-        std::unique_lock<std::recursive_mutex>& state_lock);
+        std::unique_lock<std::recursive_mutex>& state_lock,
+        bool activate_factories = true);
     bool DependenciesReady(const PluginRecord& plugin, std::string& diagnostic) const;
     bool HasRunningDependent(const PluginRecord& plugin, std::string& dependent) const;
     void RejectUnstartedPlugin(PluginRecord& plugin, std::string diagnostic);
@@ -212,6 +219,7 @@ private:
     std::size_t PluginDisplayIndex(const PluginRecord* plugin) const;
     std::string PluginDisplayId(const PluginRecord* plugin) const;
     std::size_t PluginCommandCount(KeelPluginHandle owner) const;
+    bool PluginCommandActive(KeelPluginHandle owner) const;
     std::string ResourceOwnerLabel(KeelPluginHandle owner) const;
 
     void PluginLog(KeelPluginHandle plugin, KeelLogLevel level, const char* message);
@@ -330,6 +338,7 @@ private:
     std::vector<CompatibilityTargetRecord> compatibility_targets_;
     std::unique_ptr<GameAdapterModule> adapter_module_;
     GameAdapter* adapter_{};
+    std::shared_ptr<FactoryService> factories_;
     std::unique_ptr<KeelHookService> keelhook_;
     std::unique_ptr<LifecycleService> lifecycle_;
     std::unique_ptr<ConVarService> convars_;

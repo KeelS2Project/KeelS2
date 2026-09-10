@@ -1,4 +1,7 @@
 #include <keels2/source2.hpp>
+#include <keels2/factories.hpp>
+#include <keels2/bootstrap_api.h>
+#include <keels2/platform/dynamic_library.h>
 #include <keels2/source2_runtime.hpp>
 
 #include <array>
@@ -6,6 +9,7 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #if !defined(KEELS2_SOURCE2_EXPECTED_PROFILE) || \
     !defined(KEELS2_SOURCE2_EXPECTED_CVAR_MODULE)
@@ -50,6 +54,16 @@ public:
             context_ = nullptr;
             return false;
         }
+        if (factories_.Connect(context) != KEEL_RESULT_OK ||
+            factories_.Subscribe(keels2::source2::Factory::engine, "NetworkServerService_001",
+                &FactoryCallback, this, 0, factory_engine_) != KEEL_RESULT_OK ||
+            factories_.Subscribe(keels2::source2::Factory::server, "Source2Server001",
+                &FactoryCallback, this, 0, factory_server_) != KEEL_RESULT_OK ||
+            factories_.Subscribe(keels2::source2::Factory::server, "KeelS2FactoryNullProbe001",
+                &FactoryCallback, this, 0, factory_null_, KEELS2_FACTORY_PROCESS_LIFETIME) != KEEL_RESULT_OK)
+        {
+            return false;
+        }
         context.Log(KEEL_LOG_INFO, "Source 2 interface gateway load validation passed");
         return true;
     }
@@ -58,7 +72,7 @@ public:
     {
         const bool invalidated = !service_ && !server_ && !game_clients_ && !cvar_ &&
             !named_engine_ && !named_server_ && !named_filesystem_ && !named_physics_ &&
-            !named_network_ && !named_server_service_ && !runtime_ && !command_;
+            !named_network_ && !named_server_service_ && !runtime_ && !command_ && !factories_;
         context.Log(
             invalidated ? KEEL_LOG_INFO : KEEL_LOG_ERROR,
             invalidated
@@ -68,6 +82,84 @@ public:
     }
 
 private:
+    static std::uint32_t FactoryCallback(const KeelFactoryRequest* request,
+        KeelFactoryResult* result, void* data)
+    {
+        auto& self = *static_cast<Source2ServicePlugin*>(data);
+        if (std::strcmp(request->interface_name, "KeelS2FactoryNullProbe001") == 0)
+        {
+            self.factory_null_calls_.fetch_add(1);
+            result->instance = nullptr;
+            result->return_code = 37;
+            return KEELS2_FACTORY_REPLACE;
+        }
+        if (request->factory == KEELS2_SOURCE2_FACTORY_ENGINE)
+        {
+            self.factory_engine_calls_.fetch_add(1);
+            if (self.factory_thread_check_.exchange(false))
+            {
+                std::thread query([&self] {
+                    const void* service{};
+                    self.factory_thread_ok_.store(self.context_->QueryService(
+                        KEELS2_FACTORIES_SERVICE_NAME, KEELS2_FACTORIES_API_VERSION,
+                        &service) == KEEL_RESULT_OK && service);
+                });
+                query.join();
+            }
+        }
+        else
+        {
+            self.factory_server_calls_.fetch_add(1);
+        }
+        return KEELS2_FACTORY_OBSERVE;
+    }
+
+    bool ValidateFactories()
+    {
+        factory_thread_check_.store(true);
+        factory_thread_ok_.store(false);
+        const auto engine_before = factory_engine_calls_.load();
+        const auto server_before = factory_server_calls_.load();
+        keels2::source2::Interface engine;
+        if (service_.Query(keels2::source2::Factory::filesystem,
+                "NetworkServerService_001", engine) != KEEL_RESULT_OK ||
+            factory_engine_calls_.load() <= engine_before || !factory_thread_ok_.load())
+        {
+            return false;
+        }
+        std::string error;
+        auto** table = *static_cast<void***>(server_.Raw());
+        const auto factory = reinterpret_cast<KeelCreateInterfaceFn>(
+            keels2::platform::ModuleSymbolFromAddress(table[0], "CreateInterface", error));
+        int code = 1;
+        if (!factory || factory("Source2Server001", &code) != server_.Raw() || code != 0 ||
+            factory_server_calls_.load() <= server_before)
+        {
+            return false;
+        }
+        KeelFactoryResult original{};
+        const auto null_before = factory_null_calls_.load();
+        if (factories_.Original(keels2::source2::Factory::server,
+                "KeelS2FactoryNullProbe001", original) != KEEL_RESULT_OK ||
+            original.instance || original.return_code != 1 ||
+            factory_null_calls_.load() != null_before ||
+            factory("KeelS2FactoryNullProbe001", &code) || code != 37 ||
+            factory_null_calls_.load() != null_before + 1 ||
+            factories_.Unsubscribe(factory_null_) != KEEL_RESULT_OK ||
+            factory("KeelS2FactoryNullProbe001", &code) || code != 1 ||
+            factory_null_calls_.load() != null_before + 1)
+        {
+            return false;
+        }
+        if (factories_.Subscribe(keels2::source2::Factory::server, "KeelS2FactoryNullProbe001",
+                &FactoryCallback, this, 0, factory_null_, KEELS2_FACTORY_PROCESS_LIFETIME) != KEEL_RESULT_OK)
+        {
+            return false;
+        }
+        context_->Log(KEEL_LOG_INFO, "managed factory live probes passed engine=observed server=export null=replaced original=forwarded removal=restored");
+        return true;
+    }
+
     struct Expected
     {
         keels2::source2::Capability capability;
@@ -508,6 +600,14 @@ private:
         {
             return;
         }
+        if (invocation.Size() == 1 && std::strcmp(invocation[0], "factories") == 0)
+        {
+            if (!ValidateFactories())
+            {
+                context_->Log(KEEL_LOG_ERROR, "managed factory live probes failed");
+            }
+            return;
+        }
         std::int32_t slot{};
         const char* slot_argument = invocation.Size() == 1 ? invocation[0] : nullptr;
         const std::string_view slot_text = slot_argument ? slot_argument : "";
@@ -531,7 +631,7 @@ private:
         const KeelResult user_message = runtime_.FindUserMessage(
             "SayText2",
             message_id);
-        const bool valid = ValidateInterfaces() && ValidateNamedInterfaces() &&
+        const bool valid = ValidateFactories() && ValidateInterfaces() && ValidateNamedInterfaces() &&
             server_command == KEEL_RESULT_OK && client_print == KEEL_RESULT_OK &&
             user_message == KEEL_RESULT_OK && message_id == 118;
         const std::string result = valid
@@ -544,7 +644,7 @@ private:
         context_->Log(valid ? KEEL_LOG_INFO : KEEL_LOG_ERROR, result.c_str());
 #else
         std::uint32_t message_id{99};
-        const bool valid = slot == 0 && ValidateInterfaces() && ValidateNamedInterfaces() &&
+        const bool valid = slot == 0 && ValidateFactories() && ValidateInterfaces() && ValidateNamedInterfaces() &&
             runtime_.ServerCommand(nullptr) == KEEL_RESULT_INVALID_ARGUMENT &&
             runtime_.ClientConsolePrint(-1, "invalid") == KEEL_RESULT_INVALID_ARGUMENT &&
             runtime_.FindUserMessage("invalid name", message_id) ==
@@ -563,6 +663,15 @@ private:
     }
 
     keels2::Context* context_{};
+    keels2::factories::Service factories_;
+    KeelFactorySubscriptionHandle factory_engine_{};
+    KeelFactorySubscriptionHandle factory_server_{};
+    KeelFactorySubscriptionHandle factory_null_{};
+    std::atomic<bool> factory_thread_check_{};
+    std::atomic<bool> factory_thread_ok_{};
+    std::atomic<std::uint32_t> factory_engine_calls_{};
+    std::atomic<std::uint32_t> factory_server_calls_{};
+    std::atomic<std::uint32_t> factory_null_calls_{};
     keels2::source2::Service service_;
     keels2::source2::Runtime runtime_;
     keels2::source2::Interface server_;

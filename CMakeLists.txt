@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(KeelS2 VERSION 0.9.0 LANGUAGES C CXX)
+project(KeelS2 VERSION 1.0.0 LANGUAGES C CXX)
 
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
@@ -394,6 +394,7 @@ add_library(keels2_host SHARED
     host/src/core_command.cpp
     host/src/game_adapter_loader.cpp
     host/src/host.cpp
+    host/src/factory_service.cpp
     host/src/keelhook_service.cpp
     host/src/lifecycle_service.cpp
     host/src/plugin_manifest_validation.cpp
@@ -688,6 +689,12 @@ if(BUILD_TESTING)
     endif()
     keels2_enable_warnings(keels2_plugin_logging)
     add_test(NAME plugin_logging COMMAND keels2_plugin_logging)
+
+    add_executable(keels2_factories_c_abi tests/factories_c_abi.c)
+    target_include_directories(keels2_factories_c_abi PRIVATE sdk/include)
+    set_target_properties(keels2_factories_c_abi PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES)
+    keels2_enable_warnings(keels2_factories_c_abi)
+    add_test(NAME factories_c_abi COMMAND keels2_factories_c_abi)
 
     add_executable(keels2_source2_c_abi tests/source2_c_abi.c)
     target_include_directories(keels2_source2_c_abi PRIVATE sdk/include)
@@ -1435,9 +1442,17 @@ if(BUILD_TESTING)
     )
     keels2_enable_warnings(keels2_keelhook_peer_plugin)
 
+    add_library(keels2_factory_service_plugin SHARED tests/factory_service_plugin.cpp)
+    target_include_directories(keels2_factory_service_plugin PRIVATE sdk/include)
+    target_compile_definitions(keels2_factory_service_plugin PRIVATE KEELS2_PLUGIN_BUILD=1)
+    set_target_properties(keels2_factory_service_plugin PROPERTIES
+        CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES PREFIX "")
+    keels2_enable_warnings(keels2_factory_service_plugin)
+
     add_library(keels2_source2_service_plugin SHARED tests/source2_service_plugin.cpp)
     add_library(keels2_source2_live_plugin SHARED tests/source2_service_plugin.cpp)
     foreach(target IN ITEMS keels2_source2_service_plugin keels2_source2_live_plugin)
+        target_link_libraries(${target} PRIVATE keels2_platform)
         target_include_directories(${target} PRIVATE sdk/include)
         target_compile_definitions(${target} PRIVATE KEELS2_PLUGIN_BUILD=1)
         set_target_properties(${target} PROPERTIES
@@ -1831,6 +1846,12 @@ if(BUILD_TESTING)
         command_removal
         plugin_index_compaction
         source2_service
+        factories
+        factory_pin
+        factory_pin_race
+        factory_wrong_name
+        factory_failed_load
+        factory_reload
         schema_entity_service
         lifecycle_service
         source2_callbacks
@@ -1902,6 +1923,7 @@ if(BUILD_TESTING)
                 $<TARGET_FILE:keels2_published_service_provider_plugin>
                 $<TARGET_FILE:keels2_published_service_consumer_plugin>
                 $<TARGET_FILE:keels2_abi_v4_fixture_plugin>
+                $<TARGET_FILE:keels2_factory_service_plugin>
                 ${CMAKE_BINARY_DIR}/integration-fixture
         )
     endforeach()

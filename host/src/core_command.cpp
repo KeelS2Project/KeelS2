@@ -1,4 +1,5 @@
 #include "host.h"
+#include "factory_service.h"
 #include "convar_service.h"
 #include "keelhook_service.h"
 #include "published_service_registry.h"
@@ -291,6 +292,13 @@ void Host::ShowHookInspection()
 
 void Host::ShowInterfaceInspection()
 {
+    if (factories_)
+    {
+        for (const auto& line : factories_->Diagnostics())
+        {
+            WriteLine(line);
+        }
+    }
     const auto snapshots = adapter_
         ? adapter_->InterfaceSnapshots()
         : std::vector<GameInterfaceSnapshot>{};
@@ -307,6 +315,7 @@ void Host::ShowInterfaceInspection()
 void Host::ShowServiceInspection()
 {
     const std::array builtins{
+        "keels2.factories v1",
         "keels2.source2 v2",
         "keels2.source2.authoring v1",
         "keels2.source2.runtime v1",
@@ -317,7 +326,7 @@ void Host::ShowServiceInspection()
         "keels2.schema v1",
         "keels2.entities v1",
         "keels2.services v1",
-        "keelhook v4"
+        "keelhook v5"
     };
     WriteLine("Built-in services: " + std::to_string(builtins.size()));
     for (const char* service : builtins)

@@ -1,3 +1,4 @@
+#include "factory_fixture.h"
 #include <keels2/bootstrap_api.h>
 #include <keels2/convar.h>
 #include <keels2/cs2/cvar_abi.h>
@@ -1281,11 +1282,36 @@ void UnregisterSource2LoopMode()
         14)(&g_engine_service, "game", &g_loop_factory, nullptr);
 }
 
+struct OriginalFactoryProbe final : FactoryProbe
+{
+    int Value() override { return 11; }
+} g_factory_probe;
+std::atomic<unsigned> g_factory_originals{};
+
+#if defined(_WIN32)
+__declspec(noinline)
+#else
+__attribute__((noinline))
+#endif
 void* EngineFactory(const char* name, int* return_code)
 {
     void* result{};
     bool inconsistent{};
-    if (g_expose_cvar && name && std::strcmp(name, keels2::cs2::kCvarInterfaceVersion) == 0)
+    if (name && std::strcmp(name, "KeelFactoryMissing001") == 0)
+    {
+        if (return_code)
+        {
+            *return_code = 17;
+        }
+        return nullptr;
+    }
+    if (name && (std::strcmp(name, "KeelFactoryProbe001") == 0 ||
+        std::strcmp(name, "KeelFactoryBlock001") == 0))
+    {
+        g_factory_originals.fetch_add(1);
+        result = &g_factory_probe;
+    }
+    else if (g_expose_cvar && name && std::strcmp(name, keels2::cs2::kCvarInterfaceVersion) == 0)
     {
         result = g_cvar_override ? g_cvar_override : &g_cvar;
     }
@@ -1539,7 +1565,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
     if (scenario == "core_commands")
     {
         return selected_profile && Contains(messages, "KeelS2 Menu") &&
-            Contains(messages, "KeelS2 Plugins Menu") && Contains(messages, "KeelS2 0.9.0") &&
+            Contains(messages, "KeelS2 Plugins Menu") && Contains(messages, "KeelS2 1.0.0") &&
             Contains(messages, "load <file>     - Load a plugin module") &&
             Contains(messages, "unload <plugin> - Unload a loaded plugin") &&
             Contains(messages, "Game: cs2") && Contains(messages, "KeelS2 status: running") &&
@@ -1549,10 +1575,12 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "keel_test - Verifies the KeelS2 native plugin command path") &&
             Contains(messages, "Commands for [01] KeelS2 Basic:") &&
             Contains(messages, "KeelS2 Inspection Menu") &&
-            Contains(messages, "Hook targets: 5") &&
+            Contains(messages, "Hook targets: 7") &&
             Contains(messages, "Source 2 interfaces:") &&
             Contains(messages, "Source2Server001 factory=2") &&
-            Contains(messages, "Built-in services: 11") &&
+            Contains(messages, "Built-in services: 12") &&
+            Contains(messages, "keels2.factories v1") &&
+            Contains(messages, "keelhook v5") &&
             Contains(messages, "Published services: 0") &&
             Contains(messages, "Commands:") &&
             Contains(messages, "keel_test owner=KeelS2 Basic [") &&
@@ -1565,7 +1593,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
         const auto final_unload = messages.rfind("[KeelS2 Basic] unload callback completed");
         const auto host_stopped = messages.find("host stopped");
         return selected_profile &&
-            Count(messages, "plugin loaded: KeelS2 Basic 0.9.0") == 3 &&
+            Count(messages, "plugin loaded: KeelS2 Basic 1.0.0") == 3 &&
             Count(messages, "[KeelS2 Basic] unload callback completed") == 3 &&
             Count(messages, "[KeelS2] plugin unloaded: [01] KeelS2 Basic") == 3 &&
             Contains(messages, "plugin filename must name one module in the plugins directory") &&
@@ -1581,7 +1609,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "[KeelS2] Usage: keel plugins unload <plugin>") &&
             Contains(messages, "[KeelS2] Usage: keel plugins info <plugin>") &&
             !Contains(messages, "[KeelS2] ERROR: usage:") &&
-            Count(messages, "KeelS2 0.9.0 is active. The basic native plugin is responding.") == 2 &&
+            Count(messages, "KeelS2 1.0.0 is active. The basic native plugin is responding.") == 2 &&
             final_unload != std::string::npos && host_stopped != std::string::npos &&
             final_unload < host_stopped;
     }
@@ -1606,6 +1634,13 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "[KeelS2] plugin unloaded: [02] Lifecycle Second") &&
             ContainsInOrder(messages, "[KeelS2] plugin unloaded: [02] Lifecycle Second", "  [02] Lifecycle First") &&
             !Contains(messages, "Plugin [04]");
+    }
+    if (scenario == "factories" || scenario == "factory_wrong_name" ||
+        scenario == "factory_failed_load" || scenario == "factory_reload")
+    {
+        return selected_profile && Contains(messages, "factory load subscriptions remained inactive") &&
+            Contains(messages, "factory fixture unloaded") && Contains(messages, "host stopped") &&
+            !Contains(messages, "factory check failed");
     }
     if (scenario == "source2_service")
     {
@@ -1746,7 +1781,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
     if (scenario == "convar_facade")
     {
         return selected_profile &&
-            Count(messages, "plugin loaded: KeelS2 Source 2 Sample 0.9.0") == 2 &&
+            Count(messages, "plugin loaded: KeelS2 Source 2 Sample 1.0.0") == 2 &&
             Count(messages, "[KeelS2 Source 2 Sample] ready command=keel_sample") == 2 &&
             Count(messages, "[KeelS2 Source 2 Sample] LevelInit context=complete") == 2 &&
             Count(messages, "[KeelS2 Source 2 Sample] LevelShutdown") == 2 &&
@@ -1904,8 +1939,8 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "[Plugin Runtime Test] paused KeelS2 Basic") &&
             Contains(messages, "[Plugin Runtime Test] resumed KeelS2 Basic") &&
             Contains(messages, "[Plugin Runtime Test] unloaded KeelS2 Basic") &&
-            Contains(messages, "  [02] KeelS2 Basic (0.9.0) by KeelS2 Project - paused") &&
-            Count(messages, "KeelS2 0.9.0 is active. The basic native plugin is responding.") == 2 &&
+            Contains(messages, "  [02] KeelS2 Basic (1.0.0) by KeelS2 Project - paused") &&
+            Count(messages, "KeelS2 1.0.0 is active. The basic native plugin is responding.") == 2 &&
             Contains(messages, "[Plugin Runtime Test] unloaded cleanly") &&
             !Contains(messages, "invalid event") &&
             !Contains(messages, "did not report busy") &&
@@ -1923,7 +1958,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "[Plugin Runtime Test] paused KeelS2 Basic") &&
             Contains(messages, "plugin transition is already active: KeelS2 Basic") &&
             Contains(messages, "[Plugin Runtime Test] unloaded cleanly") &&
-            Contains(messages, "KeelS2 0.9.0 is active. The basic native plugin is responding.") &&
+            Contains(messages, "KeelS2 1.0.0 is active. The basic native plugin is responding.") &&
             Contains(messages, "host stopped") &&
             !Contains(messages, "invalid event") &&
             !Contains(messages, "did not report busy") &&
@@ -2023,8 +2058,8 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
     }
     if (scenario == "success")
     {
-        return selected_profile && Contains(messages, "plugin loaded: KeelS2 Basic 0.9.0") &&
-            Contains(messages, "[KeelS2 Basic] KeelS2 0.9.0 is active. The basic native plugin is responding.") &&
+        return selected_profile && Contains(messages, "plugin loaded: KeelS2 Basic 1.0.0") &&
+            Contains(messages, "[KeelS2 Basic] KeelS2 1.0.0 is active. The basic native plugin is responding.") &&
             Contains(messages, "Plugin [01]") && Contains(messages, "Name: KeelS2 Basic") &&
             !Contains(messages, "[KeelS2] [INFO]") &&
             ContainsInOrder(messages, "[KeelS2 Basic] unload callback completed", "host stopped");
@@ -2036,7 +2071,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
 
 int main(int argument_count, char** arguments)
 {
-    if (argument_count != 41)
+    if (argument_count != 42)
     {
         return 1;
     }
@@ -2080,7 +2115,8 @@ int main(int argument_count, char** arguments)
     const std::filesystem::path published_service_provider_source = arguments[37];
     const std::filesystem::path published_service_consumer_source = arguments[38];
     const std::filesystem::path abi_v4_fixture_source = arguments[39];
-    const std::filesystem::path fixture = std::filesystem::path(arguments[40]) / scenario;
+    const std::filesystem::path factory_plugin_source = arguments[40];
+    const std::filesystem::path fixture = std::filesystem::path(arguments[41]) / scenario;
     const std::filesystem::path shutdown_trace = fixture / "shutdown.trace";
 
 #if defined(_WIN32)
@@ -2116,6 +2152,9 @@ int main(int argument_count, char** arguments)
     const bool plugin_lifecycle = scenario == "plugin_lifecycle";
     const bool command_removal = scenario == "command_removal";
     const bool plugin_index_compaction = scenario == "plugin_index_compaction";
+    const bool factories = scenario == "factories" || scenario == "factory_pin" ||
+        scenario == "factory_pin_race" || scenario == "factory_wrong_name" ||
+        scenario == "factory_failed_load" || scenario == "factory_reload";
     const bool source2_service = scenario == "source2_service";
     const bool schema_entity_service = scenario == "schema_entity_service";
     const bool lifecycle_service = scenario == "lifecycle_service";
@@ -2145,7 +2184,7 @@ int main(int argument_count, char** arguments)
         !missing_source2_server && !missing_game_clients && !wrong_cvar_provenance &&
         !duplicate_command && !duplicate_plugin_name && !reserved_command &&
         !core_commands && !plugin_lifecycle && !command_removal &&
-        !plugin_index_compaction && !source2_service && !schema_entity_service &&
+        !plugin_index_compaction && !source2_service && !factories && !schema_entity_service &&
         !lifecycle_service &&
         !source2_callbacks &&
         !authoring_concurrency && !convar_service && !convar_failed_load && !convar_facade &&
@@ -2430,6 +2469,19 @@ int main(int argument_count, char** arguments)
             plugin_directory / (std::string("02_keelhook_peer") + plugin_extension))))
     {
         return 36;
+    }
+    if (factories && !CopyFile(factory_plugin_source,
+            plugin_directory / (std::string("01_factory") + plugin_extension)))
+    {
+        return 150;
+    }
+    if (scenario == "factory_failed_load")
+    {
+#if defined(_WIN32)
+        _putenv_s("KEELS2_FACTORY_FAIL_LOAD", "1");
+#else
+        setenv("KEELS2_FACTORY_FAIL_LOAD", "1", 1);
+#endif
     }
     if (source2_service &&
         !CopyFile(
@@ -2895,6 +2947,257 @@ int main(int argument_count, char** arguments)
         }
         expected_registrations = 5;
     }
+    if (factories && scenario != "factory_failed_load")
+    {
+        keels2::platform::DynamicLibrary provider;
+        const auto provider_path = plugin_directory / ".runtime" / "1" /
+            (std::string("01_factory") + plugin_extension);
+        if (!provider.Open(provider_path, loader_error))
+        {
+            std::fputs(messages(), stderr);
+            return 151;
+        }
+        const auto get_fixture = reinterpret_cast<FactoryFixture* (*)()>(
+            provider.Symbol("KeelTest_FactoryFixture"));
+        if (!get_fixture)
+        {
+            return 152;
+        }
+        auto& control = *get_fixture();
+        control.engine = &EngineFactory;
+        control.server = factory;
+        const auto check = [&](bool valid, const char* phase) {
+            if (!valid)
+            {
+                std::fprintf(stderr, "factory check failed: %s, calls=%u errors=%u order=%u\n%s",
+                    phase, control.calls.load(), control.errors.load(), control.order.load(), messages());
+            }
+            return valid;
+        };
+        int code{};
+        const auto initial_originals = g_factory_originals.load();
+        if (!check(control.api && control.source2 &&
+                control.engine("KeelFactoryProbe001", &code) == &g_factory_probe && code == 0 &&
+                control.calls.load() == 4 && control.errors.load() == 0 &&
+                g_factory_originals.load() == initial_originals + 1, "real engine factory"))
+        {
+            return 153;
+        }
+        control.recurse.store(true);
+        if (!check(control.engine("KeelFactoryProbe001", nullptr) == &g_factory_probe &&
+                control.calls.load() == 8 && control.errors.load() == 0 &&
+                g_factory_originals.load() == initial_originals + 5, "reentrant original and named query"))
+        {
+            return 154;
+        }
+        control.recurse.store(false);
+        for (KeelSource2Factory scope : {KEELS2_SOURCE2_FACTORY_ENGINE,
+                KEELS2_SOURCE2_FACTORY_FILESYSTEM, KEELS2_SOURCE2_FACTORY_PHYSICS,
+                KEELS2_SOURCE2_FACTORY_NETWORK, KEELS2_SOURCE2_FACTORY_SERVER_SERVICE})
+        {
+            KeelSource2InterfaceInfo info{};
+            info.size = sizeof(info);
+            const unsigned before = control.calls.load();
+            if (!check(control.source2->query_named_interface(control.plugin, scope,
+                    "KeelFactoryProbe001", &info) == KEEL_RESULT_OK &&
+                    info.instance == &g_factory_probe && info.factory == scope &&
+                    control.calls.load() == before + 4, "cached names and physical aliases"))
+            {
+                return 155;
+            }
+        }
+        if (!check(!control.engine("KeelFactoryMissing001", &code) && code == 17 &&
+                !control.server("KeelFactoryServerMissing001", &code) && code == 1 &&
+                !control.engine(nullptr, &code) && code == 1 && !control.errors.load(),
+                "missing and bootstrap-export server factories"))
+        {
+            return 156;
+        }
+        KeelFactorySubscriptionHandle invalid = 99;
+        KeelFactorySubscriptionSpec spec{};
+        KeelFactoryResult original{};
+        if (!check(control.api->subscribe(control.plugin, nullptr, &invalid) == KEEL_RESULT_INVALID_ARGUMENT &&
+                invalid == 0 && control.api->subscribe(control.plugin, &spec, &invalid) == KEEL_RESULT_INCOMPATIBLE &&
+                control.api->query_original(control.plugin, 1, "KeelFactoryProbe001", &original) == KEEL_RESULT_INCOMPATIBLE,
+                "invalid ABI envelopes"))
+        {
+            return 157;
+        }
+        spec.size = sizeof(spec);
+        spec.factory = 99;
+        original.size = sizeof(original);
+        if (!check(control.api->subscribe(control.plugin, &spec, &invalid) == KEEL_RESULT_INVALID_ARGUMENT &&
+                control.api->query_original(control.plugin, 99, "x", &original) == KEEL_RESULT_INVALID_ARGUMENT &&
+                control.api->query_original(9999, 1, "x", &original) == KEEL_RESULT_NOT_READY &&
+                control.api->unsubscribe(9999, control.subscriptions[0]) == KEEL_RESULT_NOT_FOUND,
+                "invalid owners and scopes"))
+        {
+            return 158;
+        }
+        const unsigned before_pause = control.calls.load();
+        if (!check(g_cvar.Dispatch({"keel", "plugins", "pause", "1"}) &&
+                control.engine("KeelFactoryProbe001", &code) == &g_factory_probe &&
+                control.calls.load() == before_pause &&
+                g_cvar.Dispatch({"keel", "plugins", "resume", "1"}) &&
+                control.engine("KeelFactoryProbe001", &code) == &g_factory_probe &&
+                control.calls.load() == before_pause + 4, "pause and resume"))
+        {
+            return 159;
+        }
+        const bool pin = scenario == "factory_pin" || scenario == "factory_pin_race";
+        control.mode.store(pin ? 2 : 1);
+        FactoryProbe* exposed{};
+        if (scenario == "factory_pin_race")
+        {
+            control.mode.store(3);
+            std::thread caller([&] {
+                exposed = static_cast<FactoryProbe*>(control.engine("KeelFactoryProbe001", &code));
+            });
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (!control.entered.load() && std::chrono::steady_clock::now() < deadline)
+            {
+                std::this_thread::yield();
+            }
+            std::atomic<bool> completed{};
+            std::thread unloading([&] {
+                g_cvar.Dispatch({"keel", "plugins", "unload", "1"});
+                completed.store(true);
+            });
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            const bool held = control.entered.load() && !completed.load();
+            control.release.store(true);
+            control.release.notify_all();
+            caller.join();
+            unloading.join();
+            if (!check(held && completed.load() && !control.unloaded.load(),
+                    "replacement exposure racing with provider unload"))
+            {
+                return 169;
+            }
+        }
+        else
+        {
+            exposed = static_cast<FactoryProbe*>(control.engine("KeelFactoryProbe001", &code));
+        }
+        if (!check(pin ? exposed && exposed->Value() == 29 && code == 0
+                : !exposed && code == 42, "first replacement wins and later subscribers observe it"))
+        {
+            return 160;
+        }
+        if (pin)
+        {
+            for (const auto handle : control.subscriptions)
+            {
+                if (control.api->unsubscribe(control.plugin, handle) != KEEL_RESULT_OK)
+                {
+                    return 161;
+                }
+            }
+            if (!check(g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) &&
+                    g_cvar.Dispatch({"keel", "plugins", "reload", "1"}) &&
+                    g_cvar.Dispatch({"keel", "plugins", "pause", "1"}) &&
+                    g_cvar.Dispatch({"keel", "inspect", "interfaces"}) &&
+                    control.unloaded.load() == 0 && exposed->Value() == 29,
+                    "provider pin survives removal and blocks lifecycle transitions"))
+            {
+                return 162;
+            }
+            keels2::platform::DynamicLibrary retained_host;
+            if (!retained_host.Open(host_path, loader_error))
+            {
+                return 163;
+            }
+            const auto stop = reinterpret_cast<KeelHostStopFn>(retained_host.Symbol("KeelHost_Stop"));
+            if (!check(stop && stop() == 0 && stop() == 0 && control.unloaded.load() == 0 &&
+                    exposed->Value() == 29 && !control.errors.load(), "shutdown retains replacement object and provider"))
+            {
+                return 164;
+            }
+            return 0;
+        }
+        control.mode.store(0);
+        if (scenario == "factory_reload" || scenario == "factory_wrong_name")
+        {
+            const char* failure = scenario == "factory_wrong_name"
+                ? "KEELS2_FACTORY_WRONG_NAME" : "KEELS2_FACTORY_FAIL_LOAD";
+#if defined(_WIN32)
+            _putenv_s(failure, "1");
+#else
+            setenv(failure, "1", 1);
+#endif
+            if (!check(g_cvar.Dispatch({"keel", "plugins", "reload", "1"}) &&
+                    control.unloaded.load() == 1 &&
+                    Count(messages(), "factory load subscriptions remained inactive") ==
+                        (scenario == "factory_wrong_name" ? 2u : 3u) &&
+                    Contains(messages(), "previous image restored") &&
+                    g_cvar.Dispatch({"keel", "plugins", "pause", "1"}) &&
+                    g_cvar.Dispatch({"keel", "plugins", "reload", "1"}) &&
+                    control.engine("KeelFactoryProbe001", &code) == &g_factory_probe &&
+                    g_cvar.Dispatch({"keel", "plugins", "resume", "1"}),
+                    "failed reload rollback and successful reload"))
+            {
+                return 165;
+            }
+            keels2::platform::DynamicLibrary reloaded;
+            const auto reloaded_path = plugin_directory / ".runtime" / "4" /
+                (std::string("01_factory") + plugin_extension);
+            if (!reloaded.Open(reloaded_path, loader_error))
+            {
+                return 170;
+            }
+            const auto get_reloaded = reinterpret_cast<FactoryFixture* (*)()>(
+                reloaded.Symbol("KeelTest_FactoryFixture"));
+            if (!check(get_reloaded && get_reloaded()->calls.load() == 0 &&
+                    control.engine("KeelFactoryProbe001", &code) == &g_factory_probe &&
+                    get_reloaded()->calls.load() == 4, "paused reload stays inactive until resume"))
+            {
+                return 171;
+            }
+        }
+        else
+        {
+            control.remove_peer.store(true);
+            const unsigned before_remove = control.calls.load();
+            control.engine("KeelFactoryProbe001", &code);
+            if (!check(control.calls.load() == before_remove + 3 && !control.errors.load(), "remove pending peer"))
+            {
+                return 166;
+            }
+            control.order.store(0);
+            control.remove_self.store(true);
+            control.engine("KeelFactoryProbe001", &code);
+            if (!check(control.api->unsubscribe(control.plugin, control.subscriptions[0]) == KEEL_RESULT_OK &&
+                    !control.errors.load(), "self-removal disables immediately and can be drained"))
+            {
+                return 167;
+            }
+            control.api->unsubscribe(control.plugin, control.subscriptions[1]);
+            control.api->unsubscribe(control.plugin, control.subscriptions[2]);
+            std::thread caller([&] { control.engine("KeelFactoryBlock001", nullptr); });
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (!control.entered.load() && std::chrono::steady_clock::now() < deadline)
+            {
+                std::this_thread::yield();
+            }
+            std::atomic<bool> completed{};
+            std::thread unloading([&] {
+                g_cvar.Dispatch({"keel", "plugins", "unload", "1"});
+                completed.store(true);
+            });
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            const bool held = control.entered.load() && !completed.load() && !control.unloaded.load();
+            control.release.store(true);
+            control.release.notify_all();
+            caller.join();
+            unloading.join();
+            if (!check(held && completed.load() && control.unloaded.load() == 1 &&
+                    control.engine("KeelFactoryProbe001", &code) == &g_factory_probe && !control.errors.load(),
+                    "concurrent unload waits for active callback"))
+            {
+                return 168;
+            }
+        }
+    }
     if (source2_service)
     {
         if (!g_cvar.Dispatch({"s2_check", "0"}) ||
@@ -3117,7 +3420,7 @@ int main(int argument_count, char** arguments)
     if (plugin_runtime_service)
     {
         const char* basic_marker =
-            "KeelS2 0.9.0 is active. The basic native plugin is responding.";
+            "KeelS2 1.0.0 is active. The basic native plugin is responding.";
         if (!g_cvar.Dispatch({"keel_runtime_probe"}) ||
             !g_cvar.Dispatch({"keel_test", "before_pause"}) ||
             Count(messages(), basic_marker) != 1 ||
@@ -3209,7 +3512,7 @@ int main(int argument_count, char** arguments)
         unload_thread.join();
         const std::uint32_t callbacks_after_unload = callback_count();
         const char* basic_marker =
-            "KeelS2 0.9.0 is active. The basic native plugin is responding.";
+            "KeelS2 1.0.0 is active. The basic native plugin is responding.";
         if (!pause_waited || !unload_waited || !pause_succeeded.load(std::memory_order_acquire) ||
             !unload_succeeded.load(std::memory_order_acquire) || unload_count() != 1 ||
             g_cvar.ActiveCount() != 2 || !g_cvar.Dispatch({"keel_test", "while_paused"}) ||
@@ -3381,7 +3684,12 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 149;
         }
-        expected_registrations = 115;
+        if (!Contains(messages(), "reload candidate has a different plugin name") ||
+            g_cvar.HasActive("partial_failure"))
+        {
+            return 172;
+        }
+        expected_registrations = 110;
     }
     if (lifecycle_service)
     {

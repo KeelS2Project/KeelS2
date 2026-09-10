@@ -31,7 +31,7 @@ void BasicPlugin::TestCommand(const CCommandContext& context, const CCommand& co
         }
         return;
     }
-    LogMessage("KeelS2 0.9.0 is active. The basic native plugin is responding.");
+    LogMessage("KeelS2 1.0.0 is active. The basic native plugin is responding.");
 }
 
 KEELS2_PLUGIN(BasicPlugin)

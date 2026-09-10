@@ -9,7 +9,7 @@ public:
     static constexpr keels2::PluginInfo Info{
         "KeelS2 Basic",
         "KeelS2 Project",
-        "0.9.0",
+        "1.0.0",
         "Minimal native plugin and console-command proof"
     };
 
