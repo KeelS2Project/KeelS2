@@ -963,20 +963,35 @@ def run_gate(args: argparse.Namespace) -> int:
                 reconnect_position,
                 ACTION_TIMEOUT,
                 server.process)
+        print("AUTOMATED: Creating a replacement bot and validating its entity handle")
+        replacement_position = server.send("bot_add_ct")
+        transcript.wait(
+            "ClientPutInServer create new player controller",
+            replacement_position,
+            90,
+            server.process)
+        restart_position = server.send("mp_restartgame 1")
+        transcript.wait("event=round_start", restart_position, 90, server.process)
         server.poll(
             "keel_schema_entity_live replacement",
             "replacement entity validation passed",
             60)
+        print("AUTOMATED: Replacement entity handle validation PASS")
         next_map = "de_inferno" if args.map != "de_inferno" else "de_dust2"
+        print(f"AUTOMATED: Changing level to {next_map} and validating map-epoch invalidation")
         map_position = server.send(f"changelevel {next_map}")
         transcript.wait("map epoch invalidation passed", map_position, 180, server.process)
         transcript.wait("LevelShutdown", map_position, 180, server.process)
         transcript.wait("LevelInit", map_position, 180, server.process)
+        print("AUTOMATED: Map-epoch invalidation PASS")
+        print("AUTOMATED: Validating the post-reload world lookup")
         server.poll(
             "keel_schema_entity_live world",
             "post-reload world lookup and typed read passed",
             90)
+        print("AUTOMATED: Post-reload world lookup PASS")
 
+        print("AUTOMATED: Unloading live fixtures")
         for name in (
             "KeelS2 0.5E Decision B",
             "KeelS2 0.5E Decision A",
@@ -988,6 +1003,7 @@ def run_gate(args: argparse.Namespace) -> int:
             "KeelS2 Basic",
         ):
             server.expect(f'keel plugins unload "{name}"', "plugin unloaded:")
+        print("AUTOMATED: Live fixture unload PASS")
 
         text = transcript.text
         required = (
