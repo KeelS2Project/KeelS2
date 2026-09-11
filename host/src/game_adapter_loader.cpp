@@ -136,6 +136,8 @@ bool GameAdapterModule::Load(
     }
     adapter_ = adapter;
     destroy_ = provider.destroy;
+    command_caller_ = SymbolFunction<GameAdapterCommandCallerFn>(
+        library_.Symbol(kGameAdapterCommandCallerSymbol));
     error.clear();
     return true;
 }
@@ -154,6 +156,7 @@ void GameAdapterModule::Reset() noexcept
     }
     adapter_ = nullptr;
     destroy_ = nullptr;
+    command_caller_ = nullptr;
     library_.Close();
     path_.clear();
 }
@@ -161,6 +164,17 @@ void GameAdapterModule::Reset() noexcept
 GameAdapter* GameAdapterModule::Get() const noexcept
 {
     return adapter_;
+}
+
+bool GameAdapterModule::SupportsClientCommands() const noexcept
+{
+    return command_caller_ != nullptr;
+}
+
+KeelResult GameAdapterModule::CommandCaller(const void* context, std::int32_t& slot) const noexcept
+{
+    slot = -1;
+    return command_caller_ ? command_caller_(context, &slot) : KEEL_RESULT_OK;
 }
 
 const std::filesystem::path& GameAdapterModule::Path() const noexcept

@@ -1,4 +1,4 @@
-#include "../samples/no_damage/policy.h"
+#include "fixtures/no_damage/policy.h"
 
 using keels2::samples::no_damage::Classify;
 using keels2::samples::no_damage::Decision;

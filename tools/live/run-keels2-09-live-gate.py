@@ -540,6 +540,76 @@ def action(
         transcript.set_echo(previous_echo)
 
 
+def validate_client_console(text: str, stage: str, revision: str, platform_label: str) -> None:
+    text = re.sub(r"^[ \t]*\[Client\][ \t]?", "", text, flags=re.MULTILINE)
+    menu = (
+        "KeelS2 Menu\n"
+        "Usage: keel <command>\n"
+        "  plugins  - Show active plugins\n"
+        "  credits  - Project credits\n"
+        "  version  - Version and build details"
+    )
+    if menu not in text or "[KeelS2]" in text:
+        raise GateFailure("client console usage output is missing or server output was pasted")
+    if stage == "information":
+        required = (
+            "KeelS2 1.0.0", "Built: ", " UTC", f"Git revision: {revision.split('-')[0]}",
+            f"Target: {platform_label.capitalize()}/x86_64", "Plugin ABI: 4",
+            "Created and developed by Peter Brev", "Official website: https://www.keels2.com/",
+            "Listing 8 active plugins:", "KeelS2 Basic", "Source2 Service Test",
+        )
+    elif stage == "paused":
+        required = ("Listing 7 active plugins:",)
+        if re.search(r"^\s*\[\d+\].*KeelS2 Basic", text, re.MULTILINE):
+            raise GateFailure("the paused plugin appeared in the client list")
+    else:
+        required = ("No active plugins.", "Plugin ABI: 4")
+        if re.search(r"^\s*\[\d+\]", text, re.MULTILINE):
+            raise GateFailure("plugins appeared after all plugins were unloaded")
+    if any(marker not in text for marker in required):
+        raise GateFailure(f"visible client console output is incomplete for {stage}")
+    rows = re.findall(r"^\s*\[\d+\].* - (\w+)\s*$", text, re.MULTILINE)
+    if any(state != "loaded" for state in rows):
+        raise GateFailure("a non-running plugin appeared in the client list")
+    expected_rows = {"information": 8, "paused": 7, "empty": 0}[stage]
+    if len(rows) != expected_rows:
+        raise GateFailure(f"expected one client list containing {expected_rows} plugins")
+
+
+def client_console_check(transcript: Transcript, evidence: Path, config: dict, stage: str) -> None:
+    commands = {
+        "information": ("keel", "keel plugins", "keel credits", "keel version"),
+        "paused": ("keel plugins", 'keel plugins unload "KeelS2 Basic"', "keel version extra"),
+        "empty": ("keel plugins", "keel version", "keel inspect"),
+    }[stage]
+    previous_echo = transcript.set_echo(False)
+    path = evidence / f"client-console-{stage}.txt"
+    try:
+        print()
+        print(f"VISIBLE CLIENT CONSOLE CHECK: {stage}")
+        print("Run each command directly in the connected CS2 player's developer console:")
+        for command in commands:
+            print(f"  {command}")
+        print("Copy the commands and their visible responses from the CS2 console.")
+        print("Paste them HERE in the runner terminal, then type END on a new line.")
+        print("Do not paste dedicated-server or RCON output. If nothing appears, type END to record failure.")
+        sys.stdout.flush()
+        with path.open("w", encoding="utf-8") as output:
+            for _ in range(512):
+                line = input()
+                if line.strip() == "END":
+                    break
+                output.write(line + "\n")
+                output.flush()
+            else:
+                raise GateFailure("client console evidence exceeded 512 lines")
+        validate_client_console(path.read_text(encoding="utf-8"), stage,
+                                str(config["revision"]), str(config["platform_label"]))
+        print(f"VISIBLE CLIENT CONSOLE CHECK {stage}: PASS (operator-provided client output)")
+    finally:
+        transcript.set_echo(previous_echo)
+
+
 def archive_evidence(source: Path, output: Path, platform_key: str) -> None:
     if platform_key == "windows-x86_64":
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
@@ -604,6 +674,46 @@ def self_test() -> None:
         archive_evidence(evidence, temporary / "evidence.zip", "windows-x86_64")
         if not (temporary / "evidence.tar.gz").is_file() or not (temporary / "evidence.zip").is_file():
             raise GateFailure("evidence archive self-test failed")
+
+        menu = (
+            "KeelS2 Menu\n"
+            "Usage: keel <command>\n"
+            "  plugins  - Show active plugins\n"
+            "  credits  - Project credits\n"
+            "  version  - Version and build details"
+        )
+        valid_empty = menu + "\nNo active plugins.\nPlugin ABI: 4\n"
+        rows = [f"  [{index:02}] {name} (1) by KeelS2 - loaded" for index, name in enumerate(
+            ("Source2 Service Test", "Schema", "Lifecycle", "KeelS2 Basic",
+             "Observer", "Decision A", "Decision B", "No Player Damage"), 1)]
+        valid_paused = menu + "\nListing 7 active plugins:\n" + "\n".join(rows[:3] + rows[4:])
+        for platform in ("linux", "windows"):
+            valid_information = "\n".join((
+                menu, "KeelS2 1.0.0", "Built: test UTC", "Git revision: test",
+                f"Target: {platform.capitalize()}/x86_64", "Plugin ABI: 4",
+                "Created and developed by Peter Brev", "Official website: https://www.keels2.com/",
+                "Listing 8 active plugins:", *rows))
+            for prefix in ("", "[Client] "):
+                for stage, valid in (("information", valid_information),
+                                     ("paused", valid_paused), ("empty", valid_empty)):
+                    decorated = "\n".join(prefix + line for line in valid.splitlines())
+                    validate_client_console(decorated, stage, "test", platform)
+                for stage, invalid in (
+                    ("information", valid_information.replace(rows[-1], "")),
+                    ("information", valid_information.replace("- loaded", "- paused", 1)),
+                    ("paused", valid_paused.replace(rows[0], rows[3])),
+                    ("empty", valid_empty + rows[0]),
+                    ("empty", ""),
+                    ("empty", valid_empty.replace("No active plugins.", "Listing 1 plugins:")),
+                    ("empty", "[KeelS2] " + valid_empty),
+                ):
+                    decorated = "\n".join(prefix + line for line in invalid.splitlines())
+                    try:
+                        validate_client_console(decorated, stage, "test", platform)
+                    except GateFailure:
+                        pass
+                    else:
+                        raise GateFailure("client console evidence guard accepted invalid output")
 
         if os.name == "nt":
             if ctypes.sizeof(ConsoleKeyEvent) != 16 or ctypes.sizeof(ConsoleInputRecord) != 20:
@@ -819,6 +929,25 @@ def run_gate(args: argparse.Namespace) -> int:
         server.expect(
             'keel plugins unload "KeelHook Target Fixture"',
             "automatic target-owner cleanup passed before module unload")
+        for example in ("stub", "sample"):
+            target = "12_" + example
+            stage(fixture_root, plugin_root, example + extension, target + extension)
+            name = "KeelS2 Stub" if example == "stub" else "KeelS2 Source 2 Sample"
+            server.expect(f'keel plugins load "{target}"', f"plugin loaded: {name}")
+            if example == "sample":
+                server.expect("keel_sample", "caller=-1 int=42 float=1.25")
+                server.expect("keel_sample bump", "caller=-1 int=43 float=1.5")
+                server.expect("keel_sample invalid", "usage: keel_sample [bump]")
+            server.expect(f'keel plugins reload "{name}"', f"plugin reloaded transactionally: {name}")
+            if example == "sample":
+                server.expect("keel_sample", "caller=-1 int=43 float=1.5")
+                server.expect("keel_sample bump", "caller=-1 int=44 float=1.75")
+            server.expect(f'keel plugins unload "{name}"', "plugin unloaded:")
+            server.expect(f'keel plugins load "{target}"', f"plugin loaded: {name}")
+            if example == "sample":
+                server.expect("keel_sample", "caller=-1 int=44 float=1.75")
+            server.expect(f'keel plugins unload "{name}"', "plugin unloaded:")
+        result["examples_gate_passed"] = True
         print("AUTOMATED PHASE 2/3: PASS")
 
         if args.skip_gameplay:
@@ -864,6 +993,12 @@ def run_gate(args: argparse.Namespace) -> int:
                 ACTION_TIMEOUT,
                 server.process)
         server.expect(f"s2_check {args.client_slot}", "Source 2 live runtime validation passed message_id=118")
+        client_console_check(transcript, evidence, config, "information")
+        server.expect('keel plugins pause "KeelS2 Basic"', "plugin paused:")
+        client_console_check(transcript, evidence, config, "paused")
+        server.expect('keel plugins info "KeelS2 Basic"', "State: paused")
+        server.expect('keel plugins resume "KeelS2 Basic"', "plugin resumed:")
+
         server.send("mp_limitteams 0")
         server.send("mp_autoteambalance 0")
         server.send("mp_friendlyfire 1")
@@ -1023,6 +1158,10 @@ def run_gate(args: argparse.Namespace) -> int:
         ):
             server.expect(f'keel plugins unload "{name}"', "plugin unloaded:")
         print("AUTOMATED: Live fixture unload PASS")
+        client_console_check(transcript, evidence, config, "empty")
+        result["client_console_gate_passed"] = True
+        result["client_console_evidence"] = "operator-provided visible CS2 developer-console responses"
+
 
         text = transcript.text
         required = (

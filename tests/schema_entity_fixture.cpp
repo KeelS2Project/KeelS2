@@ -1,3 +1,5 @@
+#include <keels2/keelhook.hpp>
+#include <eiface.h>
 #include <entity2/entityclass.h>
 #include <entity2/entityinstance.h>
 #include <entity2/entitysystem.h>
@@ -11,6 +13,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
+#include <string>
+#include <vector>
 
 #if defined(_WIN32)
 #define KEELS2_SCHEMA_FIXTURE_EXPORT __declspec(dllexport)
@@ -680,3 +685,50 @@ int main()
     return RunNativeBridgeChecks();
 }
 #endif
+
+namespace
+{
+std::mutex g_console_mutex;
+std::vector<std::pair<int, std::string>> g_console_lines;
+std::array<void*, 256> g_console_vtable{};
+RawInterface g_console_engine{g_console_vtable.data()};
+
+void ConsolePrint(void*, CPlayerSlot slot, const char* message)
+{
+    std::scoped_lock lock(g_console_mutex);
+    g_console_lines.emplace_back(slot.Get(), message ? message : "");
+}
+}
+
+extern "C" KEELS2_SCHEMA_FIXTURE_EXPORT void* KeelTest_ConsoleEngine()
+{
+    const auto index = keels2::kh::VirtualIndex<&IVEngineServer2::ClientPrintf>();
+    if (!index || *index >= g_console_vtable.size())
+    {
+        return nullptr;
+    }
+    g_console_vtable[0] = FunctionAddress(&ValidationSlot);
+    g_console_vtable[*index] = FunctionAddress(&ConsolePrint);
+    return &g_console_engine;
+}
+
+extern "C" KEELS2_SCHEMA_FIXTURE_EXPORT const char* KeelTest_ConsoleOutput(int slot)
+{
+    std::scoped_lock lock(g_console_mutex);
+    thread_local std::string output;
+    output.clear();
+    for (const auto& [caller, line] : g_console_lines)
+    {
+        if (caller == slot)
+        {
+            output += line;
+        }
+    }
+    return output.c_str();
+}
+
+extern "C" KEELS2_SCHEMA_FIXTURE_EXPORT void KeelTest_ResetConsoleOutput()
+{
+    std::scoped_lock lock(g_console_mutex);
+    g_console_lines.clear();
+}

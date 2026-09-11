@@ -270,6 +270,22 @@ extern "C" void* KeelCs2_CreateGameEventListener(
     }
 }
 
+extern "C" KeelResult KeelCs2_CommandCaller(const void* context, std::int32_t* slot)
+{
+    if (!context || !slot)
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    const auto& caller = *static_cast<const CCommandContext*>(context);
+    const CPlayerSlot player = caller.GetPlayerSlot();
+    if (player.Get() != -1 && !player.IsValid())
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    *slot = player.Get();
+    return KEEL_RESULT_OK;
+}
+
 extern "C" KeelResult KeelCs2_ServerCommand(void* engine_server, const char* command)
 {
     if (!engine_server || !command || !command[0])

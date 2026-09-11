@@ -278,14 +278,8 @@ def package_entries(platform_key: str) -> tuple[str, ...]:
             "addons/keels2/bin/win64/keels2_game_cs2.dll",
             "addons/keels2/bin/win64/keels2_host.dll",
             "addons/keels2/bin/win64/server.dll",
-            "addons/keels2/plugins/win64/keels2_basic.dll",
-            "addons/keels2/plugins/win64/keels2_callbacks.dll",
-            "addons/keels2/plugins/win64/keels2_entities.dll",
-            "addons/keels2/plugins/win64/keels2_hooks.dll",
-            "addons/keels2/plugins/win64/keels2_lifecycle.dll",
-            "addons/keels2/plugins/win64/keels2_no_damage.dll",
-            "addons/keels2/plugins/win64/keels2_runtime.dll",
             "addons/keels2/plugins/win64/keels2_sample.dll",
+            "addons/keels2/plugins/win64/keels2_stub.dll",
             "addons/keels2/tools/win64/keels2_compatibility_review.exe",
         )
     if platform_key == "linux-x86_64":
@@ -307,14 +301,8 @@ def package_entries(platform_key: str) -> tuple[str, ...]:
             "addons/keels2/bin/linuxsteamrt64/libkeels2_game_cs2.so",
             "addons/keels2/bin/linuxsteamrt64/libkeels2_host.so",
             "addons/keels2/bin/linuxsteamrt64/libserver.so",
-            "addons/keels2/plugins/linuxsteamrt64/keels2_basic.so",
-            "addons/keels2/plugins/linuxsteamrt64/keels2_callbacks.so",
-            "addons/keels2/plugins/linuxsteamrt64/keels2_entities.so",
-            "addons/keels2/plugins/linuxsteamrt64/keels2_hooks.so",
-            "addons/keels2/plugins/linuxsteamrt64/keels2_lifecycle.so",
-            "addons/keels2/plugins/linuxsteamrt64/keels2_no_damage.so",
-            "addons/keels2/plugins/linuxsteamrt64/keels2_runtime.so",
             "addons/keels2/plugins/linuxsteamrt64/keels2_sample.so",
+            "addons/keels2/plugins/linuxsteamrt64/keels2_stub.so",
             "addons/keels2/tools/linuxsteamrt64/keels2_compatibility_review",
         )
     stop(f"unsupported artifact platform: {platform_key}")

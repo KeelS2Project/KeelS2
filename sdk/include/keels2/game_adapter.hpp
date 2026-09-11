@@ -41,6 +41,10 @@ struct GameCommandInvocation
     const void* command;
 };
 
+inline constexpr const char* kGameAdapterCommandCallerSymbol = "KeelGameAdapter_CommandCaller";
+inline constexpr std::uint64_t kClientCommandFlags = (1ull << 2) | (1ull << 25);
+using GameAdapterCommandCallerFn = KeelResult (*)(const void* context, std::int32_t* slot) noexcept;
+
 using GameCommandCallback = void (*)(const GameCommandInvocation& invocation, void* user_data);
 using GameLifecycleCallback = void (*)(const KeelLifecycleEvent& event, void* user_data);
 using GameSource2Callback = KeelBool (*)(KeelSource2CallbackEvent& event, void* user_data);

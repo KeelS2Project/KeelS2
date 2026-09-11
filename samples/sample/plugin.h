@@ -84,7 +84,6 @@ private:
 
     void OnRoundStart(IGameEvent* event);
 
-    bool gameFrameLogged = false;
     ConVar<int> integer;
     ConVar<float> floating;
     ConVar<int> limitTeams;

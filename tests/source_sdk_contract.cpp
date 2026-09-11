@@ -1,4 +1,5 @@
 #include <keels2/keels2.hpp>
+#include <keels2/game_adapter.hpp>
 #include <keels2/source2_sdk.hpp>
 
 #include <cstdint>
@@ -83,6 +84,7 @@ public:
 };
 
 static_assert(SOURCE_ENGINE == 25);
+static_assert(keels2::host::kClientCommandFlags == (FCVAR_GAMEDLL | FCVAR_CLIENT_CAN_EXECUTE));
 static_assert(plugin_continue == KH_ACTION_CONTINUE);
 static_assert(plugin_override == KH_ACTION_OVERRIDE);
 static_assert(plugin_supersede == KH_ACTION_SUPERSEDE);

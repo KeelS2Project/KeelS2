@@ -34,7 +34,7 @@ class Source2CallbacksService;
 class Source2RuntimeService;
 class PublishedServiceRegistry;
 
-inline constexpr const char* kHostVersion = "1.0.0";
+inline constexpr const char* kHostVersion = KEELS2_HOST_VERSION;
 
 #if defined(_WIN32)
 inline constexpr const char* kPlatformName = "win64";
@@ -142,6 +142,10 @@ private:
     void DispatchCoreCommand(
         const KeelCommandInvocation& invocation,
         std::unique_lock<std::recursive_mutex>& state_lock);
+    void DispatchClientCommand(
+        const KeelCommandInvocation& invocation,
+        std::int32_t slot);
+    std::vector<std::string> PluginListLines(bool active_only) const;
     void ShowMainMenu();
     void ShowPluginsMenu();
     void ShowVersion();

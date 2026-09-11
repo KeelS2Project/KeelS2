@@ -47,6 +47,12 @@ int main(int argument_count, char** arguments)
     {
         return 2;
     }
+    std::int32_t slot{100};
+    if (module.SupportsClientCommands() ||
+        module.CommandCaller(nullptr, slot) != KEEL_RESULT_OK || slot != -1)
+    {
+        return 9;
+    }
     KeelHostCompatibilityInfo compatibility{};
     if (!module.Get()->Start(nullptr, nullptr, compatibility, error) ||
         !module.Get()->CompleteStartup(error) || !module.Get()->IsGameThread())

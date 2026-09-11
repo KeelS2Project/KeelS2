@@ -579,7 +579,9 @@ bool Host::RegisterCoreCommand()
     resource->name = "keel";
     resource->description = "KeelS2 command menu";
     resource->callback = &CoreCommand;
-    return RegisterCommandRecord(std::move(resource), 0);
+    const auto flags = adapter_module_ && adapter_module_->SupportsClientCommands()
+        ? kClientCommandFlags : 0;
+    return RegisterCommandRecord(std::move(resource), flags);
 }
 
 void Host::ApiLog(KeelPluginHandle plugin, KeelLogLevel level, const char* message)
@@ -1084,7 +1086,20 @@ void Host::DispatchCommand(const GameCommandInvocation& game_invocation, void* u
             };
             if (command->owner == 0)
             {
-                host.DispatchCoreCommand(invocation, state_lock);
+                std::int32_t slot{-1};
+                if (!host.adapter_module_ ||
+                    host.adapter_module_->CommandCaller(game_invocation.context, slot) != KEEL_RESULT_OK)
+                {
+                    return;
+                }
+                if (slot >= 0)
+                {
+                    host.DispatchClientCommand(invocation, slot);
+                }
+                else
+                {
+                    host.DispatchCoreCommand(invocation, state_lock);
+                }
             }
             else
             {

@@ -3367,3 +3367,10 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT std::uint32_t KeelGameAdapter_Query(
     };
     return 1;
 }
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_CommandCaller(
+    const void* context,
+    std::int32_t* slot) noexcept
+{
+    return KeelCs2_CommandCaller(context, slot);
+}

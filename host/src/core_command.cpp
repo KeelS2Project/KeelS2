@@ -1,4 +1,5 @@
 #include "host.h"
+#include "keels2_build_metadata.h"
 #include "factory_service.h"
 #include "convar_service.h"
 #include "keelhook_service.h"
@@ -10,6 +11,71 @@
 
 namespace keels2::host
 {
+
+namespace
+{
+std::vector<std::string> VersionLines()
+{
+    return {
+        "KeelS2 " + std::string(kHostVersion),
+        "Built: " + std::string(kBuildTime),
+        "Git revision: " + std::string(kBuildRevision),
+        "Target: " + std::string(kBuildPlatform),
+        "Plugin ABI: " + std::to_string(KEELS2_PLUGIN_ABI_VERSION)
+    };
+}
+
+std::vector<std::string> CreditLines()
+{
+    return {
+        "KeelS2",
+        "Created and developed by Peter Brev",
+        "KeelHook, plugin framework, and Source 2 integration",
+        "Official website: https://www.keels2.com/"
+    };
+}
+}
+
+void Host::DispatchClientCommand(
+    const KeelCommandInvocation& invocation,
+    std::int32_t slot)
+{
+    std::vector<std::string> lines;
+    if (invocation.argument_count == 1 && invocation.arguments && invocation.arguments[0])
+    {
+        const std::string_view command(invocation.arguments[0]);
+        if (EqualInsensitive(command, "plugins"))
+        {
+            lines = PluginListLines(true);
+        }
+        else if (EqualInsensitive(command, "credits"))
+        {
+            lines = CreditLines();
+        }
+        else if (EqualInsensitive(command, "version"))
+        {
+            lines = VersionLines();
+        }
+    }
+    if (lines.empty())
+    {
+        lines = {
+            "KeelS2 Menu",
+            "Usage: keel <command>",
+            "  plugins  - Show active plugins",
+            "  credits  - Project credits",
+            "  version  - Version and build details",
+        };
+    }
+    for (const std::string& line : lines)
+    {
+        std::string error;
+        if (adapter_->ClientConsolePrint(slot, (line + "\n").c_str(), error) != KEEL_RESULT_OK)
+        {
+            break;
+        }
+    }
+}
 
 void Host::DispatchCoreCommand(
     const KeelCommandInvocation& invocation,
@@ -407,8 +473,10 @@ void Host::ShowPluginsMenu()
 
 void Host::ShowVersion()
 {
-    WriteLine("KeelS2 " + std::string(kHostVersion));
-    WriteLine("Plugin ABI: " + std::to_string(KEELS2_PLUGIN_ABI_VERSION));
+    for (const auto& line : VersionLines())
+    {
+        WriteLine(line);
+    }
 }
 
 void Host::ShowGame()
@@ -463,15 +531,31 @@ void Host::ShowStatus()
 
 void Host::ShowCredits()
 {
-    WriteLine("KeelS2 is developed by the KeelS2 Project.");
-    WriteLine("https://keels2.com");
+    for (const auto& line : CreditLines())
+    {
+        WriteLine(line);
+    }
 }
 
 void Host::ShowPluginList()
 {
-    WriteLine("Listing " + std::to_string(plugins_.size()) + " plugins:");
+    for (const auto& line : PluginListLines(false))
+    {
+        WriteLine(line);
+    }
+}
+
+std::vector<std::string> Host::PluginListLines(bool active_only) const
+{
+    std::vector<std::string> lines;
     for (const auto& plugin : plugins_)
     {
+        if (active_only && (plugin->state != PluginState::loaded || !plugin->selectable ||
+            !plugin->accepting_resources || plugin->loading || plugin->transitioning ||
+            plugin->cleanup_pending))
+        {
+            continue;
+        }
         std::string label = plugin->name.empty() ? plugin->path.filename().string() : plugin->name;
         std::string line = "  [" + PluginDisplayId(plugin.get()) + "] " + label;
         if (!plugin->version.empty())
@@ -484,8 +568,13 @@ void Host::ShowPluginList()
         }
         line += " - ";
         line += PluginStateLabel(plugin->state);
-        WriteLine(line);
+        lines.push_back(std::move(line));
     }
+    const std::string heading = active_only
+        ? (lines.empty() ? "No active plugins." : "Listing " + std::to_string(lines.size()) + " active plugins:")
+        : "Listing " + std::to_string(lines.size()) + " plugins:";
+    lines.insert(lines.begin(), heading);
+    return lines;
 }
 
 void Host::ShowPluginInfo(std::string_view selector)

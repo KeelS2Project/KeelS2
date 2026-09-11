@@ -59,6 +59,7 @@ KeelResult KeelCs2_ReadEntityField(
     const KeelCs2SchemaField* field,
     void* value,
     uint32_t value_size);
+KeelResult KeelCs2_CommandCaller(const void* context, int32_t* slot);
 KeelResult KeelCs2_ServerCommand(void* engine_server, const char* command);
 KeelResult KeelCs2_ClientConsolePrint(
     void* engine_server,

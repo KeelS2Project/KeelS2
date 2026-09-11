@@ -199,7 +199,7 @@ def profile_bundle(
         tool_name = "keels2_compatibility_review.exe"
         run_text = (
             "Expand the ZIP, open PowerShell in this directory, and run:\n"
-            ".\\capture-keels2-cs2-profile-windows.ps1 -ServerRoot E:\\steamcmd\\servers\\cs2_win\n")
+            ".\\capture-keels2-cs2-profile-windows.ps1 -ServerRoot E:\\steamcmd\\servers\\cs2_win -ConnectAddress 192.168.1.57 -Port 27035\n")
     else:
         script_name = "capture-keels2-cs2-profile-linux.sh"
         tool_name = "keels2_compatibility_review"
@@ -237,13 +237,13 @@ def live_bundle(
         wrapper = "run-keels2-09-live-gate-windows.ps1"
         run_text = (
             "Expand the ZIP, stop any running server, open PowerShell in this directory, and run:\n"
-            ".\\run-keels2-09-live-gate-windows.ps1 -ServerRoot E:\\steamcmd\\servers\\cs2_win\n")
+            ".\\run-keels2-09-live-gate-windows.ps1 -ServerRoot E:\\steamcmd\\servers\\cs2_win -ConnectAddress 192.168.1.57 -Port 27035\n")
     else:
         wrapper = "run-keels2-09-live-gate-linux.sh"
         run_text = (
             "Extract the archive, stop any running server, enter this directory, and run:\n"
             "chmod +x run-keels2-09-live-gate-linux.sh\n"
-            "./run-keels2-09-live-gate-linux.sh /home/user/servers/cs2_dedi\n")
+            "./run-keels2-09-live-gate-linux.sh /home/user/servers/cs2_dedi --connect-address 127.0.0.1 --port 27035\n")
     copy(repo / "tools" / "live" / wrapper, root / wrapper)
     package_root = build / "package" / "addons" / "keels2"
     payload = root / "payload" / "addons" / "keels2"
@@ -258,8 +258,10 @@ def live_bundle(
     package_plugins = package_root / "plugins" / str(profile["directory"])
     fixtures = root / "fixtures"
     fixture_sources = {
-        "basic" + extension: package_plugins / ("keels2_basic" + extension),
-        "no_damage" + extension: package_plugins / ("keels2_no_damage" + extension),
+        "sample" + extension: package_plugins / ("keels2_sample" + extension),
+        "stub" + extension: package_plugins / ("keels2_stub" + extension),
+        "basic" + extension: artifact(build / "tests" / "fixtures" / "basic", configuration, "keels2_basic" + extension),
+        "no_damage" + extension: artifact(build / "tests" / "fixtures" / "no_damage", configuration, "keels2_no_damage" + extension),
         "failing" + extension: artifact(build, configuration, "keels2_failing_plugin" + extension),
         "keelhook_target" + extension: artifact(build, configuration, "01_keelhook_live_target" + extension),
         "keelhook_peer" + extension: artifact(build, configuration, "02_keelhook_peer" + extension),
@@ -284,6 +286,8 @@ def live_bundle(
         "schema": 1,
         "version": "1.0.0",
         "factory_probe_required": True,
+        "client_console_required": True,
+        "examples_required": True,
         "build_id": BUILD_ID,
         "platform": key,
         "platform_label": profile["label"],

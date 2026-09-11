@@ -406,7 +406,32 @@ add_library(keels2_host SHARED
     host/src/source2_callbacks_service.cpp
     host/src/source2_runtime_service.cpp
 )
+string(TIMESTAMP KEELS2_BUILD_TIME "%Y-%m-%d %H:%M:%S UTC" UTC)
+set(KEELS2_BUILD_REVISION "unavailable")
+find_package(Git QUIET)
+if(Git_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
+    execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE KEELS2_GIT_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE KEELS2_GIT_RESULT ERROR_QUIET)
+    if(KEELS2_GIT_RESULT EQUAL 0 AND KEELS2_GIT_REVISION MATCHES "^[0-9a-f]+$")
+        set(KEELS2_BUILD_REVISION "${KEELS2_GIT_REVISION}")
+        execute_process(COMMAND "${GIT_EXECUTABLE}" diff --quiet HEAD
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            RESULT_VARIABLE KEELS2_GIT_DIRTY)
+        if(NOT KEELS2_GIT_DIRTY EQUAL 0)
+            string(APPEND KEELS2_BUILD_REVISION "-dirty")
+        endif()
+    endif()
+endif()
+set(KEELS2_BUILD_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+if(KEELS2_BUILD_ARCH MATCHES "^(AMD64|amd64|x86_64)$")
+    set(KEELS2_BUILD_ARCH "x86_64")
+endif()
+configure_file(cmake/KeelS2BuildMetadata.h.in generated/keels2_build_metadata.h @ONLY)
+target_compile_definitions(keels2_host PRIVATE KEELS2_HOST_VERSION="${PROJECT_VERSION}")
 target_include_directories(keels2_host PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}/generated"
     bootstrap/include
     host/src
     platform/include
@@ -472,26 +497,25 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
 endif()
 
-add_subdirectory(samples/basic)
-keels2_set_output(keels2_basic "plugins/${KEELS2_PLATFORM_DIR}")
-add_subdirectory(samples/lifecycle)
-keels2_set_output(keels2_lifecycle "plugins/${KEELS2_PLATFORM_DIR}")
+foreach(obsolete basic lifecycle runtime callbacks entities hooks no_damage)
+    file(REMOVE "${KEELS2_PACKAGE_ROOT}/plugins/${KEELS2_PLATFORM_DIR}/keels2_${obsolete}${CMAKE_SHARED_LIBRARY_SUFFIX}")
+endforeach()
+
+add_subdirectory(samples/stub)
+keels2_set_output(keels2_stub "plugins/${KEELS2_PLATFORM_DIR}")
 add_subdirectory(samples/sample)
 keels2_set_output(keels2_sample "plugins/${KEELS2_PLATFORM_DIR}")
-add_subdirectory(samples/runtime)
-keels2_set_output(keels2_runtime "plugins/${KEELS2_PLATFORM_DIR}")
-add_subdirectory(samples/callbacks)
-keels2_set_output(keels2_callbacks "plugins/${KEELS2_PLATFORM_DIR}")
-add_subdirectory(samples/entities)
-keels2_set_output(keels2_entities "plugins/${KEELS2_PLATFORM_DIR}")
-add_subdirectory(samples/hooks)
-keels2_set_output(keels2_hooks "plugins/${KEELS2_PLATFORM_DIR}")
-add_subdirectory(samples/no_damage)
-keels2_set_output(keels2_no_damage "plugins/${KEELS2_PLATFORM_DIR}")
 
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    add_subdirectory(samples/adapter)
+    add_subdirectory(tests/fixtures/basic)
+    add_subdirectory(tests/fixtures/lifecycle)
+    add_subdirectory(tests/fixtures/runtime)
+    add_subdirectory(tests/fixtures/callbacks)
+    add_subdirectory(tests/fixtures/entities)
+    add_subdirectory(tests/fixtures/hooks)
+    add_subdirectory(tests/fixtures/no_damage)
+    add_subdirectory(tests/fixtures/adapter)
 
     add_test(
         NAME live_packaging_self_test
@@ -885,6 +909,12 @@ if(BUILD_TESTING)
     target_link_libraries(keels2_plugin_contract PRIVATE keels2_platform)
     keels2_enable_warnings(keels2_plugin_contract)
     add_test(NAME plugin_contract COMMAND keels2_plugin_contract $<TARGET_FILE:keels2_basic>)
+    add_executable(keels2_stub_contract tests/stub_contract.cpp)
+    target_include_directories(keels2_stub_contract PRIVATE platform/include sdk/include)
+    target_link_libraries(keels2_stub_contract PRIVATE keels2_platform)
+    keels2_enable_warnings(keels2_stub_contract)
+    add_test(NAME stub_contract COMMAND keels2_stub_contract $<TARGET_FILE:keels2_stub>)
+
     add_library(keels2_authoring_contract_plugin SHARED
         tests/authoring_contract_plugin.cpp
         tests/source2_command_fixture.cpp
@@ -987,7 +1017,7 @@ if(BUILD_TESTING)
     )
 
     set(KEELS2_SDK_INSTALL_DIR "${CMAKE_BINARY_DIR}/sdk-install")
-    set(KEELS2_STANDALONE_BUILD_DIR "${CMAKE_BINARY_DIR}/standalone-basic")
+    set(KEELS2_STANDALONE_BUILD_DIR "${CMAKE_BINARY_DIR}/standalone-stub")
     add_test(
         NAME sdk_install
         COMMAND ${CMAKE_COMMAND}
@@ -998,7 +1028,7 @@ if(BUILD_TESTING)
     set(KEELS2_STANDALONE_CONFIGURE
         ${CMAKE_COMMAND}
         --fresh
-        -S "${CMAKE_CURRENT_SOURCE_DIR}/samples/basic"
+        -S "${CMAKE_CURRENT_SOURCE_DIR}/samples/stub"
         -B "${KEELS2_STANDALONE_BUILD_DIR}"
         "-DKeelS2_DIR=${KEELS2_SDK_INSTALL_DIR}/${KEELS2_CMAKE_INSTALL_DIR}"
         "-DKEELS2_SOURCE_SDK_ROOT=${KEELS2_SOURCE_SDK_RESOLVED_ROOT}"
@@ -1031,7 +1061,7 @@ if(BUILD_TESTING)
     set(KEELS2_STANDALONE_ADAPTER_CONFIGURE
         ${CMAKE_COMMAND}
         --fresh
-        -S "${CMAKE_CURRENT_SOURCE_DIR}/samples/adapter"
+        -S "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/adapter"
         -B "${KEELS2_STANDALONE_ADAPTER_BUILD_DIR}"
         "-DKeelS2_DIR=${KEELS2_SDK_INSTALL_DIR}/${KEELS2_CMAKE_INSTALL_DIR}"
         "-DKEELS2_SOURCE_SDK_ROOT=${KEELS2_SOURCE_SDK_RESOLVED_ROOT}"
@@ -1069,7 +1099,7 @@ if(BUILD_TESTING)
     set(KEELS2_STANDALONE_LIFECYCLE_CONFIGURE
         ${CMAKE_COMMAND}
         --fresh
-        -S "${CMAKE_CURRENT_SOURCE_DIR}/samples/lifecycle"
+        -S "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lifecycle"
         -B "${KEELS2_STANDALONE_LIFECYCLE_BUILD_DIR}"
         "-DKeelS2_DIR=${KEELS2_SDK_INSTALL_DIR}/${KEELS2_CMAKE_INSTALL_DIR}"
         "-DKEELS2_SOURCE_SDK_ROOT=${KEELS2_SOURCE_SDK_RESOLVED_ROOT}"
@@ -1145,7 +1175,7 @@ if(BUILD_TESTING)
     set(KEELS2_STANDALONE_RUNTIME_CONFIGURE
         ${CMAKE_COMMAND}
         --fresh
-        -S "${CMAKE_CURRENT_SOURCE_DIR}/samples/runtime"
+        -S "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/runtime"
         -B "${KEELS2_STANDALONE_RUNTIME_BUILD_DIR}"
         "-DKeelS2_DIR=${KEELS2_SDK_INSTALL_DIR}/${KEELS2_CMAKE_INSTALL_DIR}"
         "-DKEELS2_SOURCE_SDK_ROOT=${KEELS2_SOURCE_SDK_RESOLVED_ROOT}"
@@ -1183,7 +1213,7 @@ if(BUILD_TESTING)
     set(KEELS2_STANDALONE_CALLBACKS_CONFIGURE
         ${CMAKE_COMMAND}
         --fresh
-        -S "${CMAKE_CURRENT_SOURCE_DIR}/samples/callbacks"
+        -S "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/callbacks"
         -B "${KEELS2_STANDALONE_CALLBACKS_BUILD_DIR}"
         "-DKeelS2_DIR=${KEELS2_SDK_INSTALL_DIR}/${KEELS2_CMAKE_INSTALL_DIR}"
         "-DKEELS2_SOURCE_SDK_ROOT=${KEELS2_SOURCE_SDK_RESOLVED_ROOT}"
@@ -1222,7 +1252,7 @@ if(BUILD_TESTING)
     set(KEELS2_STANDALONE_ENTITIES_CONFIGURE
         ${CMAKE_COMMAND}
         --fresh
-        -S "${CMAKE_CURRENT_SOURCE_DIR}/samples/entities"
+        -S "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/entities"
         -B "${KEELS2_STANDALONE_ENTITIES_BUILD_DIR}"
         "-DKeelS2_DIR=${KEELS2_SDK_INSTALL_DIR}/${KEELS2_CMAKE_INSTALL_DIR}"
         "-DKEELS2_SOURCE_SDK_ROOT=${KEELS2_SOURCE_SDK_RESOLVED_ROOT}"
@@ -1261,7 +1291,7 @@ if(BUILD_TESTING)
     set(KEELS2_STANDALONE_HOOKS_CONFIGURE
         ${CMAKE_COMMAND}
         --fresh
-        -S "${CMAKE_CURRENT_SOURCE_DIR}/samples/hooks"
+        -S "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/hooks"
         -B "${KEELS2_STANDALONE_HOOKS_BUILD_DIR}"
         "-DKeelS2_DIR=${KEELS2_SDK_INSTALL_DIR}/${KEELS2_CMAKE_INSTALL_DIR}"
         "-DKEELS2_SOURCE_SDK_ROOT=${KEELS2_SOURCE_SDK_RESOLVED_ROOT}"
@@ -1309,6 +1339,7 @@ if(BUILD_TESTING)
     keels2_enable_warnings(keels2_fake_server)
 
     add_library(keels2_schema_entity_fixture SHARED tests/schema_entity_fixture.cpp)
+    target_include_directories(keels2_schema_entity_fixture PRIVATE sdk/include)
     target_link_libraries(keels2_schema_entity_fixture PRIVATE
         keels2_fake_tier0
         KeelS2::SourceSDKHeaders
@@ -1842,6 +1873,7 @@ if(BUILD_TESTING)
         duplicate_plugin_name
         reserved_command
         core_commands
+        client_console
         plugin_lifecycle
         command_removal
         plugin_index_compaction

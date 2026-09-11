@@ -2,7 +2,17 @@
 
 bool SamplePlugin::Load()
 {
-    gameFrameLogged = false;
+    auto* engine = GetEngineInterface<IVEngineServer2>(INTERFACEVERSION_VENGINESERVER);
+    auto* server = GetSource2Server<IServerGameDLL>();
+    auto* clients = GetSource2GameClients<IServerGameClients>();
+    auto* cvars = GetCVarSystem<ICvar>();
+    auto* network = GetEngineInterface<INetworkServerService>(
+        NETWORKSERVERSERVICE_INTERFACE_VERSION);
+    if (!engine || !server || !clients || !cvars || !network)
+    {
+        LogError("required Source 2 interfaces are unavailable");
+        return false;
+    }
 
     integer = CreateConVar<int>(
         "keels2_sample_int",
@@ -38,6 +48,21 @@ bool SamplePlugin::Load()
         LogError("registration failed");
         return false;
     }
+
+    const ConVarRefAbstract untyped("mp_limitteams");
+    if (!untyped.IsValidRef() || !untyped.IsConVarDataAvailable() ||
+        untyped.GetType() != EConVarType_Int32)
+    {
+        LogError("mp_limitteams has no valid integer data");
+        return false;
+    }
+    const CConVarRef<int> typed(untyped);
+    if (!typed.IsValidRef() || !typed.IsConVarDataValid())
+    {
+        LogError("mp_limitteams typed reference is invalid");
+        return false;
+    }
+    LogMessage("mp_limitteams typed={} untyped={}", typed.Get(), untyped.GetInt());
 
     LogMessage(
         "ready command=keel_sample "
@@ -102,23 +127,8 @@ bool SamplePlugin::OnClientCommand(
     return true;
 }
 
-void SamplePlugin::OnGameFrame(
-    bool simulating,
-    bool firstTick,
-    bool lastTick)
+void SamplePlugin::OnGameFrame(bool, bool, bool)
 {
-    if (gameFrameLogged)
-    {
-        return;
-    }
-
-    gameFrameLogged = true;
-
-    LogMessage(
-        "GameFrame simulating={} first_tick={} last_tick={}",
-        simulating,
-        firstTick,
-        lastTick);
 }
 
 void SamplePlugin::OnClientConnected(
@@ -214,8 +224,12 @@ void SamplePlugin::Command(
     if (command.ArgC() == 2)
     {
         const int value = integer.Get();
-        integer.Set(value == integer.Max() ? integer.Min() : value + 1);
-        floating.Set(floating.Get() + 0.25f);
+        const bool integerSet = integer.Set(value == integer.Max() ? integer.Min() : value + 1);
+        const bool floatingSet = floating.Set(floating.Get() + 0.25f);
+        if (!integerSet || !floatingSet)
+        {
+            LogError("sample ConVar update was rejected");
+        }
     }
 
     LogMessage(

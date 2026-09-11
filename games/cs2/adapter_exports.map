@@ -1,6 +1,7 @@
 {
     global:
         KeelGameAdapter_Query;
+        KeelGameAdapter_CommandCaller;
     local:
         *;
 };

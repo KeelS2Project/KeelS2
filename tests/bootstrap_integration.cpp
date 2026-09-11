@@ -457,6 +457,7 @@ public:
         Entry entry;
         entry.reference = keels2::cs2::CommandRef(index, static_cast<std::int32_t>(index));
         entry.name = setup.name ? setup.name : "";
+        entry.flags = setup.flags;
         entry.callback = setup.callback_info.callback.interface_pointer;
         entry.active = entry.callback != nullptr;
         entries.push_back(entry);
@@ -620,7 +621,23 @@ public:
             : 0;
     }
 
-    bool Dispatch(std::initializer_list<const char*> arguments)
+    std::uint64_t Flags(const char* name) const
+    {
+        const auto entry = std::find_if(entries.begin(), entries.end(), [name](const Entry& command) {
+            return command.active && command.name == name;
+        });
+        return entry == entries.end() ? 0 : entry->flags;
+    }
+
+    keels2::cs2::ICommandCallback* Callback(const char* name)
+    {
+        const auto entry = std::find_if(entries.begin(), entries.end(), [name](const Entry& command) {
+            return command.active && command.name == name;
+        });
+        return entry == entries.end() ? nullptr : entry->callback;
+    }
+
+    bool Dispatch(std::initializer_list<const char*> arguments, std::int32_t slot = -1)
     {
         if (arguments.size() == 0 || !*arguments.begin())
         {
@@ -634,7 +651,7 @@ public:
             return false;
         }
 
-        return DispatchCallback(iterator->callback, arguments);
+        return DispatchCallback(iterator->callback, arguments, slot);
     }
 
     bool DispatchRetired(std::initializer_list<const char*> arguments)
@@ -986,9 +1003,12 @@ private:
         return entry == convars.end() ? std::shared_ptr<ConVarEntry>{} : *entry;
     }
 
+public:
     static bool DispatchCallback(
         keels2::cs2::ICommandCallback* callback,
-        std::initializer_list<const char*> arguments)
+        std::initializer_list<const char*> arguments,
+        std::int32_t slot = -1,
+        std::int32_t target = -1)
     {
         if (!callback || arguments.size() == 0 || !*arguments.begin())
         {
@@ -1008,13 +1028,14 @@ private:
             &value_pointer,
             sizeof(value_pointer)
         );
-        const std::array<std::int32_t, 2> context{-1, -1};
+        const std::array<std::int32_t, 2> context{target, slot};
         callback->CommandCallback(context.data(), command.data());
         return true;
     }
     struct Entry
     {
         keels2::cs2::CommandRef reference;
+        std::uint64_t flags{};
         std::string name;
         keels2::cs2::ICommandCallback* callback{};
         bool active{};
@@ -1035,6 +1056,8 @@ private:
 #undef KEELS2_EMPTY_SLOT
 
 FakeCvar g_cvar;
+void* g_client_console_engine{};
+bool g_expose_sample_engine{};
 bool g_expose_cvar{true};
 void* g_cvar_override{};
 
@@ -1315,6 +1338,11 @@ void* EngineFactory(const char* name, int* return_code)
     {
         result = g_cvar_override ? g_cvar_override : &g_cvar;
     }
+    else if ((g_expose_sample_engine || g_client_console_engine) && name &&
+        std::strcmp(name, "Source2EngineToServer001") == 0)
+    {
+        result = g_client_console_engine ? g_client_console_engine : &g_named_interface;
+    }
     else if (name && std::strcmp(name, "EngineServiceMgr001") == 0)
     {
         result = &g_engine_service;
@@ -1562,14 +1590,14 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "[Reserved Command Test] reserved command rejection passed") &&
             Contains(messages, "plugin loaded: Reserved Command Test 1");
     }
-    if (scenario == "core_commands")
+    if (scenario == "core_commands" || scenario == "client_console")
     {
         return selected_profile && Contains(messages, "KeelS2 Menu") &&
             Contains(messages, "KeelS2 Plugins Menu") && Contains(messages, "KeelS2 1.0.0") &&
             Contains(messages, "load <file>     - Load a plugin module") &&
             Contains(messages, "unload <plugin> - Unload a loaded plugin") &&
             Contains(messages, "Game: cs2") && Contains(messages, "KeelS2 status: running") &&
-            Contains(messages, "https://keels2.com") && Contains(messages, "Listing 3 plugins:") &&
+            Contains(messages, "https://www.keels2.com/") && Contains(messages, "Listing 3 plugins:") &&
             Contains(messages, "Plugin [01]") && Contains(messages, "Name: KeelS2 Basic") &&
             Contains(messages, "plugin selector \"lifecycle\" is ambiguous:") &&
             Contains(messages, "keel_test - Verifies the KeelS2 native plugin command path") &&
@@ -1786,7 +1814,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Count(messages, "[KeelS2 Source 2 Sample] LevelInit context=complete") == 2 &&
             Count(messages, "[KeelS2 Source 2 Sample] LevelShutdown") == 2 &&
             Count(messages, "[KeelS2 Source 2 Sample] event=round_start") == 2 &&
-            Count(messages, "[KeelS2 Source 2 Sample] GameFrame") == 2 &&
+            Count(messages, "[KeelS2 Source 2 Sample] GameFrame") == 0 &&
             Count(messages, "[KeelS2 Source 2 Sample] ClientConnected") == 2 &&
             Count(messages, "[KeelS2 Source 2 Sample] ClientPutInServer") == 2 &&
             Count(messages, "[KeelS2 Source 2 Sample] ClientActive") == 2 &&
@@ -1805,7 +1833,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "old=9 new=10") &&
             Contains(messages, "int=9 float=4 mp_limitteams=2") &&
             Contains(messages, "int=10 float=4 mp_limitteams=2") &&
-            Contains(messages, "GameFrame simulating=true first_tick=false last_tick=true") &&
+            Count(messages, "[KeelS2 Source 2 Sample] mp_limitteams typed=2 untyped=2") == 2 &&
             Count(messages, "plugin paused: [01] KeelS2 Source 2 Sample") == 1 &&
             Count(messages, "plugin resumed: [01] KeelS2 Source 2 Sample") == 1 &&
             Count(messages, "[KeelS2 Source 2 Sample] unloaded; ordinary resources required no manual cleanup") == 2 &&
@@ -2148,7 +2176,8 @@ int main(int argument_count, char** arguments)
     const bool duplicate_command = scenario == "duplicate_command";
     const bool duplicate_plugin_name = scenario == "duplicate_plugin_name";
     const bool reserved_command = scenario == "reserved_command";
-    const bool core_commands = scenario == "core_commands";
+    const bool client_console = scenario == "client_console";
+    const bool core_commands = scenario == "core_commands" || client_console;
     const bool plugin_lifecycle = scenario == "plugin_lifecycle";
     const bool command_removal = scenario == "command_removal";
     const bool plugin_index_compaction = scenario == "plugin_index_compaction";
@@ -2243,6 +2272,20 @@ int main(int argument_count, char** arguments)
         !schema_lookup_count)
     {
         return 124;
+    }
+    const auto console_engine = reinterpret_cast<InterfaceFunction>(
+        schema_entity_fixture.Symbol("KeelTest_ConsoleEngine"));
+    const auto console_output = reinterpret_cast<const char* (*)(int)>(
+        schema_entity_fixture.Symbol("KeelTest_ConsoleOutput"));
+    const auto reset_console = reinterpret_cast<SchemaEntityVoidFunction>(
+        schema_entity_fixture.Symbol("KeelTest_ResetConsoleOutput"));
+    if (client_console)
+    {
+        if (!console_engine || !console_output || !reset_console ||
+            !(g_client_console_engine = console_engine()))
+        {
+            return 160;
+        }
     }
     reset_schema_entities();
     g_schema_system_interface = schema_system();
@@ -2606,6 +2649,7 @@ int main(int argument_count, char** arguments)
     }
 
     g_expose_cvar = !missing_cvar;
+    g_expose_sample_engine = convar_facade;
     using ConnectFunction = bool (*)(void*, KeelCreateInterfaceFn);
     const auto connect = config ? VtableFunction<ConnectFunction>(config, 0) : nullptr;
     if (!config || return_code != 0 || !connect || !connect(config, &EngineFactory))
@@ -2870,6 +2914,166 @@ int main(int argument_count, char** arguments)
         if (!dispatched)
         {
             return 29;
+        }
+    }
+    if (client_console)
+    {
+        if ((g_cvar.Flags("keel") & ((1ull << 2) | (1ull << 25))) != ((1ull << 2) | (1ull << 25)))
+        {
+            return 170;
+        }
+        auto* core_callback = g_cvar.Callback("keel");
+        for (std::int32_t target = -1; target <= 3; ++target)
+        {
+            const std::string before(messages());
+            FakeCvar::DispatchCallback(core_callback, {"keel", "inspect", "hooks"}, -1, target);
+            const std::string after(messages());
+            if (after.find("Hook inspection complete", before.size()) == std::string::npos)
+            {
+                std::fprintf(stderr, "server command was rejected for target %d\n", target);
+                return 171;
+            }
+        }
+        const auto client = [&](std::initializer_list<const char*> command_arguments, int slot = 0) {
+            reset_console();
+            FakeCvar::DispatchCallback(core_callback, command_arguments, slot);
+            return std::string(console_output(slot));
+        };
+        const auto server_output = std::string(messages());
+        const auto menu = client({"keel"});
+        const auto plugins = client({"keel", "plugins"});
+        const auto version = client({"keel", "version"});
+        const auto credits = client({"keel", "credits"});
+        if (menu != "KeelS2 Menu\n"
+                    "Usage: keel <command>\n"
+                    "  plugins  - Show active plugins\n"
+                    "  credits  - Project credits\n"
+                    "  version  - Version and build details\n" ||
+            !Contains(plugins.c_str(), "Listing 3 active plugins:") ||
+            !ContainsInOrder(plugins.c_str(), "[01] KeelS2 Basic (1.0.0) by KeelS2 Project",
+                "[02] Lifecycle First") ||
+            !ContainsInOrder(plugins.c_str(), "[02] Lifecycle First", "[03] Lifecycle Second") ||
+            !Contains(version.c_str(), "KeelS2 1.0.0\nBuilt: ") ||
+            !Contains(version.c_str(), " UTC\nGit revision: ") ||
+            !Contains(version.c_str(), "/x86_64\nPlugin ABI: 4\n") ||
+            !Contains(credits.c_str(), "Created and developed by Peter Brev") ||
+            !Contains(credits.c_str(), "https://www.keels2.com/") ||
+            server_output != messages())
+        {
+            std::fprintf(stderr, "client reply mismatch:\n%s%s%s%s", menu.c_str(), plugins.c_str(),
+                version.c_str(), credits.c_str());
+            return 161;
+        }
+        for (std::int32_t target = -1; target <= 3; ++target)
+        {
+            reset_console();
+            FakeCvar::DispatchCallback(core_callback, {"keel", "inspect", "hooks"}, 5, target);
+            if (console_output(5) != menu || console_output(0)[0] != '\0' ||
+                server_output != messages())
+            {
+                return 172;
+            }
+        }
+        for (const auto command_arguments : {
+            std::initializer_list<const char*>{"keel", "plugins", "load", "bad"},
+            {"keel", "plugins", "unload", "1"}, {"keel", "plugins", "reload", "1"},
+            {"keel", "plugins", "pause", "1"}, {"keel", "plugins", "resume", "1"},
+            {"keel", "plugins", "retry", "1"}, {"keel", "plugins", "list"},
+            {"keel", "inspect"}, {"keel", "status"}, {"keel", "version", "extra"},
+            {"keel", "credits", "extra"}, {"keel", "unknown"}, {"keel", nullptr}})
+        {
+            if (client(command_arguments, 5) != menu || console_output(0)[0] != '\0' ||
+                server_output != messages() || !g_cvar.HasActive("keel_test"))
+            {
+                return 162;
+            }
+        }
+        if (!client({"keel", "plugins", "unload", "1"}, -2).empty() ||
+            !client({"keel", "plugins"}, 64).empty() || server_output != messages())
+        {
+            return 163;
+        }
+        if (!g_cvar.Dispatch({"keel", "plugins", "pause", "1"}))
+        {
+            return 164;
+        }
+        const auto paused = client({"keel", "plugins"});
+        if (!Contains(paused.c_str(), "Listing 2 active plugins:") ||
+            Contains(paused.c_str(), "KeelS2 Basic") ||
+            !ContainsInOrder(paused.c_str(), "[02] Lifecycle First", "[03] Lifecycle Second") ||
+            !g_cvar.Dispatch({"keel", "plugins", "pause", "2"}) ||
+            !g_cvar.Dispatch({"keel", "plugins", "pause", "3"}) ||
+            client({"keel", "plugins"}) != "No active plugins.\n")
+        {
+            return 165;
+        }
+        for (const char* id : {"1", "2", "3"})
+        {
+            if (!g_cvar.Dispatch({"keel", "plugins", "resume", id}))
+            {
+                return 166;
+            }
+        }
+        reset_console();
+        std::thread first([&] {
+            for (unsigned request{}; request < 20; ++request)
+            {
+                FakeCvar::DispatchCallback(core_callback, {"keel", "version"}, 0);
+            }
+        });
+        std::thread second([&] {
+            for (unsigned request{}; request < 20; ++request)
+            {
+                FakeCvar::DispatchCallback(core_callback, {"keel", "credits"}, 5);
+            }
+        });
+        std::thread third([&] {
+            for (unsigned request{}; request < 20; ++request)
+            {
+                FakeCvar::DispatchCallback(core_callback, {"keel", "plugins"}, 7);
+            }
+        });
+        bool reloaded = true;
+        for (unsigned cycle{}; cycle < 3; ++cycle)
+        {
+            reloaded = g_cvar.Dispatch({"keel", "plugins", "reload", "KeelS2 Basic"}) && reloaded;
+        }
+        first.join();
+        second.join();
+        third.join();
+        expected_registrations += 3;
+        if (!reloaded || Count(console_output(0), "Plugin ABI: 4") != 20 ||
+            Contains(console_output(0), "Peter Brev") ||
+            Count(console_output(5), "Created and developed by Peter Brev") != 20 ||
+            Contains(console_output(5), "Git revision:") ||
+            Count(console_output(7), "Listing 3 active plugins:") != 20 ||
+            Count(console_output(7), "KeelS2 Basic (1.0.0)") != 20 ||
+            Count(console_output(7), "Lifecycle First") != 20 ||
+            Count(console_output(7), "Lifecycle Second") != 20 ||
+            console_output(1)[0] != '\0')
+        {
+            const std::string first_output(console_output(0));
+            const std::string second_output(console_output(5));
+            const std::string third_output(console_output(7));
+            std::fprintf(stderr, "client concurrency mismatch reloaded=%d:\n%s\n%s\n%s\n%s",
+                reloaded, first_output.c_str(), second_output.c_str(), third_output.c_str(), messages());
+            return 167;
+        }
+        if (!CopyFile(invalid_plugin_source, plugin_directory / (std::string("invalid") + plugin_extension)) ||
+            !CopyFile(failing_plugin_source, plugin_directory / (std::string("failing") + plugin_extension)) ||
+            !g_cvar.Dispatch({"keel", "plugins", "load", "invalid"}) ||
+            !g_cvar.Dispatch({"keel", "plugins", "load", "failing"}))
+        {
+            return 168;
+        }
+        ++expected_registrations;
+        const auto filtered = client({"keel", "plugins"});
+        if (!Contains(filtered.c_str(), "Listing 3 active plugins:") ||
+            Contains(filtered.c_str(), "Failing Test Plugin") ||
+            Contains(filtered.c_str(), "invalid") ||
+            Contains(filtered.c_str(), "error"))
+        {
+            return 169;
         }
     }
     if (plugin_lifecycle)
@@ -4344,7 +4548,7 @@ int main(int argument_count, char** arguments)
 
         if (client_command_original_calls() != 1 ||
             Count(messages(), "[KeelS2 Source 2 Sample] event=round_start") != 1 ||
-            Count(messages(), "[KeelS2 Source 2 Sample] GameFrame") != 1 ||
+            Count(messages(), "[KeelS2 Source 2 Sample] GameFrame") != 0 ||
             !g_cvar.SetInt32("keels2_sample_int", 99) ||
             !g_cvar.Dispatch({"keel_sample", "bump"}) ||
             !g_cvar.ReadInt32("keels2_sample_int", integer_value) || integer_value != 100 ||

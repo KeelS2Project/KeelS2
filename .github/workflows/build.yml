@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feature/1.0-managed-factories
   pull_request:
 
 concurrency:
