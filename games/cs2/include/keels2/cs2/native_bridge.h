@@ -3,6 +3,7 @@
 
 #include <keels2/plugin.h>
 #include <keels2/schema.h>
+#include <keels2/player_actions.h>
 
 #include <stdint.h>
 
@@ -26,6 +27,20 @@ typedef struct KeelCs2EntityIdentity
     int32_t index;
     uint32_t source2_handle;
 } KeelCs2EntityIdentity;
+
+typedef struct KeelCs2PlayerActionBindings
+{
+    uint32_t teleport_slot;
+    uint32_t suicide_slot;
+    void* damage_construct;
+    void* damage_apply;
+    void* damage_destroy;
+    uint32_t damage_info_size;
+} KeelCs2PlayerActionBindings;
+
+KeelResult KeelCs2_PlayerAction(void* entity_system, void* schema_system, const char* module,
+    const KeelCs2EntityIdentity* entity, const KeelPlayerAction* action,
+    const KeelCs2PlayerActionBindings* bindings);
 
 void* KeelCs2_CreateGameEventListener(
     void* manager,

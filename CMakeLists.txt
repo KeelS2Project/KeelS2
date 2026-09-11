@@ -456,6 +456,7 @@ endif()
 
 add_library(keels2_game_cs2 SHARED
     games/cs2/src/cs2_adapter.cpp
+    games/cs2/src/player_actions.cpp
 )
 target_include_directories(keels2_game_cs2 PRIVATE
     games/cs2/include

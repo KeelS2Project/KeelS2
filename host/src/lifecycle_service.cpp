@@ -54,6 +54,12 @@ const KeelLifecycleApi& LifecycleService::Api() const noexcept
     return api_;
 }
 
+bool LifecycleService::GameFrameInstalled() const
+{
+    std::scoped_lock lock(registry_mutex_);
+    return installed_[KEELS2_LIFECYCLE_GAME_FRAME] && !shutting_down_;
+}
+
 void LifecycleService::Activate(KeelPluginHandle plugin)
 {
     std::scoped_lock lock(registry_mutex_);
@@ -297,6 +303,9 @@ void LifecycleService::Dispatch(const KeelLifecycleEvent& event)
     {
         return;
     }
+    if (event.type == KEELS2_LIFECYCLE_GAME_FRAME &&
+        event.payload_size == sizeof(KeelLifecycleGameFrame) && adapter_.IsGameThread())
+        host_.DispatchDeferredPluginCommands();
     std::vector<std::shared_ptr<Subscription>> callbacks;
     {
         std::scoped_lock lock(registry_mutex_);

@@ -613,6 +613,11 @@ bool Host::PluginCommandActive(KeelPluginHandle owner) const
 
 bool Host::HasRunningDependent(const PluginRecord& plugin, std::string& dependent) const
 {
+    if (plugin.active_entity_actions)
+    {
+        dependent = "active native entity action";
+        return true;
+    }
     if (PluginCommandActive(plugin.handle))
     {
         dependent = "active plugin command callback";

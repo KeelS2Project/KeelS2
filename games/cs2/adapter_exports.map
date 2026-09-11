@@ -2,6 +2,7 @@
     global:
         KeelGameAdapter_Query;
         KeelGameAdapter_CommandCaller;
+        KeelGameAdapter_PlayerAction;
     local:
         *;
 };

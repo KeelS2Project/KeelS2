@@ -29,6 +29,7 @@ public:
     LifecycleService& operator=(const LifecycleService&) = delete;
 
     const KeelLifecycleApi& Api() const noexcept;
+    bool GameFrameInstalled() const;
     void Activate(KeelPluginHandle plugin);
     KeelResult Deactivate(KeelPluginHandle plugin);
     KeelResult ReleasePlugin(KeelPluginHandle plugin);
@@ -65,7 +66,7 @@ private:
     GameAdapter& adapter_;
     KeelHookService& hooks_;
     KeelLifecycleApi api_{};
-    std::mutex registry_mutex_;
+    mutable std::mutex registry_mutex_;
     std::unordered_map<KeelLifecycleSubscriptionHandle, std::shared_ptr<Subscription>> subscriptions_;
     std::array<bool, KEELS2_LIFECYCLE_CLIENT_SETTINGS_CHANGED + 1> installed_{};
     KeelLifecycleSubscriptionHandle next_subscription_{1};

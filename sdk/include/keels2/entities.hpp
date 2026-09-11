@@ -2,6 +2,7 @@
 #define KEELS2_ENTITIES_HPP
 
 #include <keels2/entities.h>
+#include <keels2/player_actions.h>
 #include <keels2/plugin.hpp>
 #include <keels2/schema.hpp>
 
@@ -97,7 +98,10 @@ public:
     bool Read(const schema::Field<Value>& field, Value& value) const noexcept
     {
         static_assert(schema::detail::kSupportedValue<Value>);
-        value = Value{};
+        if constexpr (std::is_same_v<Value, Vector>)
+            value.Init();
+        else
+            value = Value{};
         return LocallyValid() && field.RawHandle() && field.context_ == context_ &&
             api_->read_field && api_->read_field(
                 context_->plugin,
@@ -105,6 +109,19 @@ public:
                 field.RawHandle(),
                 &value,
                 sizeof(value)) == KEEL_RESULT_OK;
+    }
+
+    KeelResult ApplyImpulse(const Vector& impulse, float damage = 0.0f) const noexcept
+    {
+        const KeelPlayerAction action{sizeof(KeelPlayerAction), KEELS2_PLAYER_ACTION_IMPULSE,
+            {impulse.x, impulse.y, impulse.z}, damage};
+        return ApplyAction(action);
+    }
+
+    KeelResult Kill() const noexcept
+    {
+        const KeelPlayerAction action{sizeof(KeelPlayerAction), KEELS2_PLAYER_ACTION_KILL, {}, 0.0f};
+        return ApplyAction(action);
     }
 
     bool Same(const Entity& other) const noexcept
@@ -122,6 +139,22 @@ public:
 
 private:
     friend class Service;
+
+    KeelResult ApplyAction(const KeelPlayerAction& action) const noexcept
+    {
+        if (!LocallyValid() || !context_->api || !context_->api->query_service)
+            return KEEL_RESULT_NOT_READY;
+        const void* raw{};
+        const auto result = context_->api->query_service(context_->plugin,
+            KEELS2_PLAYER_ACTIONS_SERVICE_NAME, KEELS2_PLAYER_ACTIONS_API_VERSION, &raw);
+        if (result != KEEL_RESULT_OK)
+            return result;
+        const auto* actions = static_cast<const KeelPlayerActionsApi*>(raw);
+        if (!actions || actions->size != sizeof(KeelPlayerActionsApi) ||
+            actions->api_version != KEELS2_PLAYER_ACTIONS_API_VERSION || !actions->apply)
+            return KEEL_RESULT_INCOMPATIBLE;
+        return actions->apply(context_->plugin, handle_, &action);
+    }
 
     bool LocallyValid() const noexcept
     {

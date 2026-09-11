@@ -4,6 +4,7 @@
 #include <keels2/bootstrap_api.h>
 #include <keels2/convar.h>
 #include <keels2/entities.h>
+#include <keels2/player_actions.h>
 #include <keels2/keelhook.h>
 #include <keels2/lifecycle.h>
 #include <keels2/schema.h>
@@ -210,6 +211,8 @@ struct GameAdapterHostApi
 };
 
 using GameAdapterCreateFn = GameAdapter* (*)(const GameAdapterHostApi* host);
+inline constexpr const char* kGameAdapterPlayerActionSymbol = "KeelGameAdapter_PlayerAction";
+using GameAdapterPlayerActionFn = KeelResult (*)(GameAdapter*, const GameEntityIdentity*, const KeelPlayerAction*) noexcept;
 using GameAdapterDestroyFn = void (*)(GameAdapter* adapter);
 
 struct GameAdapterProvider

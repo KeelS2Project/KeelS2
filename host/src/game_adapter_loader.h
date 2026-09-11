@@ -29,12 +29,14 @@ public:
     GameAdapter* Get() const noexcept;
     bool SupportsClientCommands() const noexcept;
     KeelResult CommandCaller(const void* context, std::int32_t& slot) const noexcept;
+    KeelResult PlayerAction(const GameEntityIdentity& entity, const KeelPlayerAction& action) const noexcept;
     const std::filesystem::path& Path() const noexcept;
 
 private:
     platform::DynamicLibrary library_;
     GameAdapterDestroyFn destroy_{};
     GameAdapterCommandCallerFn command_caller_{};
+    GameAdapterPlayerActionFn player_action_{};
     GameAdapter* adapter_{};
     std::filesystem::path path_;
 };

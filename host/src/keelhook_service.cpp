@@ -338,6 +338,20 @@ public:
         }
     }
 
+    bool OnCurrentTarget(KeelPluginHandle plugin) const
+    {
+        std::scoped_lock lock(registry_mutex_);
+        for (std::size_t index{}; index < target_depth_; ++index)
+        {
+            const auto* target = target_stack_[index];
+            if (target && (target->leases.contains(plugin) ||
+                std::any_of(target->callbacks.begin(), target->callbacks.end(),
+                    [plugin](const auto& callback) { return callback->owner == plugin; })))
+                return true;
+        }
+        return false;
+    }
+
     KeelResult Deactivate(KeelPluginHandle plugin)
     {
         std::vector<std::shared_ptr<CallbackRecord>> callbacks;
@@ -4087,6 +4101,11 @@ void KeelHookService::Activate(KeelPluginHandle plugin)
 KeelResult KeelHookService::Deactivate(KeelPluginHandle plugin)
 {
     return implementation_->Deactivate(plugin);
+}
+
+bool KeelHookService::OnCurrentTarget(KeelPluginHandle plugin) const
+{
+    return implementation_->OnCurrentTarget(plugin);
 }
 
 KeelResult KeelHookService::ReleasePlugin(KeelPluginHandle plugin)

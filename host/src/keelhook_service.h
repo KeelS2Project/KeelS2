@@ -55,6 +55,7 @@ public:
     void Activate(KeelPluginHandle plugin);
     KeelResult Deactivate(KeelPluginHandle plugin);
     KeelResult ReleasePlugin(KeelPluginHandle plugin);
+    bool OnCurrentTarget(KeelPluginHandle plugin) const;
     std::vector<TargetSnapshot> Snapshots() const;
     bool Shutdown();
 

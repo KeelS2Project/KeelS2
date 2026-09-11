@@ -1689,6 +1689,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Count(messages, "plugin loaded: Schema Entity Test 0.6") == 2 &&
             Count(messages, "[Schema Entity Test] schema field resolution passed") == 2 &&
             Count(messages, "[Schema Entity Test] entity lookup and typed read passed") == 2 &&
+            Count(messages, "[Schema Entity Test] player action service rejection checks passed") == 2 &&
             Contains(messages, "[Schema Entity Test] entity destruction invalidation passed") &&
             Contains(messages, "[Schema Entity Test] entity serial reuse validation passed") &&
             Contains(messages, "[Schema Entity Test] map epoch invalidation passed") &&
@@ -2741,7 +2742,7 @@ int main(int argument_count, char** arguments)
     Source2CountFunction game_event_remove_count{};
     Source2BoolFunction game_event_listener_active{};
     if (lifecycle_service || lifecycle_failed_load || authoring_concurrency ||
-        source2_callbacks || convar_facade)
+        source2_callbacks || convar_facade || schema_entity_service)
     {
         if (!lifecycle_fixture.Open(real_server_path, loader_error))
         {
@@ -3467,6 +3468,28 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 133;
         }
+        keels2::platform::DynamicLibrary deferred_fixture;
+        const auto deferred_path = plugin_directory / (std::string("01_schema_entity_service") + plugin_extension);
+        if (!deferred_fixture.Open(RuntimePluginPath(plugin_directory, deferred_path), loader_error))
+            return 210;
+        using DeferredFixture = void* (*)(void (*)());
+        const auto deferred = reinterpret_cast<DeferredFixture>(deferred_fixture.Symbol("KeelTest_DeferredDispatch"));
+        if (!deferred)
+            return 211;
+        void* target = deferred(+[] {
+            for (int request = 0; request < 33; ++request)
+                g_cvar.Dispatch({"keel", "plugins", "unload", "Schema Entity Test"});
+        });
+        deferred_fixture.Close();
+        VtableFunction<void (*)(void*)>(target, 0)(target);
+        if (!g_cvar.HasActive("keel_schema_entity_check") ||
+            Count(messages(), "plugin unload queued for the next game frame after the current hook: Schema Entity Test") != 32 ||
+            Count(messages(), "deferred plugin command queue is full") != 1)
+            return 212;
+        dispatch_lifecycle();
+        if (g_cvar.HasActive("keel_schema_entity_check") || g_cvar.ActiveCount() != 1 ||
+            Count(messages(), "deferred plugin command target no longer exists") != 31)
+            return 213;
         expected_registrations = 3;
     }
     if (source2_callbacks)

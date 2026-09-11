@@ -5,6 +5,8 @@
 #include <keels2/schema.h>
 
 #include <tier0/platform.h>
+#include <entityhandle.h>
+#include <mathlib/vector.h>
 
 #include <atomic>
 #include <cstring>
@@ -38,7 +40,9 @@ inline constexpr bool kSupportedValue =
     std::is_same_v<std::remove_cv_t<Value>, uint64> ||
     std::is_same_v<std::remove_cv_t<Value>, float32> ||
     std::is_same_v<std::remove_cv_t<Value>, float64> ||
-    std::is_same_v<std::remove_cv_t<Value>, bool>;
+    std::is_same_v<std::remove_cv_t<Value>, bool> ||
+    std::is_same_v<std::remove_cv_t<Value>, CEntityHandle> ||
+    std::is_same_v<std::remove_cv_t<Value>, Vector>;
 
 template <typename Value>
 constexpr KeelSchemaValueType ValueType() noexcept
@@ -88,6 +92,14 @@ constexpr KeelSchemaValueType ValueType() noexcept
     else if constexpr (std::is_same_v<Type, float64>)
     {
         return KEELS2_SCHEMA_FLOAT64;
+    }
+    else if constexpr (std::is_same_v<Type, Vector>)
+    {
+        return KEELS2_SCHEMA_VECTOR3;
+    }
+    else if constexpr (std::is_same_v<Type, CEntityHandle>)
+    {
+        return KEELS2_SCHEMA_ENTITY_HANDLE;
     }
     else
     {

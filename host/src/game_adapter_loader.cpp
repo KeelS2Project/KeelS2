@@ -138,6 +138,8 @@ bool GameAdapterModule::Load(
     destroy_ = provider.destroy;
     command_caller_ = SymbolFunction<GameAdapterCommandCallerFn>(
         library_.Symbol(kGameAdapterCommandCallerSymbol));
+    player_action_ = SymbolFunction<GameAdapterPlayerActionFn>(
+        library_.Symbol(kGameAdapterPlayerActionSymbol));
     error.clear();
     return true;
 }
@@ -157,6 +159,7 @@ void GameAdapterModule::Reset() noexcept
     adapter_ = nullptr;
     destroy_ = nullptr;
     command_caller_ = nullptr;
+    player_action_ = nullptr;
     library_.Close();
     path_.clear();
 }
@@ -180,6 +183,11 @@ KeelResult GameAdapterModule::CommandCaller(const void* context, std::int32_t& s
 const std::filesystem::path& GameAdapterModule::Path() const noexcept
 {
     return path_;
+}
+
+KeelResult GameAdapterModule::PlayerAction(const GameEntityIdentity& entity, const KeelPlayerAction& action) const noexcept
+{
+    return adapter_ && player_action_ ? player_action_(adapter_, &entity, &action) : KEEL_RESULT_UNSUPPORTED;
 }
 
 }

@@ -54,6 +54,10 @@ int main(int argument_count, char** arguments)
         return 9;
     }
     KeelHostCompatibilityInfo compatibility{};
+    const keels2::host::GameEntityIdentity entity{};
+    const KeelPlayerAction action{sizeof(KeelPlayerAction), KEELS2_PLAYER_ACTION_KILL, {}, 0};
+    if (module.PlayerAction(entity, action) != KEEL_RESULT_UNSUPPORTED)
+        return 10;
     if (!module.Get()->Start(nullptr, nullptr, compatibility, error) ||
         !module.Get()->CompleteStartup(error) || !module.Get()->IsGameThread())
     {

@@ -17,8 +17,23 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <cmath>
 #include <new>
+#include <string_view>
 #include <type_traits>
+#include <vector>
+
+namespace
+{
+template <typename Function>
+Function NativeActionFunction(void* address)
+{
+    static_assert(sizeof(Function) == sizeof(address));
+    Function function{};
+    std::memcpy(&function, &address, sizeof(function));
+    return function;
+}
+}
 
 static_assert(sizeof(ConVarRef) == sizeof(keels2::cs2::ConVarRef));
 static_assert(alignof(ConVarRef) == alignof(keels2::cs2::ConVarRef));
@@ -80,6 +95,9 @@ bool PublicBuiltin(KeelSchemaValueType value_type, BuiltinType& type) noexcept
         case KEELS2_SCHEMA_CHAR:
             type = {SCHEMA_BUILTIN_TYPE_CHAR, 1, 1};
             return true;
+        case KEELS2_SCHEMA_VECTOR3:
+            type = {SCHEMA_BUILTIN_TYPE_FLOAT32, sizeof(Vector), alignof(Vector)};
+            return true;
         case KEELS2_SCHEMA_INT8:
             type = {SCHEMA_BUILTIN_TYPE_INT8, 1, 1};
             return true;
@@ -96,6 +114,7 @@ bool PublicBuiltin(KeelSchemaValueType value_type, BuiltinType& type) noexcept
             type = {SCHEMA_BUILTIN_TYPE_INT32, 4, 4};
             return true;
         case KEELS2_SCHEMA_UINT32:
+        case KEELS2_SCHEMA_ENTITY_HANDLE:
             type = {SCHEMA_BUILTIN_TYPE_UINT32, 4, 4};
             return true;
         case KEELS2_SCHEMA_INT64:
@@ -419,17 +438,49 @@ extern "C" KeelResult KeelCs2_ResolveSchemaField(
             {
                 continue;
             }
-            if (!field.m_pType ||
-                field.m_pType->m_eTypeCategory != SCHEMA_TYPE_BUILTIN ||
-                field.m_pType->m_eAtomicCategory != SCHEMA_ATOMIC_INVALID)
+            if (!field.m_pType || field.m_nSingleInheritanceOffset < 0)
             {
                 return KEEL_RESULT_INCOMPATIBLE;
             }
-            const auto* builtin = static_cast<const CSchemaType_Builtin*>(field.m_pType);
-            if (builtin->m_eBuiltinType != expected.schema_type ||
-                builtin->m_nSize != expected.size || field.m_nSingleInheritanceOffset < 0)
+            if (value_type == KEELS2_SCHEMA_VECTOR3)
             {
-                return KEEL_RESULT_INCOMPATIBLE;
+                if (field.m_pType->m_eTypeCategory != SCHEMA_TYPE_ATOMIC ||
+                    field.m_pType->m_eAtomicCategory != SCHEMA_ATOMIC_PLAIN)
+                    return KEEL_RESULT_INCOMPATIBLE;
+                const auto* atomic = static_cast<const CSchemaType_Atomic*>(field.m_pType);
+                if (std::string_view(atomic->m_sTypeName.Get()) != "Vector" ||
+                    atomic->m_nSize != expected.size || atomic->m_nAlignment != expected.alignment)
+                    return KEEL_RESULT_INCOMPATIBLE;
+            }
+            else if (value_type == KEELS2_SCHEMA_ENTITY_HANDLE)
+            {
+                if (field.m_pType->m_eTypeCategory != SCHEMA_TYPE_ATOMIC ||
+                    field.m_pType->m_eAtomicCategory != SCHEMA_ATOMIC_T)
+                {
+                    return KEEL_RESULT_INCOMPATIBLE;
+                }
+                const auto* atomic = static_cast<const CSchemaType_Atomic_T*>(field.m_pType);
+                const std::string_view name(atomic->m_sTypeName.Get());
+                if (!name.starts_with("CHandle<") || !name.ends_with('>') ||
+                    atomic->m_nSize != expected.size || atomic->m_nAlignment != expected.alignment ||
+                    !atomic->m_pTemplateType ||
+                    atomic->m_pTemplateType->m_eTypeCategory != SCHEMA_TYPE_DECLARED_CLASS)
+                {
+                    return KEEL_RESULT_INCOMPATIBLE;
+                }
+            }
+            else
+            {
+                if (field.m_pType->m_eTypeCategory != SCHEMA_TYPE_BUILTIN ||
+                    field.m_pType->m_eAtomicCategory != SCHEMA_ATOMIC_INVALID)
+                {
+                    return KEEL_RESULT_INCOMPATIBLE;
+                }
+                const auto* builtin = static_cast<const CSchemaType_Builtin*>(field.m_pType);
+                if (builtin->m_eBuiltinType != expected.schema_type || builtin->m_nSize != expected.size)
+                {
+                    return KEEL_RESULT_INCOMPATIBLE;
+                }
             }
             const std::uint64_t end =
                 static_cast<std::uint64_t>(field.m_nSingleInheritanceOffset) + expected.size;
@@ -641,4 +692,99 @@ extern "C" KeelResult KeelCs2_ReadEntityField(
     {
         return KEEL_RESULT_ENGINE_FAILURE;
     }
+}
+
+extern "C" KeelResult KeelCs2_PlayerAction(void* entity_system, void* schema_system, const char* module,
+    const KeelCs2EntityIdentity* entity, const KeelPlayerAction* action,
+    const KeelCs2PlayerActionBindings* bindings)
+{
+    if (!entity_system || !schema_system || !module || !entity || !action || !bindings ||
+        action->size != sizeof(KeelPlayerAction) ||
+        (action->kind != KEELS2_PLAYER_ACTION_IMPULSE && action->kind != KEELS2_PLAYER_ACTION_KILL) ||
+        !std::isfinite(action->damage) || action->damage < 0 || action->damage > 100000 ||
+        !bindings->damage_construct || !bindings->damage_apply || !bindings->damage_destroy ||
+        bindings->teleport_slot != 162 || bindings->suicide_slot != 384 || bindings->damage_info_size != 0x118)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    for (const auto value : action->impulse)
+        if (!std::isfinite(value) || std::abs(value) > 4096 ||
+            (action->kind == KEELS2_PLAYER_ACTION_KILL && value != 0))
+            return KEEL_RESULT_INVALID_ARGUMENT;
+    if (action->kind == KEELS2_PLAYER_ACTION_KILL && action->damage != 0)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        auto* identity = IdentityByHandle(static_cast<CEntitySystem*>(entity_system), entity->source2_handle);
+        if (!identity || identity->GetEntityIndex().Get() != entity->index)
+            return KEEL_RESULT_NOT_FOUND;
+        auto* dynamic_class = identity->m_pClass->GetSchemaBinding();
+        if (!ValidClass(dynamic_class) || !dynamic_class->m_pszName ||
+            std::strcmp(dynamic_class->m_pszName, "CCSPlayerPawn") != 0)
+            return KEEL_RESULT_INCOMPATIBLE;
+        const auto read = [&](const char* name, KeelSchemaValueType type, void* output, std::uint32_t size) {
+            KeelCs2SchemaField field{};
+            const auto result = KeelCs2_ResolveSchemaField(schema_system, module, "CBaseEntity", name, type, &field);
+            return result == KEEL_RESULT_OK ? KeelCs2_ReadEntityField(entity_system, entity, &field, output, size) : result;
+        };
+        std::uint8_t life{};
+        auto result = read("m_lifeState", KEELS2_SCHEMA_UINT8, &life, sizeof(life));
+        if (result != KEEL_RESULT_OK)
+            return result;
+        if (life != LIFE_ALIVE)
+            return KEEL_RESULT_NOT_READY;
+        void* instance = identity->m_pInstance;
+        void** table{};
+        std::memcpy(&table, instance, sizeof(table));
+        if (!table)
+            return KEEL_RESULT_INCOMPATIBLE;
+        if (action->kind == KEELS2_PLAYER_ACTION_KILL)
+        {
+            using Suicide = void (*)(void*, bool, bool);
+            if (!table[bindings->suicide_slot])
+                return KEEL_RESULT_INCOMPATIBLE;
+            NativeActionFunction<Suicide>(table[bindings->suicide_slot])(instance, false, true);
+            return KEEL_RESULT_OK;
+        }
+        Vector velocity;
+        result = read("m_vecAbsVelocity", KEELS2_SCHEMA_VECTOR3, &velocity, sizeof(velocity));
+        if (result != KEEL_RESULT_OK)
+            return result;
+        velocity += Vector(action->impulse[0], action->impulse[1], action->impulse[2]);
+        if (!velocity.IsValid())
+            return KEEL_RESULT_INCOMPATIBLE;
+        CSchemaClassInfo* damage_class{};
+        if (action->damage > 0)
+        {
+            auto* scope = reinterpret_cast<ISchemaSystemTypeScope*>(
+                static_cast<ISchemaSystem*>(schema_system)->FindTypeScopeForModule(module));
+            damage_class = scope ? scope->FindDeclaredClass("CTakeDamageInfo").Get() : nullptr;
+            if (!ValidClass(damage_class) || damage_class->m_nSize != static_cast<int>(bindings->damage_info_size) ||
+                damage_class->m_nAlignment > alignof(std::max_align_t))
+                return KEEL_RESULT_INCOMPATIBLE;
+        }
+        using Teleport = void (*)(void*, const Vector*, const QAngle*, const Vector*);
+        if (!table[bindings->teleport_slot])
+            return KEEL_RESULT_INCOMPATIBLE;
+        NativeActionFunction<Teleport>(table[bindings->teleport_slot])(instance, nullptr, nullptr, &velocity);
+        if (action->damage > 0)
+        {
+            if (KeelCs2_ValidateEntity(entity_system, entity) != KEEL_RESULT_OK)
+                return KEEL_RESULT_NOT_FOUND;
+            using Construct = void (*)(void*, void*, void*, void*, float, std::uint32_t, std::int32_t);
+            using Apply = void (*)(void*, void*, void*);
+            using Destroy = void (*)(void*);
+            std::vector<std::max_align_t> storage((bindings->damage_info_size + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t));
+            auto* world = IdentityByIndex(static_cast<CEntitySystem*>(entity_system), 0);
+            void* source = world ? world->m_pInstance : nullptr;
+            NativeActionFunction<Construct>(bindings->damage_construct)(storage.data(), source, source, nullptr, action->damage, 0, 0);
+            struct DamageLifetime
+            {
+                Destroy destroy;
+                void* storage;
+                ~DamageLifetime() { destroy(storage); }
+            } lifetime{NativeActionFunction<Destroy>(bindings->damage_destroy), storage.data()};
+            NativeActionFunction<Apply>(bindings->damage_apply)(instance, storage.data(), nullptr);
+        }
+        return KEEL_RESULT_OK;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
 }

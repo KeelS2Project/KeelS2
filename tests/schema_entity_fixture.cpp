@@ -1,4 +1,5 @@
 #include <keels2/keelhook.hpp>
+#include <keels2/schema.hpp>
 #include <eiface.h>
 #include <entity2/entityclass.h>
 #include <entity2/entityinstance.h>
@@ -14,6 +15,7 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -46,7 +48,8 @@ void ValidationSlot(void*)
 
 alignas(CSchemaType_Builtin)
 std::array<std::byte, sizeof(CSchemaType_Builtin)> g_int32_type_storage{};
-SchemaClassFieldData_t g_base_fields[1]{};
+SchemaClassFieldData_t g_base_fields[3]{};
+CSchemaClassInfo g_damage_class{};
 CSchemaClassInfo g_base_class{};
 SchemaBaseClassInfoData_t g_derived_bases[1]{};
 CSchemaClassInfo g_derived_class{};
@@ -63,6 +66,8 @@ CSchemaClassInfo* DeclaredClass(const char* name)
     {
         return &g_derived_class;
     }
+    if (name && std::strcmp(name, "CTakeDamageInfo") == 0)
+        return &g_damage_class;
     return nullptr;
 }
 
@@ -119,7 +124,7 @@ constexpr std::size_t Align(std::size_t value, std::size_t alignment)
 }
 
 constexpr std::size_t kHealthOffset = Align(sizeof(CEntityInstance), alignof(int32));
-constexpr std::size_t kEntitySize = Align(kHealthOffset + sizeof(int32), 16);
+constexpr std::size_t kEntitySize = Align(kHealthOffset + 32, 16);
 constexpr std::int32_t kEntityIndex = 7;
 
 alignas(CGameEntitySystem)
@@ -261,6 +266,204 @@ struct Initialize
 } g_initialize;
 
 #if defined(KEELS2_SCHEMA_FIXTURE_NATIVE_TEST)
+int RunHandleChecks()
+{
+    static_assert(keels2::schema::detail::ValueType<CEntityHandle>() == KEELS2_SCHEMA_ENTITY_HANDLE);
+    static_assert(sizeof(CEntityHandle) == sizeof(uint32));
+    Reset();
+#if defined(_WIN32)
+    constexpr const char* module = "server.dll";
+#else
+    constexpr const char* module = "libserver.so";
+#endif
+    alignas(CSchemaType_Atomic_T) std::array<std::byte, sizeof(CSchemaType_Atomic_T)> storage{};
+    alignas(CSchemaType) std::array<std::byte, sizeof(CSchemaType)> parameter_storage{};
+    auto* type = reinterpret_cast<CSchemaType_Atomic_T*>(storage.data());
+    auto* parameter = reinterpret_cast<CSchemaType*>(parameter_storage.data());
+    parameter->m_eTypeCategory = SCHEMA_TYPE_DECLARED_CLASS;
+    type->m_sTypeName = "CHandle< CCSPlayerPawn >";
+    type->m_eTypeCategory = SCHEMA_TYPE_ATOMIC;
+    type->m_eAtomicCategory = SCHEMA_ATOMIC_T;
+    type->m_nSize = sizeof(uint32);
+    type->m_nAlignment = alignof(uint32);
+    type->m_pTemplateType = parameter;
+    g_base_fields[0].m_pType = type;
+    g_base_fields[0].m_pszName = "m_hPlayerPawn";
+    KeelCs2SchemaField field{};
+    auto resolve = [&](KeelSchemaValueType value_type = KEELS2_SCHEMA_ENTITY_HANDLE) {
+        return KeelCs2_ResolveSchemaField(&g_schema_system, module, "CBaseEntity", "m_hPlayerPawn", value_type, &field);
+    };
+    if (resolve() != KEEL_RESULT_OK || field.value_type != KEELS2_SCHEMA_ENTITY_HANDLE ||
+        field.value_size != sizeof(uint32) || field.value_alignment != alignof(uint32))
+        return 100;
+    KeelCs2EntityIdentity entity{};
+    uint32 value{};
+    const uint32 stored = static_cast<uint32>(CEntityHandle(75,17).ToInt());
+    std::memcpy(g_entity_storage.data() + kHealthOffset, &stored, sizeof(stored));
+    if (KeelCs2_FindEntityByIndex(EntitySystem(), kEntityIndex, &entity) != KEEL_RESULT_OK ||
+        KeelCs2_ReadEntityField(EntitySystem(), &entity, &field, &value, sizeof(value)) != KEEL_RESULT_OK || value != stored)
+        return 101;
+    if (resolve(KEELS2_SCHEMA_UINT32) != KEEL_RESULT_INCOMPATIBLE)
+        return 102;
+    type->m_sTypeName = "CUtlVector< CCSPlayerPawn >";
+    if (resolve() != KEEL_RESULT_INCOMPATIBLE)
+        return 103;
+    type->m_sTypeName = "CHandle< CCSPlayerPawn >";
+    type->m_nSize = 8;
+    if (resolve() != KEEL_RESULT_INCOMPATIBLE)
+        return 104;
+    type->m_nSize = 4;
+    type->m_nAlignment = 8;
+    if (resolve() != KEEL_RESULT_INCOMPATIBLE)
+        return 105;
+    type->m_nAlignment = 4;
+    parameter->m_eTypeCategory = SCHEMA_TYPE_BUILTIN;
+    if (resolve() != KEEL_RESULT_INCOMPATIBLE)
+        return 106;
+    parameter->m_eTypeCategory = SCHEMA_TYPE_DECLARED_CLASS;
+    type->m_eAtomicCategory = SCHEMA_ATOMIC_COLLECTION_OF_T;
+    if (resolve() != KEEL_RESULT_INCOMPATIBLE)
+        return 107;
+    type->m_eAtomicCategory = SCHEMA_ATOMIC_T;
+    type->m_pTemplateType = nullptr;
+    if (resolve() != KEEL_RESULT_INCOMPATIBLE)
+        return 108;
+    type->m_sTypeName.Purge();
+    Reset();
+    return 0;
+}
+
+
+std::vector<int> g_actions;
+float g_action_damage{};
+bool g_action_arguments{};
+void TestTeleport(void* instance, const Vector* position, const QAngle* angles, const Vector* velocity)
+{
+    g_action_arguments = instance == EntityInstance() && !position && !angles && velocity;
+    if (velocity)
+        std::memcpy(g_entity_storage.data() + kHealthOffset + 8, velocity, sizeof(Vector));
+    g_actions.push_back(1);
+}
+void TestSuicide(void* instance, bool explode, bool force)
+{
+    g_action_arguments = instance == EntityInstance() && !explode && force;
+    g_entity_storage[kHealthOffset + 4] = std::byte{2};
+    g_actions.push_back(2);
+}
+void TestDamageConstruct(void*, void* inflictor, void* attacker, void* ability, float damage, std::uint32_t type, std::int32_t custom)
+{
+    g_action_arguments = g_action_arguments && !inflictor && !attacker && !ability && type == 0 && custom == 0;
+    g_action_damage = damage;
+    g_actions.push_back(3);
+}
+void TestDamageApply(void* instance, void* info, void* result)
+{
+    g_action_arguments = g_action_arguments && instance == EntityInstance() && info && !result;
+    g_actions.push_back(4);
+}
+void TestDamageDestroy(void* info)
+{
+    g_action_arguments = g_action_arguments && info;
+    g_actions.push_back(5);
+}
+int RunPlayerActionChecks()
+{
+    Reset();
+#if defined(_WIN32)
+    constexpr const char* module = "server.dll";
+#else
+    constexpr const char* module = "libserver.so";
+#endif
+    static_assert(keels2::schema::detail::ValueType<Vector>() == KEELS2_SCHEMA_VECTOR3);
+    alignas(CSchemaType_Builtin) std::array<std::byte, sizeof(CSchemaType_Builtin)> life_storage{};
+    alignas(CSchemaType_Atomic) std::array<std::byte, sizeof(CSchemaType_Atomic)> vector_storage{};
+    auto* life = reinterpret_cast<CSchemaType_Builtin*>(life_storage.data());
+    life->m_eTypeCategory = SCHEMA_TYPE_BUILTIN;
+    life->m_eAtomicCategory = SCHEMA_ATOMIC_INVALID;
+    life->m_eBuiltinType = SCHEMA_BUILTIN_TYPE_UINT8;
+    life->m_nSize = 1;
+    auto* vector = reinterpret_cast<CSchemaType_Atomic*>(vector_storage.data());
+    vector->m_eTypeCategory = SCHEMA_TYPE_ATOMIC;
+    vector->m_eAtomicCategory = SCHEMA_ATOMIC_PLAIN;
+    vector->m_sTypeName = "Vector";
+    vector->m_nSize = sizeof(Vector);
+    vector->m_nAlignment = alignof(Vector);
+    g_base_fields[1] = {"m_lifeState", life, static_cast<int>(kHealthOffset + 4), 0, nullptr};
+    g_base_fields[2] = {"m_vecAbsVelocity", vector, static_cast<int>(kHealthOffset + 8), 0, nullptr};
+    g_base_class.m_nFieldCount = 3;
+    g_damage_class = {};
+    g_damage_class.m_pszName = "CTakeDamageInfo";
+    g_damage_class.m_nSize = 0x118;
+    g_damage_class.m_nAlignment = 8;
+    std::array<void*, 385> table{};
+    table[162] = FunctionAddress(&TestTeleport);
+    table[384] = FunctionAddress(&TestSuicide);
+    StorePointer(g_entity_storage.data(), table.data());
+    KeelCs2EntityIdentity entity{};
+    if (KeelCs2_FindEntityByIndex(EntitySystem(), kEntityIndex, &entity) != KEEL_RESULT_OK)
+        return 200;
+    KeelCs2PlayerActionBindings bindings{162,384,FunctionAddress(&TestDamageConstruct),
+        FunctionAddress(&TestDamageApply),FunctionAddress(&TestDamageDestroy),0x118};
+    KeelPlayerAction action{sizeof(KeelPlayerAction),KEELS2_PLAYER_ACTION_IMPULSE,{200,-200,300},5};
+    auto apply = [&] { return KeelCs2_PlayerAction(EntitySystem(), &g_schema_system, module, &entity, &action, &bindings); };
+    g_actions.clear();
+    if (apply() != KEEL_RESULT_OK || !g_action_arguments || g_action_damage != 5 || g_actions != std::vector<int>({1,3,4,5}))
+        return 201;
+    Vector velocity;
+    std::memcpy(velocity.Base(), g_entity_storage.data() + kHealthOffset + 8, sizeof(velocity));
+    if (velocity != Vector(200,-200,300))
+        return 202;
+    g_actions.clear();
+    action.damage = 0;
+    if (apply() != KEEL_RESULT_OK || g_actions != std::vector<int>({1}))
+        return 203;
+    std::memcpy(velocity.Base(), g_entity_storage.data() + kHealthOffset + 8, sizeof(velocity));
+    if (velocity != Vector(400,-400,600))
+        return 204;
+    g_actions.clear();
+    action.damage = -1;
+    if (apply() != KEEL_RESULT_INVALID_ARGUMENT || !g_actions.empty())
+        return 205;
+    action.damage = 0;
+    action.impulse[0] = std::numeric_limits<float>::quiet_NaN();
+    if (apply() != KEEL_RESULT_INVALID_ARGUMENT)
+        return 206;
+    action.impulse[0] = 200;
+    vector->m_nSize = 16;
+    if (apply() != KEEL_RESULT_INCOMPATIBLE || !g_actions.empty())
+        return 207;
+    vector->m_nSize = sizeof(Vector);
+    vector->m_sTypeName = "VectorWS";
+    if (apply() != KEEL_RESULT_INCOMPATIBLE)
+        return 208;
+    vector->m_sTypeName = "Vector";
+    vector->m_nAlignment = 16;
+    if (apply() != KEEL_RESULT_INCOMPATIBLE)
+        return 209;
+    vector->m_nAlignment = alignof(Vector);
+    action.damage = 5;
+    g_damage_class.m_nSize = 0x110;
+    if (apply() != KEEL_RESULT_INCOMPATIBLE || !g_actions.empty())
+        return 210;
+    g_damage_class.m_nSize = 0x118;
+    action = {sizeof(KeelPlayerAction),KEELS2_PLAYER_ACTION_KILL,{},0};
+    if (apply() != KEEL_RESULT_OK || !g_action_arguments || g_actions != std::vector<int>({2}))
+        return 211;
+    if (apply() != KEEL_RESULT_NOT_READY || g_actions.size() != 1)
+        return 212;
+    g_entity_storage[kHealthOffset + 4] = std::byte{};
+    g_derived_class.m_pszName = "CChicken";
+    if (apply() != KEEL_RESULT_INCOMPATIBLE)
+        return 213;
+    g_derived_class.m_pszName = "CCSPlayerPawn";
+    SetHandle(*Identity(), 13);
+    if (apply() != KEEL_RESULT_NOT_FOUND)
+        return 214;
+    vector->m_sTypeName.Purge();
+    Reset();
+    return 0;
+}
+
 int RunNativeBridgeChecks()
 {
 #if defined(_WIN32)
@@ -682,7 +885,10 @@ extern "C" KEELS2_SCHEMA_FIXTURE_EXPORT std::uint32_t KeelTest_SchemaLookupCount
 #if defined(KEELS2_SCHEMA_FIXTURE_NATIVE_TEST)
 int main()
 {
-    return RunNativeBridgeChecks();
+    const int handles = RunHandleChecks();
+    if (handles) return handles;
+    const int actions = RunPlayerActionChecks();
+    return actions ? actions : RunNativeBridgeChecks();
 }
 #endif
 

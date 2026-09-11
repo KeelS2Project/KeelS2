@@ -1,10 +1,12 @@
 #include "schema_entity_service.h"
 
 #include "host.h"
+#include "game_adapter_loader.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <cmath>
 #include <stdexcept>
 #include <utility>
 
@@ -28,6 +30,7 @@ SchemaEntityService::SchemaEntityService(Host& host, GameAdapter& adapter)
         &ReleaseFieldEntry,
         &DescribeFieldEntry
     };
+    player_actions_api_ = {sizeof(KeelPlayerActionsApi), KEELS2_PLAYER_ACTIONS_API_VERSION, &PlayerActionEntry};
     entities_api_ = {
         sizeof(KeelEntitiesApi),
         KEELS2_ENTITIES_API_VERSION,
@@ -54,6 +57,62 @@ const KeelSchemaApi& SchemaEntityService::SchemaApi() const noexcept
 const KeelEntitiesApi& SchemaEntityService::EntitiesApi() const noexcept
 {
     return entities_api_;
+}
+
+const KeelPlayerActionsApi& SchemaEntityService::PlayerActionsApi() const noexcept
+{
+    return player_actions_api_;
+}
+
+KeelResult SchemaEntityService::PlayerActionEntry(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelPlayerAction* action)
+{
+    try
+    {
+        auto* service = active_.load(std::memory_order_acquire);
+        return service ? service->PlayerAction(plugin, entity, action) : KEEL_RESULT_NOT_READY;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+KeelResult SchemaEntityService::PlayerAction(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelPlayerAction* action)
+{
+    if (!entity || !action || action->size != sizeof(KeelPlayerAction) ||
+        (action->kind != KEELS2_PLAYER_ACTION_IMPULSE && action->kind != KEELS2_PLAYER_ACTION_KILL) ||
+        !std::isfinite(action->damage) || action->damage < 0 || action->damage > 100000)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    for (const auto component : action->impulse)
+        if (!std::isfinite(component) || std::abs(component) > 4096 ||
+            (action->kind == KEELS2_PLAYER_ACTION_KILL && component != 0))
+            return KEEL_RESULT_INVALID_ARGUMENT;
+    if (action->kind == KEELS2_PLAYER_ACTION_KILL && action->damage != 0)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    std::scoped_lock state_lock(host_.state_mutex_);
+    if (!PluginReady(plugin))
+        return KEEL_RESULT_NOT_READY;
+    if (!adapter_.IsGameThread())
+        return KEEL_RESULT_WRONG_THREAD;
+    GameEntityIdentity identity;
+    {
+        std::scoped_lock lock(registry_mutex_);
+        const auto record = entities_.find(entity);
+        if (record == entities_.end() || record->second.owner != plugin)
+            return KEEL_RESULT_NOT_FOUND;
+        identity = record->second.entity;
+    }
+    std::string error;
+    const auto valid = adapter_.ValidateEntity(identity, error);
+    if (valid != KEEL_RESULT_OK)
+        return valid;
+    auto* owner = host_.PluginByHandle(plugin);
+    if (!owner || owner->active_entity_actions == UINT32_MAX)
+        return KEEL_RESULT_BUSY;
+    ++owner->active_entity_actions;
+    struct ActionHold
+    {
+        std::uint32_t& count;
+        ~ActionHold() { --count; }
+    } hold{owner->active_entity_actions};
+    return host_.adapter_module_ ? host_.adapter_module_->PlayerAction(identity, *action) : KEEL_RESULT_UNSUPPORTED;
 }
 
 KeelResult SchemaEntityService::ReleasePlugin(KeelPluginHandle plugin)
@@ -687,7 +746,7 @@ bool SchemaEntityService::ValidSchemaName(const char* name) noexcept
 
 bool SchemaEntityService::ValidValueType(KeelSchemaValueType type) noexcept
 {
-    return type >= KEELS2_SCHEMA_CHAR && type <= KEELS2_SCHEMA_BOOL;
+    return type >= KEELS2_SCHEMA_CHAR && type <= KEELS2_SCHEMA_VECTOR3;
 }
 
 std::string SchemaEntityService::FieldCacheKey(

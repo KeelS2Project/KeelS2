@@ -4,6 +4,7 @@
 #include "convar_service.h"
 #include "keelhook_service.h"
 #include "published_service_registry.h"
+#include "lifecycle_service.h"
 
 #include <algorithm>
 #include <iomanip>
@@ -34,6 +35,59 @@ std::vector<std::string> CreditLines()
         "Official website: https://www.keels2.com/"
     };
 }
+}
+
+bool Host::DeferPluginCommand(std::string_view operation, std::string_view selector)
+{
+    if (dispatching_deferred_plugin_commands_ || !lifecycle_ ||
+        !lifecycle_->GameFrameInstalled() || !keelhook_)
+        return false;
+    PluginRecord* plugin = SelectPlugin(selector);
+    if (!plugin)
+        return true;
+    if (!keelhook_->OnCurrentTarget(plugin->handle))
+        return false;
+    if (deferred_plugin_commands_.size() >= 32)
+    {
+        Write(KEEL_LOG_ERROR, "deferred plugin command queue is full");
+        return true;
+    }
+    deferred_plugin_commands_.emplace_back(plugin->handle, operation);
+    Write(KEEL_LOG_INFO, "plugin " + std::string(operation) + " queued for the next game frame after the current hook: " + plugin->name);
+    return true;
+}
+
+void Host::DispatchDeferredPluginCommands()
+{
+    std::unique_lock lock(state_mutex_);
+    if (!accepting_resources_ || deferred_plugin_commands_.empty() || dispatching_deferred_plugin_commands_)
+        return;
+    auto pending = std::move(deferred_plugin_commands_);
+    deferred_plugin_commands_.clear();
+    dispatching_deferred_plugin_commands_ = true;
+    try
+    {
+        for (const auto& [handle, operation] : pending)
+        {
+            PluginRecord* plugin = PluginByHandle(handle);
+            if (!plugin)
+            {
+                Write(KEEL_LOG_ERROR, "deferred plugin command target no longer exists");
+                continue;
+            }
+            const auto selector = PluginDisplayId(plugin);
+            if (operation == "reload")
+                ReloadPluginCommand(selector, lock);
+            else if (operation == "unload")
+                UnloadPluginCommand(selector, lock);
+        }
+    }
+    catch (...)
+    {
+        dispatching_deferred_plugin_commands_ = false;
+        throw;
+    }
+    dispatching_deferred_plugin_commands_ = false;
 }
 
 void Host::DispatchClientCommand(
@@ -178,7 +232,8 @@ void Host::DispatchCoreCommand(
         {
             if (invocation.argument_count == 3 && invocation.arguments[2])
             {
-                UnloadPluginCommand(invocation.arguments[2], state_lock);
+                if (!DeferPluginCommand("unload", invocation.arguments[2]))
+                    UnloadPluginCommand(invocation.arguments[2], state_lock);
             }
             else
             {
@@ -189,7 +244,8 @@ void Host::DispatchCoreCommand(
         {
             if (invocation.argument_count == 3 && invocation.arguments[2])
             {
-                ReloadPluginCommand(invocation.arguments[2], state_lock);
+                if (!DeferPluginCommand("reload", invocation.arguments[2]))
+                    ReloadPluginCommand(invocation.arguments[2], state_lock);
             }
             else
             {

@@ -30,6 +30,8 @@ typedef uint32_t KeelSchemaValueType;
 #define KEELS2_SCHEMA_FLOAT32 10u
 #define KEELS2_SCHEMA_FLOAT64 11u
 #define KEELS2_SCHEMA_BOOL 12u
+#define KEELS2_SCHEMA_ENTITY_HANDLE 13u
+#define KEELS2_SCHEMA_VECTOR3 14u
 
 typedef struct KeelSchemaFieldSpec
 {

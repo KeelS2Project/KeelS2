@@ -90,6 +90,7 @@ struct PluginRecord
     bool transitioning{};
     bool cleanup_pending{};
     bool factory_dispatch_enabled{};
+    std::uint32_t active_entity_actions{};
 };
 
 struct CommandRecord
@@ -142,6 +143,8 @@ private:
     void DispatchCoreCommand(
         const KeelCommandInvocation& invocation,
         std::unique_lock<std::recursive_mutex>& state_lock);
+    bool DeferPluginCommand(std::string_view operation, std::string_view selector);
+    void DispatchDeferredPluginCommands();
     void DispatchClientCommand(
         const KeelCommandInvocation& invocation,
         std::int32_t slot);
@@ -361,6 +364,8 @@ private:
     std::unordered_map<KeelCommandHandle, std::unique_ptr<CommandRecord>> commands_;
     std::vector<std::unique_ptr<CommandRecord>> retired_commands_;
     std::vector<KeelPluginHandle> load_order_;
+    std::vector<std::pair<KeelPluginHandle, std::string>> deferred_plugin_commands_;
+    bool dispatching_deferred_plugin_commands_{};
 };
 
 std::uint32_t BeginGameCommandDispatch() noexcept;

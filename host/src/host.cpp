@@ -521,6 +521,8 @@ bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
     WriteShutdownTrace("plugin unload loop complete");
 
     load_order_.clear();
+    deferred_plugin_commands_.clear();
+    dispatching_deferred_plugin_commands_ = false;
     WriteShutdownTrace("plugin load order cleared");
     plugins_.clear();
     WriteShutdownTrace("plugin records cleared");
@@ -933,6 +935,15 @@ KeelResult Host::QueryService(
             published_services_ = std::make_unique<PublishedServiceRegistry>(*this);
         }
         *service = &published_services_->Api();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_PLAYER_ACTIONS_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_PLAYER_ACTIONS_API_VERSION)
+            return KEEL_RESULT_INCOMPATIBLE;
+        if (!schema_entities_)
+            schema_entities_ = std::make_unique<SchemaEntityService>(*this, *adapter_);
+        *service = &schema_entities_->PlayerActionsApi();
         return KEEL_RESULT_OK;
     }
     if (std::strcmp(name, KEELS2_SCHEMA_SERVICE_NAME) == 0 ||

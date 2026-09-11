@@ -2,6 +2,7 @@
 
 #include <keels2/cs2/cvar_abi.h>
 #include <keels2/cs2/native_bridge.h>
+#include <keels2/cs2/player_actions.h>
 #include <keels2/keelhook.hpp>
 #include <keels2/platform/console.h>
 #include <keels2/platform/diagnostic_trace.h>
@@ -599,6 +600,7 @@ public:
         game_clients_ = {};
         server_ = {};
         compatibility_profile_.clear();
+        player_action_bindings_ = {};
         if (trace)
         {
             platform::AppendShutdownTrace("cs2 interface invalidation complete");
@@ -1559,6 +1561,34 @@ public:
             maximum_value
         };
         return KEEL_RESULT_OK;
+    }
+
+    KeelResult PlayerAction(const GameEntityIdentity& entity, const KeelPlayerAction& action)
+    {
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+        void* system{};
+        std::string error;
+        {
+            std::scoped_lock lock(schema_entity_mutex_);
+            const auto ready = CurrentEntitySystemLocked(system, error);
+            if (ready != KEEL_RESULT_OK)
+                return ready;
+            if (!entity.epoch || entity.epoch != entity_epoch_)
+                return KEEL_RESULT_NOT_FOUND;
+        }
+        if (!player_action_bindings_.damage_construct)
+        {
+            platform::LoadedModule module;
+            if (platform::FindLoadedModule(server_.module_path, module, error) != platform::ModuleLookup::found)
+                return KEEL_RESULT_NOT_READY;
+            const auto ready = cs2::ResolvePlayerActions(module, compatibility_profile_, player_action_bindings_, error);
+            if (ready != KEEL_RESULT_OK)
+                return ready;
+        }
+        const KeelCs2EntityIdentity native{entity.index, entity.source2_handle};
+        return KeelCs2_PlayerAction(system, schema_system_.instance, schema_server_module_.c_str(),
+            &native, &action, &player_action_bindings_);
     }
 
     KeelResult ResolveSchemaField(
@@ -3255,6 +3285,7 @@ private:
     platform::LoadedModulePin game_event_module_pin_;
     void** game_event_manager_vtable_{};
     std::string compatibility_profile_;
+    KeelCs2PlayerActionBindings player_action_bindings_{};
     std::string schema_server_module_;
     std::string entity_system_module_;
     std::filesystem::path entity_system_module_path_;
@@ -3373,4 +3404,14 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_CommandCaller(
     std::int32_t* slot) noexcept
 {
     return KeelCs2_CommandCaller(context, slot);
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_PlayerAction(
+    keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* entity,
+    const KeelPlayerAction* action) noexcept
+{
+    if (!adapter || !entity || !action)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->PlayerAction(*entity, *action); }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
 }

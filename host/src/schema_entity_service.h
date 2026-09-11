@@ -28,10 +28,13 @@ public:
 
     const KeelSchemaApi& SchemaApi() const noexcept;
     const KeelEntitiesApi& EntitiesApi() const noexcept;
+    const KeelPlayerActionsApi& PlayerActionsApi() const noexcept;
     KeelResult ReleasePlugin(KeelPluginHandle plugin);
     bool Shutdown();
 
 private:
+    static KeelResult PlayerActionEntry(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelPlayerAction* action);
+    KeelResult PlayerAction(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelPlayerAction* action);
     struct FieldRecord
     {
         KeelPluginHandle owner{};
@@ -131,6 +134,7 @@ private:
     GameAdapter& adapter_;
     KeelSchemaApi schema_api_{};
     KeelEntitiesApi entities_api_{};
+    KeelPlayerActionsApi player_actions_api_{};
     mutable std::mutex registry_mutex_;
     std::unordered_map<std::string, std::shared_ptr<GameSchemaField>> field_cache_;
     std::unordered_map<KeelSchemaFieldHandle, FieldRecord> fields_;

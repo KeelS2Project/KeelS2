@@ -1,9 +1,19 @@
 #include <keels2/keels2.hpp>
 
 #include <string.h>
+#include <limits>
 
 namespace
 {
+const KeelHostApi* g_api{};
+KeelPluginHandle g_owner{};
+void (*g_deferred_dispatch)(){};
+class DeferredDispatch
+{
+public:
+    virtual void Run() { if (g_deferred_dispatch) g_deferred_dispatch(); }
+};
+DeferredDispatch g_deferred_target;
 
 class SchemaEntityPlugin final : public keels2::Plugin
 {
@@ -32,7 +42,7 @@ public:
             !FindSchemaField("CBaseEntity", "m_missing", missing) &&
             !FindSchemaField("CBaseEntity!", "m_iHealth", malformed) &&
             !FindEntity(7, unavailable);
-        if (!resolved || !CreateCommand(
+        if (!resolved || !HookPre(&g_deferred_target, &DeferredDispatch::Run, &SchemaEntityPlugin::BeforeDispatch) || !CreateCommand(
                 "keel_schema_entity_check",
                 "Checks schema fields and validated entity handles",
                 &SchemaEntityPlugin::Check))
@@ -59,7 +69,10 @@ public:
             : "map epoch invalidation failed");
     }
 
+    void OnGameFrame(bool, bool, bool) override {}
+
 private:
+    keels2::kh::Action BeforeDispatch() { return keels2::kh::Action::Continue; }
     void Check(const CCommandContext&, const CCommand& command)
     {
         if (command.ArgC() != 2)
@@ -96,7 +109,8 @@ private:
         int32 health;
         if (FindEntity(7, retained_) &&
             FindEntity(CEntityHandle(retained_.Source2Handle()), same) &&
-            retained_.Same(same) && retained_.Read(health_, health) && health == 42)
+            retained_.Same(same) && retained_.Read(health_, health) && health == 42 &&
+            Actions())
         {
             original_handle_ = retained_.Source2Handle();
             LogMessage("entity lookup and typed read passed");
@@ -109,7 +123,7 @@ private:
     {
         int32 health;
         LogMessage(!retained_.Valid() && !retained_.Read(health_, health) &&
-                !retained_.Same(retained_)
+                !retained_.Same(retained_) && retained_.Kill() == KEEL_RESULT_NOT_FOUND
             ? "entity destruction invalidation passed"
             : "entity destruction invalidation failed");
     }
@@ -121,7 +135,8 @@ private:
         int32 health;
         LogMessage(!FindSchemaField("CBaseEntity", "m_iHealth", field) &&
                 !FindEntity(7, entity) && !retained_.Valid() &&
-                !retained_.Read(health_, health) && health == 0
+                !retained_.Read(health_, health) && health == 0 &&
+                retained_.Kill() == KEEL_RESULT_WRONG_THREAD
             ? "wrong-thread access rejected"
             : "wrong-thread access was accepted");
     }
@@ -140,6 +155,40 @@ private:
         LogError("entity serial reuse validation failed");
     }
 
+    bool Actions()
+    {
+        const void* raw{};
+        if (g_api->query_service(g_owner, KEELS2_PLAYER_ACTIONS_SERVICE_NAME, 2, &raw) != KEEL_RESULT_INCOMPATIBLE ||
+            g_api->query_service(g_owner, KEELS2_PLAYER_ACTIONS_SERVICE_NAME, 1, &raw) != KEEL_RESULT_OK)
+            return false;
+        const auto* actions = static_cast<const KeelPlayerActionsApi*>(raw);
+        if (!actions || actions->size != sizeof(*actions) || actions->api_version != 1 || !actions->apply)
+            return false;
+        if (g_api->query_service(g_owner, KEELS2_ENTITIES_SERVICE_NAME, 1, &raw) != KEEL_RESULT_OK)
+            return false;
+        const auto* entities = static_cast<const KeelEntitiesApi*>(raw);
+        KeelEntityHandle entity{};
+        if (entities->find_by_index(g_owner, 7, &entity) != KEEL_RESULT_OK)
+            return false;
+        KeelPlayerAction action{sizeof(KeelPlayerAction), KEELS2_PLAYER_ACTION_KILL, {}, 0};
+        bool valid = actions->apply(g_owner, entity, &action) == KEEL_RESULT_UNSUPPORTED &&
+            actions->apply(g_owner + 10000, entity, &action) == KEEL_RESULT_NOT_READY &&
+            actions->apply(g_owner, entity + 10000, &action) == KEEL_RESULT_NOT_FOUND;
+        action.damage = 1;
+        valid = valid && actions->apply(g_owner, entity, &action) == KEEL_RESULT_INVALID_ARGUMENT;
+        action.kind = KEELS2_PLAYER_ACTION_IMPULSE;
+        action.impulse[0] = std::numeric_limits<float>::infinity();
+        valid = valid && actions->apply(g_owner, entity, &action) == KEEL_RESULT_INVALID_ARGUMENT;
+        action.impulse[0] = 0;
+        action.damage = -1;
+        valid = valid && actions->apply(g_owner, entity, &action) == KEEL_RESULT_INVALID_ARGUMENT;
+        action.damage = 0;
+        valid = valid && entities->release(g_owner, entity) == KEEL_RESULT_OK &&
+            actions->apply(g_owner, entity, &action) == KEEL_RESULT_NOT_FOUND;
+        LogMessage(valid ? "player action service rejection checks passed" : "player action service rejection checks failed");
+        return valid;
+    }
+
     keels2::SchemaField<int32> health_;
     keels2::Entity retained_;
     uint32 original_handle_ = 0;
@@ -147,4 +196,26 @@ private:
 
 }
 
-KEELS2_PLUGIN(SchemaEntityPlugin)
+extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Query(const KeelHostQuery* query, KeelPluginInfo* info)
+{
+    return keels2::detail::AuthoringAdapter<SchemaEntityPlugin>::Query(query, info);
+}
+extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Manifest(const KeelHostQuery* query, KeelPluginManifest* manifest)
+{
+    return keels2::detail::AuthoringAdapter<SchemaEntityPlugin>::Manifest(query, manifest);
+}
+extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(const KeelHostApi* api, KeelPluginHandle plugin)
+{
+    g_api = api;
+    g_owner = plugin;
+    return keels2::detail::AuthoringAdapter<SchemaEntityPlugin>::Load(api, plugin);
+}
+extern "C" KEELS2_PLUGIN_EXPORT void KeelPlugin_Unload(KeelPluginHandle plugin)
+{
+    keels2::detail::AuthoringAdapter<SchemaEntityPlugin>::Unload(plugin);
+}
+extern "C" KEELS2_PLUGIN_EXPORT void* KeelTest_DeferredDispatch(void (*callback)())
+{
+    g_deferred_dispatch = callback;
+    return &g_deferred_target;
+}
