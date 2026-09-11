@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(KeelS2 VERSION 1.0.0 LANGUAGES C CXX)
+project(KeelS2 VERSION 1.1.0 LANGUAGES C CXX)
 
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
@@ -348,12 +348,25 @@ keels2_enable_warnings(keels2_cs2_compatibility)
 
 add_library(keels2_cs2_native_bridge STATIC
     games/cs2/src/native_bridge.cpp
+    games/cs2/src/native_players.cpp
+    games/cs2/src/native_messages.cpp
 )
+get_target_property(KEELS2_CS2_SDK_INCLUDES KeelS2::SourceSDKHeaders INTERFACE_INCLUDE_DIRECTORIES)
+find_path(KEELS2_CS2_PROTO_DIR networkbasetypes.pb.cc
+    PATHS ${KEELS2_CS2_SDK_INCLUDES} NO_DEFAULT_PATH REQUIRED)
+add_library(keels2_cs2_proto STATIC
+    "${KEELS2_CS2_PROTO_DIR}/networkbasetypes.pb.cc"
+    "${KEELS2_CS2_PROTO_DIR}/network_connection.pb.cc"
+    "${KEELS2_CS2_PROTO_DIR}/valveextensions.pb.cc"
+)
+target_link_libraries(keels2_cs2_proto PRIVATE KeelS2::SourceSDK)
+set_target_properties(keels2_cs2_proto PROPERTIES
+    POSITION_INDEPENDENT_CODE ON CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 target_include_directories(keels2_cs2_native_bridge PUBLIC
     games/cs2/include
     sdk/include
 )
-target_link_libraries(keels2_cs2_native_bridge PRIVATE KeelS2::SourceSDK)
+target_link_libraries(keels2_cs2_native_bridge PRIVATE KeelS2::SourceSDK keels2_cs2_proto)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     # The native bridge is the other intentional game-owned C++ ABI boundary;
     # test fixtures provide the verified vtable layout without engine RTTI.
@@ -399,6 +412,8 @@ add_library(keels2_host SHARED
     host/src/lifecycle_service.cpp
     host/src/plugin_manifest_validation.cpp
     host/src/plugin_service.cpp
+    host/src/player_registry.cpp
+    host/src/player_service.cpp
     host/src/published_service_registry.cpp
     host/src/plugin_manager.cpp
     host/src/schema_entity_service.cpp
@@ -739,6 +754,20 @@ if(BUILD_TESTING)
     )
     keels2_enable_warnings(keels2_source2_runtime_c_abi)
     add_test(NAME source2_runtime_c_abi COMMAND keels2_source2_runtime_c_abi)
+
+    add_executable(keels2_players_c_abi tests/players_c_abi.c)
+    target_include_directories(keels2_players_c_abi PRIVATE sdk/include)
+    set_target_properties(keels2_players_c_abi PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES)
+    keels2_enable_warnings(keels2_players_c_abi)
+    add_test(NAME players_c_abi COMMAND keels2_players_c_abi)
+
+    add_executable(keels2_player_registry
+        tests/player_registry.cpp
+        host/src/player_registry.cpp
+    )
+    target_include_directories(keels2_player_registry PRIVATE sdk/include host/src)
+    keels2_enable_warnings(keels2_player_registry)
+    add_test(NAME player_registry COMMAND keels2_player_registry)
 
     add_executable(keels2_lifecycle_c_abi tests/lifecycle_c_abi.c)
     target_include_directories(keels2_lifecycle_c_abi PRIVATE sdk/include)
@@ -1343,7 +1372,7 @@ if(BUILD_TESTING)
     target_include_directories(keels2_schema_entity_fixture PRIVATE sdk/include)
     target_link_libraries(keels2_schema_entity_fixture PRIVATE
         keels2_fake_tier0
-        KeelS2::SourceSDKHeaders
+        KeelS2::SourceSDK
     )
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(keels2_schema_entity_fixture PRIVATE -fno-sanitize=vptr)
@@ -1370,6 +1399,15 @@ if(BUILD_TESTING)
     endif()
     keels2_enable_warnings(keels2_schema_entity_native_bridge)
     add_test(NAME schema_entity_native_bridge COMMAND keels2_schema_entity_native_bridge)
+
+    add_executable(keels2_native_message_contract tests/native_message_contract.cpp)
+    target_link_libraries(keels2_native_message_contract PRIVATE keels2_cs2_native_bridge keels2_fake_tier0 KeelS2::SourceSDK)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(keels2_native_message_contract PRIVATE -fno-sanitize=vptr)
+    endif()
+    keels2_enable_warnings(keels2_native_message_contract)
+    add_test(NAME native_message_contract COMMAND keels2_native_message_contract)
+
 
     add_library(keels2_invalid_plugin SHARED tests/invalid_plugin.cpp)
     target_include_directories(keels2_invalid_plugin PRIVATE sdk/include)
@@ -1456,7 +1494,17 @@ if(BUILD_TESTING)
     target_compile_definitions(keels2_keelhook_target_plugin PRIVATE
         KEELHOOK_FIXTURE_PROFILE="${KEELS2_KEELHOOK_TEST_PROFILE}"
         KEELHOOK_FIXTURE_PROFILE_TARGET=1
+        STATIC_TIER0
     )
+    target_sources(keels2_keelhook_target_plugin PRIVATE
+        tests/native_authoring_fixture.cpp
+        tests/native_authoring_target.cpp
+        tests/source2_command_fixture.cpp
+    )
+    target_link_libraries(keels2_keelhook_target_plugin PRIVATE KeelS2::SDK)
+    if(MSVC)
+        target_compile_definitions(keels2_keelhook_target_plugin PRIVATE TIER0_DLL_EXPORT)
+    endif()
     target_compile_definitions(keels2_keelhook_live_target_plugin PRIVATE
         KEELHOOK_FIXTURE_PROFILE="${KEELS2_KEELHOOK_LIVE_PROFILE}"
     )
@@ -1481,11 +1529,13 @@ if(BUILD_TESTING)
         CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES PREFIX "")
     keels2_enable_warnings(keels2_factory_service_plugin)
 
-    add_library(keels2_source2_service_plugin SHARED tests/source2_service_plugin.cpp)
+    add_library(keels2_source2_service_plugin SHARED
+        tests/source2_service_plugin.cpp tests/player_service_contract.cpp
+        platform/src/dynamic_library.cpp)
     add_library(keels2_source2_live_plugin SHARED tests/source2_service_plugin.cpp)
     foreach(target IN ITEMS keels2_source2_service_plugin keels2_source2_live_plugin)
-        target_link_libraries(${target} PRIVATE keels2_platform)
-        target_include_directories(${target} PRIVATE sdk/include)
+        target_include_directories(${target} PRIVATE sdk/include platform/include)
+        target_link_libraries(${target} PRIVATE ${CMAKE_DL_LIBS})
         target_compile_definitions(${target} PRIVATE KEELS2_PLUGIN_BUILD=1)
         set_target_properties(${target} PROPERTIES
             CXX_VISIBILITY_PRESET hidden
@@ -1494,6 +1544,8 @@ if(BUILD_TESTING)
         )
         keels2_enable_warnings(${target})
     endforeach()
+    target_link_libraries(keels2_source2_service_plugin PRIVATE KeelS2::SourceSDK)
+    target_link_libraries(keels2_source2_live_plugin PRIVATE keels2_platform)
     target_compile_definitions(keels2_source2_service_plugin PRIVATE
         KEELS2_SOURCE2_EXPECTED_PROFILE="${KEELS2_KEELHOOK_TEST_PROFILE}"
         KEELS2_SOURCE2_EXPECTED_CVAR_MODULE="${KEELS2_SOURCE2_TEST_CVAR_MODULE}"
@@ -1709,6 +1761,19 @@ if(BUILD_TESTING)
     )
     keels2_enable_warnings(keels2_convar_authoring_plugin)
 
+    foreach(role provider consumer)
+        add_library(keels2_convar_native_${role} SHARED tests/convar_native_access_plugin.cpp)
+        target_link_libraries(keels2_convar_native_${role} PRIVATE KeelS2::SDK KeelS2::SourceSDK)
+        target_compile_definitions(keels2_convar_native_${role} PRIVATE KEELS2_PLUGIN_BUILD=1)
+        set_target_properties(keels2_convar_native_${role} PROPERTIES
+            CXX_VISIBILITY_PRESET hidden
+            VISIBILITY_INLINES_HIDDEN YES
+            PREFIX ""
+        )
+        keels2_enable_warnings(keels2_convar_native_${role})
+    endforeach()
+    target_compile_definitions(keels2_convar_native_provider PRIVATE KEELS2_TEST_CONVAR_PROVIDER=1)
+
     add_library(keels2_plugin_runtime_service_plugin SHARED
         tests/plugin_runtime_service_plugin.cpp
     )
@@ -1893,6 +1958,7 @@ if(BUILD_TESTING)
         convar_failed_load
         convar_facade
         convar_authoring
+        convar_native_access
         plugin_runtime_service
         plugin_runtime_concurrency
         plugin_transition_shutdown_retry
@@ -1958,6 +2024,8 @@ if(BUILD_TESTING)
                 $<TARGET_FILE:keels2_abi_v4_fixture_plugin>
                 $<TARGET_FILE:keels2_factory_service_plugin>
                 ${CMAKE_BINARY_DIR}/integration-fixture
+                $<TARGET_FILE:keels2_convar_native_provider>
+                $<TARGET_FILE:keels2_convar_native_consumer>
         )
     endforeach()
     get_property(KEELS2_REGISTERED_TESTS DIRECTORY PROPERTY TESTS)

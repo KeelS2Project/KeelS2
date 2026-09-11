@@ -2,11 +2,14 @@
 #define KEELS2_KEELS2_HPP
 
 #include <keels2/convar.h>
+#include <keels2/convar_access.h>
 #include <keels2/entities.hpp>
 #include <keels2/factories.hpp>
 #include <keels2/lifecycle.h>
 #include <keels2/plugin.hpp>
 #include <keels2/plugins.h>
+#include <keels2/players.hpp>
+#include <keels2/native_runtime.hpp>
 #include <keels2/schema.hpp>
 #include <keels2/services.hpp>
 #include <keels2/source2.hpp>
@@ -236,6 +239,7 @@ public:
     }
 
     bool Bind(
+        const KeelHostApi* host,
         const KeelConVarApi* service,
         KeelPluginHandle plugin,
         KeelConVarHandle handle,
@@ -303,6 +307,7 @@ public:
                     return false;
                 }
             }
+            host_ = host;
             name_ = info.name;
             native_convar_.emplace(native);
             minimum_ = std::move(minimum);
@@ -368,6 +373,62 @@ public:
         }
     }
 
+    template <typename Callback>
+    KeelResult WithNative(Callback&& callback) const noexcept
+    {
+        static_assert(std::is_void_v<std::invoke_result_t<Callback, CConVarRef<Value>&>>);
+        if (!Active() || !host_ || !host_->query_service)
+        {
+            return KEEL_RESULT_NOT_READY;
+        }
+        try
+        {
+            const void* service{};
+            const KeelResult result = host_->query_service(
+                plugin_, KEELS2_CONVAR_ACCESS_SERVICE_NAME, KEELS2_CONVAR_ACCESS_API_VERSION, &service);
+            if (result != KEEL_RESULT_OK)
+            {
+                return result;
+            }
+            const auto* api = static_cast<const KeelConVarAccessApi*>(service);
+            if (!api || api->size != sizeof(*api) || api->api_version != KEELS2_CONVAR_ACCESS_API_VERSION || !api->invoke)
+            {
+                return KEEL_RESULT_INCOMPATIBLE;
+            }
+            struct Invocation
+            {
+                std::remove_reference_t<Callback>* callback;
+            } invocation{std::addressof(callback)};
+            return api->invoke(plugin_, handle_, [](const void* reference, void* user_data) -> KeelResult {
+                if (!reference || !user_data || !g_pCVar)
+                {
+                    return KEEL_RESULT_INVALID_ARGUMENT;
+                }
+                try
+                {
+                    ConVarRef handle;
+                    std::memcpy(&handle, reference, sizeof(handle));
+                    CConVarRef<Value> native(handle);
+                    if (!native.IsValidRef() || !native.IsConVarDataAvailable() ||
+                        native.GetType() != TranslateConVarType<Value>())
+                    {
+                        return KEEL_RESULT_INCOMPATIBLE;
+                    }
+                    std::invoke(*static_cast<Invocation*>(user_data)->callback, native);
+                    return KEEL_RESULT_OK;
+                }
+                catch (...)
+                {
+                    return KEEL_RESULT_ENGINE_FAILURE;
+                }
+            }, &invocation);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
+    }
+
     const char* Name() const noexcept
     {
         return name_.c_str();
@@ -417,6 +478,7 @@ public:
     }
 
 private:
+    const KeelHostApi* host_{};
     std::string name_;
     std::optional<CConVarRef<Value>> native_convar_;
     std::optional<Value> minimum_;
@@ -451,6 +513,13 @@ public:
     Value Get() const
     {
         return state_ ? state_->Get() : Value{};
+    }
+
+    template <typename Callback>
+    KeelResult WithNative(Callback&& callback) const noexcept
+    {
+        const auto state = state_;
+        return state ? state->WithNative(std::forward<Callback>(callback)) : KEEL_RESULT_NOT_READY;
     }
 
     bool Set(const Value& value) const noexcept
@@ -629,6 +698,7 @@ public:
         void* native_convar) noexcept
     {
         if (!state || !BindNative(
+                state->api,
                 convar_service,
                 state->plugin,
                 handle,
@@ -693,6 +763,7 @@ public:
 
 protected:
     virtual bool BindNative(
+        const KeelHostApi* host,
         const KeelConVarApi* service,
         KeelPluginHandle plugin,
         KeelConVarHandle handle,
@@ -760,12 +831,13 @@ public:
 
 protected:
     bool BindNative(
+        const KeelHostApi* host,
         const KeelConVarApi* service,
         KeelPluginHandle plugin,
         KeelConVarHandle handle,
         void* native_convar) noexcept override
     {
-        return state_->Bind(service, plugin, handle, native_convar);
+        return state_->Bind(host, service, plugin, handle, native_convar);
     }
 
     void SetHandleActive(bool active) noexcept override
@@ -1693,6 +1765,61 @@ protected:
         return schema_service_.Resolve(class_name, field_name, output) == KEEL_RESULT_OK;
     }
 
+    KeelResult CheckGameThread()
+    {
+        source2::NativeRuntime runtime;
+        const KeelResult result = ConnectNativeRuntime(runtime);
+        return result == KEEL_RESULT_OK ? runtime.CheckGameThread() : result;
+    }
+
+    KeelResult PrintToConsole(CPlayerSlot slot, const char* text)
+    {
+        source2::NativeRuntime runtime;
+        const KeelResult result = ConnectNativeRuntime(runtime);
+        return result == KEEL_RESULT_OK ? runtime.PrintToConsole(slot, text) : result;
+    }
+
+    KeelResult PrintToChat(CPlayerSlot slot, const char* text)
+    {
+        source2::NativeRuntime runtime;
+        const KeelResult result = ConnectNativeRuntime(runtime);
+        return result == KEEL_RESULT_OK ? runtime.PrintToChat(slot, text) : result;
+    }
+
+    KeelResult PrintToChatAll(const char* text)
+    {
+        source2::NativeRuntime runtime;
+        const KeelResult result = ConnectNativeRuntime(runtime);
+        return result == KEEL_RESULT_OK ? runtime.PrintToChatAll(text) : result;
+    }
+
+    KeelResult PlayerServiceStatus()
+    {
+        players::Service service;
+        return ConnectPlayers(service);
+    }
+
+    bool GetPlayer(CPlayerSlot slot, PlayerInfo& player)
+    {
+        player = {};
+        players::Service service;
+        return ConnectPlayers(service) == KEEL_RESULT_OK && service.Get(slot, player) == KEEL_RESULT_OK;
+    }
+
+    bool GetPlayer(const PlayerConnection& connection, PlayerInfo& player)
+    {
+        player = {};
+        players::Service service;
+        return ConnectPlayers(service) == KEEL_RESULT_OK && service.Validate(connection, player) == KEEL_RESULT_OK;
+    }
+
+    bool GetNextPlayer(CPlayerSlot after, PlayerInfo& player)
+    {
+        player = {};
+        players::Service service;
+        return ConnectPlayers(service) == KEEL_RESULT_OK && service.Next(after, player) == KEEL_RESULT_OK;
+    }
+
     bool FindEntity(int index, Entity& output) noexcept
     {
         std::scoped_lock lock(schema_entities_mutex_);
@@ -1723,6 +1850,36 @@ private:
     friend class keels2::detail::GameEventBinding;
     template <typename Type>
     friend class keels2::detail::AuthoringAdapter;
+
+    KeelResult ConnectNativeRuntime(source2::NativeRuntime& runtime)
+    {
+        std::scoped_lock lock(native_runtime_mutex_);
+        if (!native_runtime_)
+        {
+            const KeelResult result = native_runtime_.Connect(context_);
+            if (result != KEEL_RESULT_OK)
+            {
+                return result;
+            }
+        }
+        runtime = native_runtime_;
+        return KEEL_RESULT_OK;
+    }
+
+    KeelResult ConnectPlayers(players::Service& service)
+    {
+        std::scoped_lock lock(players_mutex_);
+        if (!players_service_)
+        {
+            const KeelResult result = players_service_.Connect(context_);
+            if (result != KEEL_RESULT_OK)
+            {
+                return result;
+            }
+        }
+        service = players_service_;
+        return KEEL_RESULT_OK;
+    }
 
     template <typename Type>
     Type* Source2Interface(
@@ -2250,6 +2407,10 @@ private:
     std::mutex schema_entities_mutex_;
     schema::Service schema_service_;
     entities::Service entities_service_;
+    std::mutex players_mutex_;
+    players::Service players_service_;
+    std::mutex native_runtime_mutex_;
+    source2::NativeRuntime native_runtime_;
     keels2::Context context_;
 };
 

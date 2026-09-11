@@ -9,7 +9,7 @@ import sys
 EXPECTED = {
     "bootstrap": {"CreateInterface"},
     "host": {"KeelHost_Start", "KeelHost_CompleteStartup", "KeelHost_Stop"},
-    "adapter": {"KeelGameAdapter_Query", "KeelGameAdapter_CommandCaller", "KeelGameAdapter_PlayerAction"},
+    "adapter": {"KeelGameAdapter_Query", "KeelGameAdapter_CommandCaller", "KeelGameAdapter_PlayerAction", "KeelGameAdapter_QueryPlayers", "KeelGameAdapter_QueryMessaging"},
     "plugin": {"KeelPlugin_Query", "KeelPlugin_Load", "KeelPlugin_Unload"},
 }
 

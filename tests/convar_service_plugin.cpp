@@ -1,4 +1,5 @@
 #include <keels2/convar.h>
+#include <keels2/convar_access.h>
 
 #include <atomic>
 #include <cstdint>
@@ -397,6 +398,37 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
         {
             Log(KEEL_LOG_ERROR, "ConVar broker load validation failed");
         }
+        return KEEL_FALSE;
+    }
+    service = reinterpret_cast<const void*>(1);
+    if (host->query_service(plugin, KEELS2_CONVAR_ACCESS_SERVICE_NAME,
+            KEELS2_CONVAR_ACCESS_API_VERSION + 1, &service) != KEEL_RESULT_INCOMPATIBLE || service ||
+        host->query_service(plugin, KEELS2_CONVAR_ACCESS_SERVICE_NAME,
+            KEELS2_CONVAR_ACCESS_API_VERSION, &service) != KEEL_RESULT_OK || !service)
+    {
+        return KEEL_FALSE;
+    }
+    const auto* access = static_cast<const KeelConVarAccessApi*>(service);
+    std::uint32_t access_count{};
+    const auto inspect = [](const void* reference, void* context) -> KeelResult {
+        if (!reference || !context)
+        {
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+        ++*static_cast<std::uint32_t*>(context);
+        return KEEL_RESULT_OK;
+    };
+    if (access->size != sizeof(*access) || access->api_version != KEELS2_CONVAR_ACCESS_API_VERSION ||
+        !access->invoke ||
+        access->invoke(plugin, 0, inspect, &access_count) != KEEL_RESULT_INVALID_ARGUMENT ||
+        access->invoke(plugin, g_integer, nullptr, &access_count) != KEEL_RESULT_INVALID_ARGUMENT ||
+        access->invoke(0, g_integer, inspect, &access_count) != KEEL_RESULT_NOT_READY ||
+        access->invoke(plugin, UINT64_MAX, inspect, &access_count) != KEEL_RESULT_NOT_FOUND ||
+        access->invoke(plugin, g_integer, inspect, &access_count) != KEEL_RESULT_OK || access_count != 1 ||
+        access->invoke(plugin, g_integer, [](const void*, void*) -> KeelResult { throw 42; }, nullptr) !=
+            KEEL_RESULT_ENGINE_FAILURE ||
+        access->invoke(plugin, g_integer, inspect, &access_count) != KEEL_RESULT_OK || access_count != 2)
+    {
         return KEEL_FALSE;
     }
     if (std::getenv("KEELS2_TEST_CONVAR_FAIL_LOAD"))

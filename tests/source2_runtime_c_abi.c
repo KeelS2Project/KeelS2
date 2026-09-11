@@ -1,4 +1,5 @@
 #include <keels2/source2_runtime.h>
+#include <keels2/native_runtime.h>
 
 #include <stddef.h>
 
@@ -12,6 +13,9 @@ _Static_assert(
 _Static_assert(
     offsetof(KeelSource2RuntimeApi, find_user_message) == 24,
     "user message offset changed");
+
+_Static_assert(sizeof(KeelNativeRuntimeApi) == 40, "native runtime API layout changed");
+_Static_assert(offsetof(KeelNativeRuntimeApi, broadcast_chat) == 32, "broadcast offset changed");
 
 int main(void)
 {

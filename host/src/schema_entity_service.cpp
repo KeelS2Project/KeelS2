@@ -104,14 +104,14 @@ KeelResult SchemaEntityService::PlayerAction(KeelPluginHandle plugin, KeelEntity
     if (valid != KEEL_RESULT_OK)
         return valid;
     auto* owner = host_.PluginByHandle(plugin);
-    if (!owner || owner->active_entity_actions == UINT32_MAX)
+    if (!owner || owner->active_native_operations == UINT32_MAX)
         return KEEL_RESULT_BUSY;
-    ++owner->active_entity_actions;
+    ++owner->active_native_operations;
     struct ActionHold
     {
         std::uint32_t& count;
         ~ActionHold() { --count; }
-    } hold{owner->active_entity_actions};
+    } hold{owner->active_native_operations};
     return host_.adapter_module_ ? host_.adapter_module_->PlayerAction(identity, *action) : KEEL_RESULT_UNSUPPORTED;
 }
 

@@ -3,6 +3,10 @@
 
 #include "keelhook_virtual_fixture.h"
 
+#if defined(KEELHOOK_FIXTURE_PROFILE_TARGET)
+#include "native_authoring_fixture.h"
+#endif
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -1291,6 +1295,14 @@ std::uint64_t BenchmarkTarget(std::int32_t expected)
 
 void RunCommand(const KeelCommandInvocation*, void*)
 {
+#if defined(KEELHOOK_FIXTURE_PROFILE_TARGET)
+    if (!native_authoring_fixture::Check(*g_hook, g_plugin))
+    {
+        Log(KEEL_LOG_ERROR, "native authoring command-reference and action contract failed");
+        return;
+    }
+    Log(KEEL_LOG_INFO, "native authoring command-reference and action contract passed");
+#endif
     if (g_run.exchange(true, std::memory_order_acq_rel))
     {
         Log(KEEL_LOG_ERROR, "KeelHook integration command ran twice");

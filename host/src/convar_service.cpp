@@ -117,6 +117,8 @@ struct ConVarService::Record
     KeelConVarHandle handle{};
     KeelPluginHandle owner{};
     GameConVarHandle game_handle{};
+    void* native_convar{};
+    KeelConVarHandle provider{};
     std::string name;
     std::string definition_key;
     KeelConVarChangeCallback callback{};
@@ -140,6 +142,7 @@ ConVarService::ConVarService(Host& host, GameAdapter& adapter)
     {
         throw std::runtime_error("ConVar service already exists");
     }
+    access_api_ = {sizeof(KeelConVarAccessApi), KEELS2_CONVAR_ACCESS_API_VERSION, &InvokeEntry};
     api_ = {
         sizeof(KeelConVarApi),
         KEELS2_CONVAR_API_VERSION,
@@ -161,6 +164,122 @@ ConVarService::~ConVarService()
 const KeelConVarApi& ConVarService::Api() const noexcept
 {
     return api_;
+}
+
+const KeelConVarAccessApi& ConVarService::AccessApi() const noexcept
+{
+    return access_api_;
+}
+
+KeelResult ConVarService::InvokeEntry(KeelPluginHandle plugin, KeelConVarHandle convar,
+    KeelConVarAccessCallback callback, void* user_data)
+{
+    if (!convar || !callback)
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    try
+    {
+        Host& host = Host::Instance();
+        std::unique_lock lock(host.state_mutex_);
+        return host.convars_ ? host.convars_->Invoke(plugin, convar, callback, user_data, lock) : KEEL_RESULT_NOT_READY;
+    }
+    catch (...)
+    {
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+}
+
+KeelResult ConVarService::Invoke(KeelPluginHandle plugin, KeelConVarHandle convar,
+    KeelConVarAccessCallback callback, void* user_data,
+    std::unique_lock<std::recursive_mutex>& host_lock)
+{
+    PluginRecord* owner = host_.PluginByHandle(plugin);
+    if (!host_.accepting_resources_ || !owner || !owner->accepting_resources || owner->cleanup_pending ||
+        (owner->transitioning && !owner->loading))
+    {
+        return KEEL_RESULT_NOT_READY;
+    }
+    if (!adapter_.IsGameThread())
+    {
+        return KEEL_RESULT_WRONG_THREAD;
+    }
+    std::unique_lock registry_lock(registry_mutex_);
+    const auto selected = records_.find(convar);
+    if (shutting_down_ || selected == records_.end() || selected->second->owner != plugin)
+    {
+        return KEEL_RESULT_NOT_FOUND;
+    }
+    const auto record = selected->second;
+    if (!record->native_convar)
+    {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+    auto provider = record;
+    if (record->provider && record->provider != record->handle)
+    {
+        const auto supplied = records_.find(record->provider);
+        if (supplied == records_.end())
+        {
+            return KEEL_RESULT_NOT_FOUND;
+        }
+        provider = supplied->second;
+    }
+    PluginRecord* provider_owner = host_.PluginByHandle(provider->owner);
+    if (!provider_owner || !provider_owner->accepting_resources || provider_owner->cleanup_pending ||
+        (provider_owner->transitioning && !provider_owner->loading))
+    {
+        return KEEL_RESULT_NOT_READY;
+    }
+    if (record->release_state.load(std::memory_order_acquire) ||
+        provider->release_state.load(std::memory_order_acquire))
+    {
+        return KEEL_RESULT_NOT_FOUND;
+    }
+    const std::size_t count = provider != record ? 2 : 1;
+    if (callback_depth_ + count > callback_stack_.size() ||
+        owner->active_native_operations == UINT32_MAX || provider_owner->active_native_operations == UINT32_MAX ||
+        record->active.load(std::memory_order_acquire) == UINT32_MAX || provider->active.load(std::memory_order_acquire) == UINT32_MAX)
+    {
+        return KEEL_RESULT_BUSY;
+    }
+    ++owner->active_native_operations;
+    if (provider_owner != owner)
+    {
+        ++provider_owner->active_native_operations;
+    }
+    callback_stack_[callback_depth_++] = record.get();
+    record->active.fetch_add(1, std::memory_order_acq_rel);
+    if (provider != record)
+    {
+        callback_stack_[callback_depth_++] = provider.get();
+        provider->active.fetch_add(1, std::memory_order_acq_rel);
+    }
+    registry_lock.unlock();
+    host_lock.unlock();
+    KeelResult result;
+    try
+    {
+        result = callback(record->native_convar, user_data);
+    }
+    catch (...)
+    {
+        result = KEEL_RESULT_ENGINE_FAILURE;
+    }
+    if (provider != record)
+    {
+        callback_stack_[--callback_depth_] = nullptr;
+        LeaveActive(provider->active);
+    }
+    callback_stack_[--callback_depth_] = nullptr;
+    LeaveActive(record->active);
+    host_lock.lock();
+    --owner->active_native_operations;
+    if (provider_owner != owner)
+    {
+        --provider_owner->active_native_operations;
+    }
+    return result;
 }
 
 std::vector<ConVarService::Snapshot> ConVarService::Snapshots() const
@@ -578,6 +697,7 @@ KeelResult ConVarService::CreateImpl(
     record->native_callback = native_callback;
     record->user_data = user_data;
     record->created = true;
+    record->provider = record->handle;
     const KeelConVarHandle handle = record->handle;
     bool inserted_definition{};
     if (definition == definitions_.end())
@@ -594,7 +714,7 @@ KeelResult ConVarService::CreateImpl(
         native_callback ? &NativeChangeEntry : nullptr,
         record.get(),
         record->game_handle,
-        native_convar,
+        &record->native_convar,
         error);
     if (created != KEEL_RESULT_OK)
     {
@@ -627,6 +747,10 @@ KeelResult ConVarService::CreateImpl(
     record->enabled.store(
         owner->state == PluginState::loaded && !owner->loading,
         std::memory_order_release);
+    if (native_convar)
+    {
+        *native_convar = record->native_convar;
+    }
     *output = handle;
     return KEEL_RESULT_OK;
 }
@@ -688,6 +812,11 @@ KeelResult ConVarService::FindImpl(
     record->handle = next_convar_++;
     record->owner = plugin;
     record->name = name;
+    const auto definition = definitions_.find(NormalizeName(name));
+    if (definition != definitions_.end())
+    {
+        record->provider = definition->second.active;
+    }
     const KeelConVarHandle handle = record->handle;
 
     std::string error;
@@ -695,7 +824,7 @@ KeelResult ConVarService::FindImpl(
         name,
         expected_type,
         record->game_handle,
-        native_convar,
+        &record->native_convar,
         error);
     if (found != KEEL_RESULT_OK)
     {
@@ -717,6 +846,10 @@ KeelResult ConVarService::FindImpl(
     record->enabled.store(
         owner->state == PluginState::loaded && !owner->loading,
         std::memory_order_release);
+    if (native_convar)
+    {
+        *native_convar = record->native_convar;
+    }
     *output = handle;
     return KEEL_RESULT_OK;
 }
@@ -928,12 +1061,14 @@ KeelResult ConVarService::ReleaseRecord(const std::shared_ptr<Record>& record)
     {
         return KEEL_RESULT_BUSY;
     }
+    std::unique_lock registry_lock(registry_mutex_);
     std::uint32_t expected{};
     if (!record->release_state.compare_exchange_strong(
             expected,
             1,
             std::memory_order_acq_rel))
     {
+        registry_lock.unlock();
         while (expected == 1)
         {
             record->release_state.wait(expected, std::memory_order_acquire);
@@ -942,6 +1077,7 @@ KeelResult ConVarService::ReleaseRecord(const std::shared_ptr<Record>& record)
         return expected == 2 ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
     }
     record->enabled.store(false, std::memory_order_release);
+    registry_lock.unlock();
     WaitForZero(record->active);
     adapter_.ReleaseConVar(record->game_handle);
     WaitForZero(record->active);

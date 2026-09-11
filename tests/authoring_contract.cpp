@@ -50,6 +50,7 @@ bool g_wrong_provenance{};
 bool g_dispatch_during_subscribe{};
 bool g_lifecycle_unavailable{};
 bool g_fail_command_registration{};
+const char* g_fail_command_name{};
 KeelLifecycleEventType g_fail_subscription_event{};
 int g_server{};
 int g_game_clients{};
@@ -73,6 +74,7 @@ void ResetHost()
     g_dispatch_during_subscribe = true;
     g_lifecycle_unavailable = false;
     g_fail_command_registration = false;
+    g_fail_command_name = nullptr;
     g_fail_subscription_event = 0;
 }
 
@@ -189,7 +191,8 @@ KeelResult RegisterSource2Command(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
-    if (g_fail_command_registration)
+    if (g_fail_command_registration ||
+        (g_fail_command_name && std::strcmp(spec->name, g_fail_command_name) == 0))
     {
         return KEEL_RESULT_ENGINE_FAILURE;
     }
@@ -805,6 +808,21 @@ int main(int argument_count, char** arguments)
     if (unload_count() != 0)
     {
         return Failure(29, "author Unload ran after command registration failure");
+    }
+
+    ResetHost();
+    reset();
+    g_fail_command_name = "authoring_throw";
+    if (load(&api, 6) != KEEL_FALSE || load_count() != 1 ||
+        g_command_records.size() != 1 || g_unregister_count != 1 ||
+        g_unsubscribe_count != 2 || !AllResourcesReleased())
+    {
+        return Failure(40, "second command failure leaked the first command or lifecycle subscriptions");
+    }
+    unload(6);
+    if (unload_count() != 0)
+    {
+        return Failure(41, "author Unload ran after partial command registration failure");
     }
 
     ResetHost();

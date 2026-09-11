@@ -49,20 +49,15 @@ bool SamplePlugin::Load()
         return false;
     }
 
-    const ConVarRefAbstract untyped("mp_limitteams");
-    if (!untyped.IsValidRef() || !untyped.IsConVarDataAvailable() ||
-        untyped.GetType() != EConVarType_Int32)
+    const KeelResult nativeAccess = limitTeams.WithNative([this](CConVarRef<int32>& typed) {
+        const ConVarRefAbstract& untyped = typed;
+        LogMessage("mp_limitteams typed={} untyped={}", typed.Get(), untyped.GetInt());
+    });
+    if (nativeAccess != KEEL_RESULT_OK)
     {
-        LogError("mp_limitteams has no valid integer data");
+        LogError("native ConVar access service version 1 is required: {}", nativeAccess);
         return false;
     }
-    const CConVarRef<int> typed(untyped);
-    if (!typed.IsValidRef() || !typed.IsConVarDataValid())
-    {
-        LogError("mp_limitteams typed reference is invalid");
-        return false;
-    }
-    LogMessage("mp_limitteams typed={} untyped={}", typed.Get(), untyped.GetInt());
 
     LogMessage(
         "ready command=keel_sample "
@@ -214,19 +209,28 @@ void SamplePlugin::Command(
     const CCommandContext& context,
     const CCommand& command)
 {
+    if (command.ArgC() == 2 && V_strcmp(command[1], "player") == 0)
+    {
+        DescribePlayer(context.GetPlayerSlot());
+        return;
+    }
     if (command.ArgC() > 2 ||
         (command.ArgC() == 2 && V_strcmp(command[1], "bump") != 0))
     {
-        LogError("usage: keel_sample [bump]");
+        LogError("usage: keel_sample [bump|player]");
         return;
     }
 
     if (command.ArgC() == 2)
     {
-        const int value = integer.Get();
-        const bool integerSet = integer.Set(value == integer.Max() ? integer.Min() : value + 1);
-        const bool floatingSet = floating.Set(floating.Get() + 0.25f);
-        if (!integerSet || !floatingSet)
+        const KeelResult integerSet = integer.WithNative([this](CConVarRef<int32>& native) {
+            const int32 next = native.Get() == integer.Max() ? integer.Min() : native.Get() + 1;
+            native.Set(next);
+        });
+        const KeelResult floatingSet = floating.WithNative([](CConVarRef<float>& native) {
+            native.Set(native.Get() + 0.25f);
+        });
+        if (integerSet != KEEL_RESULT_OK || floatingSet != KEEL_RESULT_OK)
         {
             LogError("sample ConVar update was rejected");
         }
@@ -238,6 +242,28 @@ void SamplePlugin::Command(
         integer.Get(),
         floating.Get(),
         limitTeams.Get());
+}
+
+void SamplePlugin::DescribePlayer(CPlayerSlot slot)
+{
+    PlayerInfo player;
+    if (!GetPlayer(slot, player))
+    {
+        LogError("keel_sample player requires a current connected client");
+        return;
+    }
+    CUtlString text;
+    text.Format("#%d %s | team=%d authenticated=%d\n", player.user_id,
+        player.name.Get(), player.team, player.authenticated ? 1 : 0);
+    const KeelResult console = PrintToConsole(player.slot, text.Get());
+    if (console != KEEL_RESULT_OK)
+    {
+        LogError("player console output is unavailable: {}", console);
+    }
+    if (PrintToChat(player.slot, "Player details printed to your console.") != KEEL_RESULT_OK)
+    {
+        LogError("player chat output is unavailable");
+    }
 }
 
 void SamplePlugin::IntegerChanged(

@@ -10,6 +10,7 @@
 #include "schema_entity_service.h"
 #include "source2_callbacks_service.h"
 #include "source2_runtime_service.h"
+#include "player_service.h"
 
 #include <keels2/platform/console.h>
 #include <keels2/platform/diagnostic_trace.h>
@@ -342,7 +343,7 @@ bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
     accepting_resources_ = false;
     const bool plugin_transition_active =
         std::any_of(plugins_.begin(), plugins_.end(), [](const auto& plugin) {
-            return plugin->transitioning;
+            return plugin->transitioning || plugin->active_native_operations || plugin->unload_callback_active;
         });
     if (plugin_transition_active)
     {
@@ -495,6 +496,7 @@ bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
         const std::string display_id = PluginDisplayId(plugin);
         const std::string name = plugin->name;
         bool callback_completed = true;
+        plugin->unload_callback_active = true;
         state_lock.unlock();
         try
         {
@@ -506,6 +508,7 @@ bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
             Write(KEEL_LOG_ERROR, "plugin threw during unload: " + plugin->name);
         }
         state_lock.lock();
+        plugin->unload_callback_active = false;
         WriteShutdownTrace(
             callback_completed
                 ? "plugin unload callback completed"
@@ -533,6 +536,7 @@ bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
     source2_callbacks_.reset();
     WriteShutdownTrace("Source 2 callback service released");
     source2_runtime_.reset();
+    players_.reset();
     convars_.reset();
     WriteShutdownTrace("ConVar service released");
     schema_entities_.reset();
@@ -836,6 +840,19 @@ KeelResult Host::QueryService(
         *service = &source2_authoring_api_;
         return KEEL_RESULT_OK;
     }
+    if (std::strcmp(name, KEELS2_NATIVE_RUNTIME_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_NATIVE_RUNTIME_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!source2_runtime_)
+        {
+            source2_runtime_ = std::make_unique<Source2RuntimeService>(*this, *adapter_);
+        }
+        *service = &source2_runtime_->NativeApi();
+        return KEEL_RESULT_OK;
+    }
     if (std::strcmp(name, KEELS2_SOURCE2_RUNTIME_SERVICE_NAME) == 0)
     {
         if (version != KEELS2_SOURCE2_RUNTIME_API_VERSION)
@@ -896,6 +913,46 @@ KeelResult Host::QueryService(
             lifecycle_ = std::make_unique<LifecycleService>(*this, *adapter_, *keelhook_);
         }
         *service = &lifecycle_->Api();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_PLAYERS_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_PLAYERS_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!adapter_module_ || !adapter_module_->PlayerCapacity())
+        {
+            return KEEL_RESULT_UNSUPPORTED;
+        }
+        if (!lifecycle_)
+        {
+            const void* lifecycle{};
+            const KeelResult result = QueryService(plugin,
+                KEELS2_LIFECYCLE_SERVICE_NAME, KEELS2_LIFECYCLE_API_VERSION, &lifecycle);
+            if (result != KEEL_RESULT_OK)
+            {
+                return result;
+            }
+        }
+        if (!players_)
+        {
+            players_ = std::make_unique<PlayerService>(*this, *adapter_module_);
+        }
+        *service = &players_->Api();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_CONVAR_ACCESS_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_CONVAR_ACCESS_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!convars_)
+        {
+            convars_ = std::make_unique<ConVarService>(*this, *adapter_);
+        }
+        *service = &convars_->AccessApi();
         return KEEL_RESULT_OK;
     }
     if (std::strcmp(name, KEELS2_CONVAR_SERVICE_NAME) == 0)

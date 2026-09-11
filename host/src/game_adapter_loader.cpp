@@ -140,6 +140,38 @@ bool GameAdapterModule::Load(
         library_.Symbol(kGameAdapterCommandCallerSymbol));
     player_action_ = SymbolFunction<GameAdapterPlayerActionFn>(
         library_.Symbol(kGameAdapterPlayerActionSymbol));
+    const auto query_players = SymbolFunction<GameAdapterQueryPlayersFn>(
+        library_.Symbol(kGameAdapterPlayersSymbol));
+    if (query_players)
+    {
+        GameAdapterPlayersApi players{};
+        players.size = sizeof(players);
+        players.api_version = kGameAdapterPlayersVersion;
+        if (query_players(kGameAdapterPlayersVersion, &players) != KEEL_RESULT_OK ||
+            players.size != sizeof(players) || players.api_version != kGameAdapterPlayersVersion ||
+            !players.capacity || !players.read)
+        {
+            error = "game adapter player provider is incompatible";
+            Reset();
+            return false;
+        }
+        players_ = players;
+    }
+    const auto query_messaging = SymbolFunction<GameAdapterQueryMessagingFn>(
+        library_.Symbol(kGameAdapterMessagingSymbol));
+    if (query_messaging)
+    {
+        GameAdapterMessagingApi messaging{};
+        messaging.size = sizeof(messaging);
+        if (query_messaging(kGameAdapterMessagingVersion, &messaging) != KEEL_RESULT_OK ||
+            messaging.size != sizeof(messaging) || messaging.api_version != kGameAdapterMessagingVersion || !messaging.chat)
+        {
+            error = "game adapter messaging provider is incompatible";
+            Reset();
+            return false;
+        }
+        messaging_ = messaging;
+    }
     error.clear();
     return true;
 }
@@ -160,6 +192,8 @@ void GameAdapterModule::Reset() noexcept
     destroy_ = nullptr;
     command_caller_ = nullptr;
     player_action_ = nullptr;
+    players_ = {};
+    messaging_ = {};
     library_.Close();
     path_.clear();
 }
@@ -183,6 +217,27 @@ KeelResult GameAdapterModule::CommandCaller(const void* context, std::int32_t& s
 const std::filesystem::path& GameAdapterModule::Path() const noexcept
 {
     return path_;
+}
+
+KeelResult GameAdapterModule::PrintChat(std::int32_t slot, KeelBool broadcast, const char* text) const noexcept
+{
+    return messaging_.chat ? messaging_.chat(adapter_, slot, broadcast, text) : KEEL_RESULT_UNSUPPORTED;
+}
+
+std::uint32_t GameAdapterModule::PlayerCapacity() const noexcept
+{
+    return players_.capacity ? players_.capacity() : 0;
+}
+
+KeelResult GameAdapterModule::ReadPlayer(std::int32_t slot, KeelPlayerInfo& player) const noexcept
+{
+    player = {};
+    player.size = sizeof(player);
+    player.slot = -1;
+    player.user_id = -1;
+    player.controller_handle = UINT32_MAX;
+    player.pawn_handle = UINT32_MAX;
+    return players_.read ? players_.read(adapter_, slot, &player) : KEEL_RESULT_UNSUPPORTED;
 }
 
 KeelResult GameAdapterModule::PlayerAction(const GameEntityIdentity& entity, const KeelPlayerAction& action) const noexcept

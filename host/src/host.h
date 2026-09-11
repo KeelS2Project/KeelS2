@@ -32,6 +32,7 @@ class PluginService;
 class SchemaEntityService;
 class Source2CallbacksService;
 class Source2RuntimeService;
+class PlayerService;
 class PublishedServiceRegistry;
 
 inline constexpr const char* kHostVersion = KEELS2_HOST_VERSION;
@@ -89,8 +90,9 @@ struct PluginRecord
     bool loading{};
     bool transitioning{};
     bool cleanup_pending{};
+    bool unload_callback_active{};
     bool factory_dispatch_enabled{};
-    std::uint32_t active_entity_actions{};
+    std::uint32_t active_native_operations{};
 };
 
 struct CommandRecord
@@ -133,6 +135,7 @@ private:
     friend class SchemaEntityService;
     friend class Source2CallbacksService;
     friend class Source2RuntimeService;
+    friend class PlayerService;
     friend class PublishedServiceRegistry;
 
     Host() = default;
@@ -353,6 +356,7 @@ private:
     std::unique_ptr<SchemaEntityService> schema_entities_;
     std::unique_ptr<Source2CallbacksService> source2_callbacks_;
     std::unique_ptr<Source2RuntimeService> source2_runtime_;
+    std::unique_ptr<PlayerService> players_;
     std::unique_ptr<PublishedServiceRegistry> published_services_;
     KeelSource2ApiV1 source2_api_v1_{};
     KeelSource2Api source2_api_{};

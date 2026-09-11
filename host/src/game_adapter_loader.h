@@ -30,6 +30,9 @@ public:
     bool SupportsClientCommands() const noexcept;
     KeelResult CommandCaller(const void* context, std::int32_t& slot) const noexcept;
     KeelResult PlayerAction(const GameEntityIdentity& entity, const KeelPlayerAction& action) const noexcept;
+    KeelResult PrintChat(std::int32_t slot, KeelBool broadcast, const char* text) const noexcept;
+    std::uint32_t PlayerCapacity() const noexcept;
+    KeelResult ReadPlayer(std::int32_t slot, KeelPlayerInfo& player) const noexcept;
     const std::filesystem::path& Path() const noexcept;
 
 private:
@@ -37,6 +40,8 @@ private:
     GameAdapterDestroyFn destroy_{};
     GameAdapterCommandCallerFn command_caller_{};
     GameAdapterPlayerActionFn player_action_{};
+    GameAdapterPlayersApi players_{};
+    GameAdapterMessagingApi messaging_{};
     GameAdapter* adapter_{};
     std::filesystem::path path_;
 };

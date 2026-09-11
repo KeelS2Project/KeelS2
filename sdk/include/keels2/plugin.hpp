@@ -22,6 +22,11 @@ namespace keels2
 
 class Plugin;
 
+namespace players
+{
+class Service;
+}
+
 namespace kh
 {
 
@@ -34,6 +39,7 @@ namespace source2
 
 class Service;
 class Runtime;
+class NativeRuntime;
 
 }
 
@@ -78,6 +84,7 @@ struct ContextState final
     const KeelHostApi* api{};
     KeelPluginHandle plugin{};
     std::atomic<bool> accepting_resources{};
+    std::atomic<bool> native_access{true};
     std::mutex keelhook_targets_mutex;
     std::unordered_map<std::uint64_t, std::weak_ptr<void>> keelhook_targets;
 };
@@ -534,6 +541,8 @@ private:
     friend class kh::Service;
     friend class source2::Service;
     friend class source2::Runtime;
+    friend class source2::NativeRuntime;
+    friend class players::Service;
     friend class schema::Service;
     friend class entities::Service;
     friend class services::Service;
@@ -572,6 +581,7 @@ private:
         if (state_)
         {
             state_->accepting_resources.store(false, std::memory_order_release);
+            state_->native_access.store(false, std::memory_order_release);
             state_->api = nullptr;
             state_->plugin = 0;
             state_.reset();

@@ -3,6 +3,8 @@
         KeelGameAdapter_Query;
         KeelGameAdapter_CommandCaller;
         KeelGameAdapter_PlayerAction;
+        KeelGameAdapter_QueryPlayers;
+        KeelGameAdapter_QueryMessaging;
     local:
         *;
 };

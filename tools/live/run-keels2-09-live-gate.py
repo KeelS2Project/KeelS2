@@ -553,7 +553,7 @@ def validate_client_console(text: str, stage: str, revision: str, platform_label
         raise GateFailure("client console usage output is missing or server output was pasted")
     if stage == "information":
         required = (
-            "KeelS2 1.0.0", "Built: ", " UTC", f"Git revision: {revision.split('-')[0]}",
+            "KeelS2 1.1.0", "Built: ", " UTC", f"Git revision: {revision.split('-')[0]}",
             f"Target: {platform_label.capitalize()}/x86_64", "Plugin ABI: 4",
             "Created and developed by Peter Brev", "Official website: https://www.keels2.com/",
             "Listing 8 active plugins:", "KeelS2 Basic", "Source2 Service Test",
@@ -689,7 +689,7 @@ def self_test() -> None:
         valid_paused = menu + "\nListing 7 active plugins:\n" + "\n".join(rows[:3] + rows[4:])
         for platform in ("linux", "windows"):
             valid_information = "\n".join((
-                menu, "KeelS2 1.0.0", "Built: test UTC", "Git revision: test",
+                menu, "KeelS2 1.1.0", "Built: test UTC", "Git revision: test",
                 f"Target: {platform.capitalize()}/x86_64", "Plugin ABI: 4",
                 "Created and developed by Peter Brev", "Official website: https://www.keels2.com/",
                 "Listing 8 active plugins:", *rows))

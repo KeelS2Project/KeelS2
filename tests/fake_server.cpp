@@ -471,6 +471,18 @@ extern "C" KEELS2_FAKE_EXPORT void KeelTest_DispatchLifecycle()
     VtableFunction<void (*)(void*, std::int32_t)>(&g_game_clients, 19)(&g_game_clients, 4);
 }
 
+extern "C" KEELS2_FAKE_EXPORT void KeelTest_PlayerConnected(std::int32_t slot)
+{
+    VtableFunction<void (*)(void*, std::int32_t, const char*, std::uint64_t, const char*, const char*, bool)>(
+        &g_game_clients, 11)(&g_game_clients, slot, "Late player", 0, "", "127.0.0.1", false);
+}
+
+extern "C" KEELS2_FAKE_EXPORT void KeelTest_PlayerDisconnecting(std::int32_t slot)
+{
+    VtableFunction<void (*)(void*, std::int32_t, std::int32_t, const char*, std::uint64_t, const char*)>(
+        &g_game_clients, 16)(&g_game_clients, slot, 39, "Late player", 0, "");
+}
+
 extern "C" KEELS2_FAKE_EXPORT std::uint32_t KeelTest_LifecycleCallCount(std::uint32_t event)
 {
     if (event == 0 || event > 7)

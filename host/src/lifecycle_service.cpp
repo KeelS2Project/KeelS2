@@ -2,6 +2,7 @@
 
 #include "host.h"
 #include "keelhook_service.h"
+#include "player_service.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -58,6 +59,34 @@ bool LifecycleService::GameFrameInstalled() const
 {
     std::scoped_lock lock(registry_mutex_);
     return installed_[KEELS2_LIFECYCLE_GAME_FRAME] && !shutting_down_;
+}
+
+KeelResult LifecycleService::EnsurePlayerTracking()
+{
+    if (!adapter_.IsGameThread())
+    {
+        return KEEL_RESULT_WRONG_THREAD;
+    }
+    std::scoped_lock lock(registry_mutex_);
+    if (shutting_down_)
+    {
+        return KEEL_RESULT_NOT_READY;
+    }
+    for (const auto event : {KEELS2_LIFECYCLE_CLIENT_CONNECTED, KEELS2_LIFECYCLE_CLIENT_DISCONNECTING})
+    {
+        if (!installed_[event])
+        {
+            std::string error;
+            const KeelResult result = adapter_.EnableLifecycleEvent(
+                event, hooks_.Api(), 0, &DispatchEntry, this, error);
+            if (result != KEEL_RESULT_OK)
+            {
+                return result;
+            }
+            installed_[event] = true;
+        }
+    }
+    return KEEL_RESULT_OK;
 }
 
 void LifecycleService::Activate(KeelPluginHandle plugin)
@@ -220,6 +249,10 @@ KeelResult LifecycleService::Subscribe(
         }
         if (!installed_[spec->event])
         {
+            if (!adapter_.IsGameThread())
+            {
+                return KEEL_RESULT_WRONG_THREAD;
+            }
             std::string error;
             const KeelResult result = adapter_.EnableLifecycleEvent(
                 spec->event,
@@ -302,6 +335,14 @@ void LifecycleService::Dispatch(const KeelLifecycleEvent& event)
         event.reserved != 0 || !event.payload || event.payload_size == 0)
     {
         return;
+    }
+    if (event.type == KEELS2_LIFECYCLE_CLIENT_CONNECTED || event.type == KEELS2_LIFECYCLE_CLIENT_DISCONNECTING)
+    {
+        std::scoped_lock lock(host_.state_mutex_);
+        if (host_.players_)
+        {
+            host_.players_->OnLifecycle(event);
+        }
     }
     if (event.type == KEELS2_LIFECYCLE_GAME_FRAME &&
         event.payload_size == sizeof(KeelLifecycleGameFrame) && adapter_.IsGameThread())

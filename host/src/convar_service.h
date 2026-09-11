@@ -4,6 +4,7 @@
 #include "game_adapter.h"
 
 #include <keels2/convar.h>
+#include <keels2/convar_access.h>
 #include <keels2/source2_authoring.h>
 
 #include <array>
@@ -40,6 +41,7 @@ public:
     ConVarService& operator=(const ConVarService&) = delete;
 
     const KeelConVarApi& Api() const noexcept;
+    const KeelConVarAccessApi& AccessApi() const noexcept;
     void Activate(KeelPluginHandle plugin);
     KeelResult Deactivate(KeelPluginHandle plugin);
     KeelResult ReleasePlugin(KeelPluginHandle plugin);
@@ -61,6 +63,11 @@ public:
     KeelResult ReleaseNative(KeelPluginHandle plugin, KeelConVarHandle convar);
 
 private:
+    static KeelResult InvokeEntry(KeelPluginHandle plugin, KeelConVarHandle convar,
+        KeelConVarAccessCallback callback, void* user_data);
+    KeelResult Invoke(KeelPluginHandle plugin, KeelConVarHandle convar,
+        KeelConVarAccessCallback callback, void* user_data,
+        std::unique_lock<std::recursive_mutex>& host_lock);
     struct Definition;
     struct Record;
 
@@ -168,6 +175,7 @@ private:
     Host& host_;
     GameAdapter& adapter_;
     KeelConVarApi api_{};
+    KeelConVarAccessApi access_api_{};
     mutable std::mutex registry_mutex_;
     std::unordered_map<KeelConVarHandle, std::shared_ptr<Record>> records_;
     std::unordered_map<std::string, Definition> definitions_;

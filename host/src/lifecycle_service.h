@@ -30,6 +30,7 @@ public:
 
     const KeelLifecycleApi& Api() const noexcept;
     bool GameFrameInstalled() const;
+    KeelResult EnsurePlayerTracking();
     void Activate(KeelPluginHandle plugin);
     KeelResult Deactivate(KeelPluginHandle plugin);
     KeelResult ReleasePlugin(KeelPluginHandle plugin);

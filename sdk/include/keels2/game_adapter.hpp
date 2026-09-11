@@ -5,6 +5,7 @@
 #include <keels2/convar.h>
 #include <keels2/entities.h>
 #include <keels2/player_actions.h>
+#include <keels2/players.h>
 #include <keels2/keelhook.h>
 #include <keels2/lifecycle.h>
 #include <keels2/schema.h>
@@ -214,6 +215,34 @@ using GameAdapterCreateFn = GameAdapter* (*)(const GameAdapterHostApi* host);
 inline constexpr const char* kGameAdapterPlayerActionSymbol = "KeelGameAdapter_PlayerAction";
 using GameAdapterPlayerActionFn = KeelResult (*)(GameAdapter*, const GameEntityIdentity*, const KeelPlayerAction*) noexcept;
 using GameAdapterDestroyFn = void (*)(GameAdapter* adapter);
+
+inline constexpr const char* kGameAdapterPlayersSymbol = "KeelGameAdapter_QueryPlayers";
+inline constexpr std::uint32_t kGameAdapterPlayersVersion = 1;
+
+struct GameAdapterPlayersApi
+{
+    std::uint32_t size;
+    std::uint32_t api_version;
+    std::uint32_t (*capacity)() noexcept;
+    KeelResult (*read)(GameAdapter* adapter, std::int32_t slot, KeelPlayerInfo* player) noexcept;
+};
+
+using GameAdapterQueryPlayersFn = KeelResult (*)(
+    std::uint32_t version, GameAdapterPlayersApi* api) noexcept;
+
+inline constexpr const char* kGameAdapterMessagingSymbol = "KeelGameAdapter_QueryMessaging";
+inline constexpr std::uint32_t kGameAdapterMessagingVersion = 1;
+
+struct GameAdapterMessagingApi
+{
+    std::uint32_t size;
+    std::uint32_t api_version;
+    KeelResult (*chat)(GameAdapter* adapter, std::int32_t slot, KeelBool broadcast, const char* text) noexcept;
+};
+
+using GameAdapterQueryMessagingFn = KeelResult (*)(
+    std::uint32_t version, GameAdapterMessagingApi* api) noexcept;
+
 
 struct GameAdapterProvider
 {

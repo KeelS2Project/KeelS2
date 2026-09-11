@@ -1593,7 +1593,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
     if (scenario == "core_commands" || scenario == "client_console")
     {
         return selected_profile && Contains(messages, "KeelS2 Menu") &&
-            Contains(messages, "KeelS2 Plugins Menu") && Contains(messages, "KeelS2 1.0.0") &&
+            Contains(messages, "KeelS2 Plugins Menu") && Contains(messages, "KeelS2 1.1.0") &&
             Contains(messages, "load <file>     - Load a plugin module") &&
             Contains(messages, "unload <plugin> - Unload a loaded plugin") &&
             Contains(messages, "Game: cs2") && Contains(messages, "KeelS2 status: running") &&
@@ -1679,6 +1679,9 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "plugin loaded: Source2 Service Test 1") &&
             Contains(messages, "plugin unloaded: [01] Source2 Service Test") &&
             Contains(messages, "host stopped") &&
+            Count(messages, "player service contract passed") == 7 &&
+            !Contains(messages, "player service contract failed") &&
+            !Contains(messages, "player service teardown failed") &&
             !Contains(messages, "Source 2 interface gateway load validation failed") &&
             !Contains(messages, "Source 2 interface gateway runtime validation failed") &&
             !Contains(messages, "Source 2 interface view remained active during unload");
@@ -1810,7 +1813,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
     if (scenario == "convar_facade")
     {
         return selected_profile &&
-            Count(messages, "plugin loaded: KeelS2 Source 2 Sample 1.0.0") == 2 &&
+            Count(messages, "plugin loaded: KeelS2 Source 2 Sample 1.1.0") == 2 &&
             Count(messages, "[KeelS2 Source 2 Sample] ready command=keel_sample") == 2 &&
             Count(messages, "[KeelS2 Source 2 Sample] LevelInit context=complete") == 2 &&
             Count(messages, "[KeelS2 Source 2 Sample] LevelShutdown") == 2 &&
@@ -1825,7 +1828,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Count(messages, "[KeelS2 Source 2 Sample] ClientConnect slot=") == 2 &&
             Count(messages, "[KeelS2 Source 2 Sample] ClientCommand slot=") == 2 &&
             Count(messages, "[KeelS2 Source 2 Sample] caller=") == 14 &&
-            Count(messages, "[KeelS2 Source 2 Sample] ERROR: usage: keel_sample [bump]") == 1 &&
+            Count(messages, "[KeelS2 Source 2 Sample] ERROR: usage: keel_sample [bump|player]") == 1 &&
             Count(messages, "[KeelS2 Source 2 Sample] keels2_sample_int changed") == 14 &&
             Contains(messages, "old=42 new=99") &&
             Contains(messages, "old=99 new=100") &&
@@ -1845,6 +1848,17 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "log formatting failed") &&
             !Contains(messages, "exception escaped a ConVar callback") &&
             !Contains(messages, "plugin threw during a Source 2 callback");
+    }
+    if (scenario == "convar_native_access")
+    {
+        return selected_profile &&
+            Count(messages, "plugin loaded: Native ConVar Provider 1") == 2 &&
+            Count(messages, "plugin loaded: Native ConVar Consumer 1") == 1 &&
+            Count(messages, "plugin unloaded: [01] Native ConVar Provider") == 2 &&
+            Contains(messages, "active native operation") &&
+            Contains(messages, "host stopped") &&
+            !Contains(messages, "plugin load was rejected") &&
+            !Contains(messages, "native resources could not be rolled back");
     }
     if (scenario == "convar_authoring")
     {
@@ -2100,7 +2114,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
 
 int main(int argument_count, char** arguments)
 {
-    if (argument_count != 42)
+    if (argument_count != 44)
     {
         return 1;
     }
@@ -2146,6 +2160,8 @@ int main(int argument_count, char** arguments)
     const std::filesystem::path abi_v4_fixture_source = arguments[39];
     const std::filesystem::path factory_plugin_source = arguments[40];
     const std::filesystem::path fixture = std::filesystem::path(arguments[41]) / scenario;
+    const std::filesystem::path native_convar_provider_source = arguments[42];
+    const std::filesystem::path native_convar_consumer_source = arguments[43];
     const std::filesystem::path shutdown_trace = fixture / "shutdown.trace";
 
 #if defined(_WIN32)
@@ -2194,6 +2210,7 @@ int main(int argument_count, char** arguments)
     const bool convar_failed_load = scenario == "convar_failed_load";
     const bool convar_facade = scenario == "convar_facade";
     const bool convar_authoring = scenario == "convar_authoring";
+    const bool convar_native_access = scenario == "convar_native_access";
     const bool plugin_runtime_service = scenario == "plugin_runtime_service";
     const bool plugin_runtime_concurrency = scenario == "plugin_runtime_concurrency";
     const bool plugin_transition_shutdown_retry =
@@ -2218,7 +2235,7 @@ int main(int argument_count, char** arguments)
         !lifecycle_service &&
         !source2_callbacks &&
         !authoring_concurrency && !convar_service && !convar_failed_load && !convar_facade &&
-        !convar_authoring &&
+        !convar_authoring && !convar_native_access &&
         !plugin_runtime_service && !plugin_runtime_concurrency &&
         !plugin_transition_shutdown_retry && !plugin_dependencies && !published_services &&
         !reload_retry && !abi_v4_compatibility &&
@@ -2280,7 +2297,7 @@ int main(int argument_count, char** arguments)
         schema_entity_fixture.Symbol("KeelTest_ConsoleOutput"));
     const auto reset_console = reinterpret_cast<SchemaEntityVoidFunction>(
         schema_entity_fixture.Symbol("KeelTest_ResetConsoleOutput"));
-    if (client_console)
+    if (client_console || convar_facade)
     {
         if (!console_engine || !console_output || !reset_console ||
             !(g_client_console_engine = console_engine()))
@@ -2421,6 +2438,10 @@ int main(int argument_count, char** arguments)
         plugin_directory / (std::string("01_convar_service") + plugin_extension);
     const auto convar_facade_plugin_path =
         plugin_directory / (std::string("01_convar_facade") + plugin_extension);
+    const auto native_convar_provider_path =
+        plugin_directory / (std::string("01_native_convar_provider") + plugin_extension);
+    const auto native_convar_consumer_path =
+        plugin_directory / (std::string("02_native_convar_consumer") + plugin_extension);
     const auto convar_authoring_plugin_path =
         plugin_directory / (std::string("01_convar_authoring") + plugin_extension);
     const auto plugin_runtime_service_path =
@@ -2559,6 +2580,12 @@ int main(int argument_count, char** arguments)
     if (convar_facade && !CopyFile(convar_facade_source, convar_facade_plugin_path))
     {
         return 92;
+    }
+    if (convar_native_access &&
+        (!CopyFile(native_convar_provider_source, native_convar_provider_path) ||
+         !CopyFile(native_convar_consumer_source, native_convar_consumer_path)))
+    {
+        return 135;
     }
     if (convar_authoring &&
         !CopyFile(convar_authoring_source, convar_authoring_plugin_path))
@@ -2742,7 +2769,7 @@ int main(int argument_count, char** arguments)
     Source2CountFunction game_event_remove_count{};
     Source2BoolFunction game_event_listener_active{};
     if (lifecycle_service || lifecycle_failed_load || authoring_concurrency ||
-        source2_callbacks || convar_facade || schema_entity_service)
+        source2_callbacks || convar_facade || schema_entity_service || source2_service)
     {
         if (!lifecycle_fixture.Open(real_server_path, loader_error))
         {
@@ -2954,7 +2981,7 @@ int main(int argument_count, char** arguments)
             !ContainsInOrder(plugins.c_str(), "[01] KeelS2 Basic (1.0.0) by KeelS2 Project",
                 "[02] Lifecycle First") ||
             !ContainsInOrder(plugins.c_str(), "[02] Lifecycle First", "[03] Lifecycle Second") ||
-            !Contains(version.c_str(), "KeelS2 1.0.0\nBuilt: ") ||
+            !Contains(version.c_str(), "KeelS2 1.1.0\nBuilt: ") ||
             !Contains(version.c_str(), " UTC\nGit revision: ") ||
             !Contains(version.c_str(), "/x86_64\nPlugin ABI: 4\n") ||
             !Contains(credits.c_str(), "Created and developed by Peter Brev") ||
@@ -3405,8 +3432,38 @@ int main(int argument_count, char** arguments)
     }
     if (source2_service)
     {
-        if (!g_cvar.Dispatch({"s2_check", "0"}) ||
-            !g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
+        const auto set_player = reinterpret_cast<void (*)(int, int, std::uint64_t, bool)>(
+            schema_entity_fixture.Symbol("KeelTest_SetPlayer"));
+        const auto connected = reinterpret_cast<void (*)(std::int32_t)>(
+            lifecycle_fixture.Symbol("KeelTest_PlayerConnected"));
+        const auto disconnecting = reinterpret_cast<void (*)(std::int32_t)>(
+            lifecycle_fixture.Symbol("KeelTest_PlayerDisconnecting"));
+        if (!set_player || !connected || !disconnecting || !console_engine ||
+            !g_cvar.Dispatch({"s2_check", "0"}))
+        {
+            return 44;
+        }
+        g_client_console_engine = console_engine();
+        set_player(3, 4301, 0, false);
+        g_cvar.Dispatch({"s2_check", "players", "late"});
+        g_cvar.Dispatch({"s2_check", "players", "native"});
+        if (!console_output || std::strcmp(console_output(3), "100% {literal}; quit\n") != 0)
+        {
+            return 44;
+        }
+        set_player(3, 4301, 76561198000000004ull, false);
+        g_cvar.Dispatch({"s2_check", "players", "auth"});
+        disconnecting(3);
+        g_cvar.Dispatch({"s2_check", "players", "disconnect"});
+        set_player(3, 4301, 0, false);
+        connected(3);
+        g_cvar.Dispatch({"s2_check", "players", "reconnect"});
+        set_player(3, 9003, 0, false);
+        g_cvar.Dispatch({"s2_check", "players", "reuse"});
+        set_player(3, 9003, 0, true);
+        g_cvar.Dispatch({"s2_check", "players", "throw"});
+        set_player(3, 9003, 0, false);
+        if (!g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
             g_cvar.HasActive("s2_check") || g_cvar.ActiveCount() != 1 ||
             g_cvar.unregister_count != 1)
         {
@@ -4355,6 +4412,129 @@ int main(int argument_count, char** arguments)
             return 91;
         }
     }
+    if (convar_native_access)
+    {
+        keels2::platform::DynamicLibrary provider;
+        keels2::platform::DynamicLibrary consumer;
+        if (!provider.Open(RuntimePluginPath(plugin_directory, native_convar_provider_path), loader_error) ||
+            !consumer.Open(RuntimePluginPath(plugin_directory, native_convar_consumer_path), loader_error))
+        {
+            return 160;
+        }
+        using Access = KeelResult (*)(void (*)(void*), void*, std::int32_t*);
+        using Read = KeelResult (*)(std::int32_t*);
+        using Throw = KeelResult (*)();
+        using Remove = bool (*)();
+        using Unloads = std::uint32_t (*)();
+        const auto access = reinterpret_cast<Access>(consumer.Symbol("KeelTest_NativeConVarAccess"));
+        const auto read = reinterpret_cast<Read>(consumer.Symbol("KeelTest_NativeConVarAbstract"));
+        const auto throwing = reinterpret_cast<Throw>(consumer.Symbol("KeelTest_NativeConVarThrow"));
+        auto provider_remove = reinterpret_cast<Remove>(provider.Symbol("KeelTest_NativeConVarRemove"));
+        const auto consumer_remove = reinterpret_cast<Remove>(consumer.Symbol("KeelTest_NativeConVarRemove"));
+        const auto refresh = reinterpret_cast<Remove>(consumer.Symbol("KeelTest_NativeConVarRefresh"));
+        const auto provider_unloads = reinterpret_cast<Unloads>(provider.Symbol("KeelTest_NativeConVarUnloads"));
+        const auto consumer_unloads = reinterpret_cast<Unloads>(consumer.Symbol("KeelTest_NativeConVarUnloads"));
+        std::int32_t observed = -1;
+        if (!access || !read || !throwing || !provider_remove || !consumer_remove || !refresh ||
+            !provider_unloads || !consumer_unloads ||
+            read(&observed) != KEEL_RESULT_OK || observed != 7 ||
+            access(nullptr, nullptr, &observed) != KEEL_RESULT_OK || observed != 23 ||
+            read(&observed) != KEEL_RESULT_OK || observed != 7)
+        {
+            std::fputs(messages(), stderr);
+            return 161;
+        }
+        struct DuringAccess
+        {
+            Remove provider_remove;
+            Remove consumer_remove;
+            bool valid{};
+        } during{provider_remove, consumer_remove};
+        if (access([](void* context) {
+                auto& check = *static_cast<DuringAccess*>(context);
+                check.valid = !check.provider_remove() && !check.consumer_remove() &&
+                    g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) &&
+                    g_cvar.Dispatch({"keel", "plugins", "unload", "2"});
+            }, &during, &observed) != KEEL_RESULT_OK || observed != 23 || !during.valid ||
+            provider_unloads() != 0 || consumer_unloads() != 0 ||
+            g_cvar.convar_unregister_count != 0 ||
+            read(&observed) != KEEL_RESULT_OK || observed != 7 ||
+            throwing() != KEEL_RESULT_ENGINE_FAILURE ||
+            access(nullptr, nullptr, &observed) != KEEL_RESULT_OK || observed != 23)
+        {
+            std::fputs(messages(), stderr);
+            return 162;
+        }
+        observed = -1;
+        KeelResult worker_result = KEEL_RESULT_OK;
+        std::thread worker([&] { worker_result = access(nullptr, nullptr, &observed); });
+        worker.join();
+        if (worker_result != KEEL_RESULT_WRONG_THREAD || observed != -1 ||
+            !g_cvar.Dispatch({"keel", "plugins", "pause", "1"}) ||
+            read(&observed) != KEEL_RESULT_NOT_READY || observed != -1 ||
+            !g_cvar.Dispatch({"keel", "plugins", "resume", "1"}) ||
+            read(&observed) != KEEL_RESULT_OK || observed != 7)
+        {
+            std::fputs(messages(), stderr);
+            return 163;
+        }
+        struct DuringRelease
+        {
+            Remove remove;
+            Read read;
+            std::thread worker{};
+            std::atomic<bool> finished{};
+            bool removed{};
+            bool waited{};
+        } release{provider_remove, read};
+        const KeelResult raced = access([](void* context) {
+            auto& check = *static_cast<DuringRelease*>(context);
+            check.worker = std::thread([&check] {
+                check.removed = check.remove();
+                check.finished.store(true, std::memory_order_release);
+            });
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+            while (std::chrono::steady_clock::now() < deadline)
+            {
+                std::int32_t current = -1;
+                if (check.read(&current) == KEEL_RESULT_NOT_FOUND)
+                {
+                    check.waited = current == -1 && !check.finished.load(std::memory_order_acquire);
+                    break;
+                }
+                std::this_thread::yield();
+            }
+        }, &release, &observed);
+        if (release.worker.joinable())
+        {
+            release.worker.join();
+        }
+        if (raced != KEEL_RESULT_OK || observed != 23 || !release.waited || !release.removed ||
+            g_cvar.convar_unregister_count != 1)
+        {
+            std::fputs(messages(), stderr);
+            return 166;
+        }
+        observed = -1;
+        if (read(&observed) != KEEL_RESULT_NOT_FOUND || observed != -1 ||
+            !g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) || provider_unloads() != 1 ||
+            read(&observed) != KEEL_RESULT_NOT_FOUND || observed != -1)
+        {
+            std::fputs(messages(), stderr);
+            return 164;
+        }
+        provider.Close();
+        if (!g_cvar.Dispatch({"keel", "plugins", "load", "01_native_convar_provider"}) ||
+            read(&observed) != KEEL_RESULT_NOT_FOUND || observed != -1 ||
+            !refresh() || read(&observed) != KEEL_RESULT_OK || observed != 7 ||
+            !g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) || consumer_unloads() != 1 ||
+            access(nullptr, nullptr, &observed) != KEEL_RESULT_NOT_READY)
+        {
+            std::fputs(messages(), stderr);
+            return 165;
+        }
+        consumer.Close();
+    }
     if (convar_authoring)
     {
         keels2::platform::DynamicLibrary authoring_plugin;
@@ -4525,6 +4705,23 @@ int main(int argument_count, char** arguments)
     }
     if (convar_facade)
     {
+        const auto set_player = reinterpret_cast<void (*)(int, int, std::uint64_t, bool)>(
+            schema_entity_fixture.Symbol("KeelTest_SetPlayer"));
+        if (!set_player || !reset_console || !console_output)
+        {
+            return 93;
+        }
+        reset_console();
+        set_player(3, 4301, 76561198000000004ull, false);
+        if (!g_cvar.Dispatch({"keel_sample", "player"}, 3) ||
+            std::strcmp(console_output(3), "#4301 Late player | team=0 authenticated=1\n") != 0 ||
+            !Contains(messages(), "player chat output is unavailable") ||
+            !g_cvar.Dispatch({"keel_sample", "player"}) ||
+            !Contains(messages(), "keel_sample player requires a current connected client"))
+        {
+            std::fputs(messages(), stderr);
+            return 93;
+        }
         std::int32_t integer_value{};
         float floating_value{};
         if (g_cvar.convar_register_count != 2 || g_cvar.convar_unregister_count != 0 ||
@@ -4690,7 +4887,7 @@ int main(int argument_count, char** arguments)
             floating_value != 4.0F || g_cvar.convar_filter_count != 24 ||
             Count(messages(), "[KeelS2 Source 2 Sample] caller=") != 13 ||
             !g_cvar.Dispatch({"keel_sample", "invalid"}) ||
-            !Contains(messages(), "usage: keel_sample [bump]") ||
+            !Contains(messages(), "usage: keel_sample [bump|player]") ||
             !g_cvar.Dispatch({"keel_sample", "bump"}) ||
             !g_cvar.ReadInt32("keels2_sample_int", integer_value) || integer_value != 10 ||
             !g_cvar.ReadFloat32("keels2_sample_float", floating_value) ||
@@ -4985,7 +5182,7 @@ int main(int argument_count, char** arguments)
             stdout);
         std::fputc('\n', stdout);
     }
-    if (convar_service || convar_failed_load || convar_facade || convar_authoring)
+    if (convar_service || convar_failed_load || convar_facade || convar_authoring || convar_native_access)
     {
         g_cvar.Reset();
         if (EngineOutstandingAllocationCount() != 0 ||

@@ -4,6 +4,7 @@
 #include <keels2/plugin.h>
 #include <keels2/schema.h>
 #include <keels2/player_actions.h>
+#include <keels2/players.h>
 
 #include <stdint.h>
 
@@ -84,6 +85,13 @@ KeelResult KeelCs2_FindUserMessage(
     void* network_messages,
     const char* name,
     uint32_t* message_id);
+
+KeelResult KeelCs2_PrintChat(void* engine_server, void* network_messages,
+    void* game_events, int32_t slot, KeelBool broadcast, const char* text);
+
+uint32_t KeelCs2_PlayerCapacity(void);
+KeelResult KeelCs2_ReadPlayer(void* engine_server, void* entity_system,
+    void* schema_system, const char* module, int32_t slot, KeelPlayerInfo* player);
 
 #ifdef __cplusplus
 }

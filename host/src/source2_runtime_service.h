@@ -2,6 +2,7 @@
 #define KEELS2_HOST_SOURCE2_RUNTIME_SERVICE_H
 
 #include <keels2/source2_runtime.h>
+#include <keels2/native_runtime.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -21,8 +22,14 @@ public:
     Source2RuntimeService& operator=(const Source2RuntimeService&) = delete;
 
     const KeelSource2RuntimeApi& Api() const noexcept;
+    const KeelNativeRuntimeApi& NativeApi() const noexcept;
 
 private:
+    static KeelResult CheckGameThreadEntry(KeelPluginHandle plugin);
+    static KeelResult ConsoleEntry(KeelPluginHandle plugin, std::int32_t slot, const char* text);
+    static KeelResult ChatEntry(KeelPluginHandle plugin, std::int32_t slot, const char* text);
+    static KeelResult BroadcastEntry(KeelPluginHandle plugin, const char* text);
+    static KeelResult NativeRequest(KeelPluginHandle plugin, std::int32_t slot, const char* text, unsigned operation);
     static KeelResult ServerCommandEntry(KeelPluginHandle plugin, const char* command);
     static KeelResult ClientConsolePrintEntry(
         KeelPluginHandle plugin,
@@ -48,6 +55,7 @@ private:
     Host& host_;
     GameAdapter& adapter_;
     KeelSource2RuntimeApi api_{};
+    KeelNativeRuntimeApi native_api_{};
 
     static Source2RuntimeService* active_;
 };

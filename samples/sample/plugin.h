@@ -1,7 +1,9 @@
 #ifndef KEELS2_SAMPLE_PLUGIN_H
 #define KEELS2_SAMPLE_PLUGIN_H
 
-#include <keels2/keels2.hpp>
+#include <keels2/authoring.hpp>
+
+using keels2::authoring::PlayerInfo;
 
 class SamplePlugin final : public keels2::Plugin
 {
@@ -9,8 +11,8 @@ public:
     static constexpr keels2::PluginInfo Info{
         "KeelS2 Source 2 Sample",
         "KeelS2 Project",
-        "1.0.0",
-        "Source 2 lifecycle, commands, events, and ConVars"
+        "1.1.0",
+        "Source 2 lifecycle, players, text, commands, events, and ConVars"
     };
 
     bool Load() override;
@@ -75,6 +77,8 @@ private:
     void Command(
         const CCommandContext& context,
         const CCommand& command);
+
+    void DescribePlayer(CPlayerSlot slot);
 
     void IntegerChanged(
         ConVar<int>& convar,

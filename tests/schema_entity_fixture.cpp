@@ -5,6 +5,8 @@
 #include <entity2/entityinstance.h>
 #include <entity2/entitysystem.h>
 #include <schemasystem/schemasystem.h>
+#include <google/protobuf/message.h>
+#include <steam/steamclientpublic.h>
 
 #if defined(KEELS2_SCHEMA_FIXTURE_NATIVE_TEST)
 #include <keels2/cs2/native_bridge.h>
@@ -17,6 +19,7 @@
 #include <mutex>
 #include <limits>
 #include <string>
+#include <stdexcept>
 #include <vector>
 
 #if defined(_WIN32)
@@ -898,6 +901,43 @@ std::mutex g_console_mutex;
 std::vector<std::pair<int, std::string>> g_console_lines;
 std::array<void*, 256> g_console_vtable{};
 RawInterface g_console_engine{g_console_vtable.data()};
+int g_player_slot{-1};
+int g_player_user{-1};
+CSteamID g_player_identity;
+bool g_player_throw{};
+
+bool PlayerInfo(void*, CPlayerSlot slot, google::protobuf::Message& info)
+{
+    if (g_player_throw)
+    {
+        throw std::runtime_error("player fixture failure");
+    }
+    if (slot.Get() != g_player_slot)
+    {
+        return false;
+    }
+    const auto* descriptor = info.GetDescriptor();
+    const auto* reflection = info.GetReflection();
+    reflection->SetString(&info, descriptor->FindFieldByName("name"), "Late player");
+    reflection->SetBool(&info, descriptor->FindFieldByName("fakeplayer"), false);
+    reflection->SetBool(&info, descriptor->FindFieldByName("ishltv"), false);
+    return true;
+}
+
+CPlayerUserId PlayerUser(void*, CPlayerSlot slot)
+{
+    return CPlayerUserId(slot.Get() == g_player_slot ? g_player_user : -1);
+}
+
+bool PlayerAuthenticated(void*, CPlayerSlot slot)
+{
+    return slot.Get() == g_player_slot && g_player_identity.ConvertToUint64() != 0;
+}
+
+const CSteamID* PlayerIdentity(void*, CPlayerSlot slot)
+{
+    return slot.Get() == g_player_slot ? &g_player_identity : nullptr;
+}
 
 void ConsolePrint(void*, CPlayerSlot slot, const char* message)
 {
@@ -909,13 +949,32 @@ void ConsolePrint(void*, CPlayerSlot slot, const char* message)
 extern "C" KEELS2_SCHEMA_FIXTURE_EXPORT void* KeelTest_ConsoleEngine()
 {
     const auto index = keels2::kh::VirtualIndex<&IVEngineServer2::ClientPrintf>();
-    if (!index || *index >= g_console_vtable.size())
+    const auto info = keels2::kh::VirtualIndex<&IVEngineServer2::GetPlayerInfo>();
+    const auto user = keels2::kh::VirtualIndex<&IVEngineServer2::GetPlayerUserId>();
+    const auto auth = keels2::kh::VirtualIndex<&IVEngineServer2::IsClientFullyAuthenticated>();
+    const auto identity = keels2::kh::VirtualIndex<&IVEngineServer2::GetClientSteamID>();
+    if (!index || !info || !user || !auth || !identity || *index >= g_console_vtable.size() ||
+        *info >= g_console_vtable.size() || *user >= g_console_vtable.size() ||
+        *auth >= g_console_vtable.size() || *identity >= g_console_vtable.size())
     {
         return nullptr;
     }
     g_console_vtable[0] = FunctionAddress(&ValidationSlot);
     g_console_vtable[*index] = FunctionAddress(&ConsolePrint);
+    g_console_vtable[*info] = FunctionAddress(&PlayerInfo);
+    g_console_vtable[*user] = FunctionAddress(&PlayerUser);
+    g_console_vtable[*auth] = FunctionAddress(&PlayerAuthenticated);
+    g_console_vtable[*identity] = FunctionAddress(&PlayerIdentity);
     return &g_console_engine;
+}
+
+extern "C" KEELS2_SCHEMA_FIXTURE_EXPORT void KeelTest_SetPlayer(int slot, int user,
+    std::uint64_t identity, bool fail)
+{
+    g_player_slot = slot;
+    g_player_user = user;
+    g_player_identity.SetFromUint64(identity);
+    g_player_throw = fail;
 }
 
 extern "C" KEELS2_SCHEMA_FIXTURE_EXPORT const char* KeelTest_ConsoleOutput(int slot)

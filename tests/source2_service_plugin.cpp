@@ -4,6 +4,10 @@
 #include <keels2/platform/dynamic_library.h>
 #include <keels2/source2_runtime.hpp>
 
+#if !defined(KEELS2_SOURCE2_LIVE)
+#include "player_service_contract.h"
+#endif
+
 #include <array>
 #include <charconv>
 #include <cstring>
@@ -70,6 +74,12 @@ public:
 
     void Unload(keels2::Context& context) noexcept override
     {
+#if !defined(KEELS2_SOURCE2_LIVE)
+        if (!players_.Unloaded(context.PluginHandle()))
+        {
+            context.Log(KEEL_LOG_ERROR, "player service teardown failed");
+        }
+#endif
         const bool invalidated = !service_ && !server_ && !game_clients_ && !cvar_ &&
             !named_engine_ && !named_server_ && !named_filesystem_ && !named_physics_ &&
             !named_network_ && !named_server_service_ && !runtime_ && !command_ && !factories_;
@@ -600,6 +610,15 @@ private:
         {
             return;
         }
+#if !defined(KEELS2_SOURCE2_LIVE)
+        if (invocation.Size() == 2 && std::strcmp(invocation[0], "players") == 0)
+        {
+            const bool passed = players_.Check(*context_, invocation[1]);
+            context_->Log(passed ? KEEL_LOG_INFO : KEEL_LOG_ERROR,
+                passed ? "player service contract passed {}" : "player service contract failed {}", invocation[1]);
+            return;
+        }
+#endif
         if (invocation.Size() == 1 && std::strcmp(invocation[0], "factories") == 0)
         {
             if (!ValidateFactories())
@@ -663,6 +682,9 @@ private:
     }
 
     keels2::Context* context_{};
+#if !defined(KEELS2_SOURCE2_LIVE)
+    PlayerServiceContract players_;
+#endif
     keels2::factories::Service factories_;
     KeelFactorySubscriptionHandle factory_engine_{};
     KeelFactorySubscriptionHandle factory_server_{};

@@ -4,11 +4,40 @@
 #include <keels2/keelhook.hpp>
 #include <keels2/source2_sdk.hpp>
 
+#include <bit>
 #include <cstdint>
 #include <type_traits>
 
 namespace keels2::kh
 {
+
+template <>
+struct ValueAdapter<ConCommandRef>
+{
+    static_assert(sizeof(ConCommandRef) == sizeof(std::uint64_t));
+    static_assert(alignof(ConCommandRef) == alignof(std::int32_t));
+    static_assert(std::is_standard_layout_v<ConCommandRef>);
+    static_assert(std::is_trivially_copyable_v<ConCommandRef>);
+
+    static constexpr KeelHookValueType type = KH_VALUE_UINT64;
+
+    static ConCommandRef Read(const KeelHookValue& value) noexcept
+    {
+        return std::bit_cast<ConCommandRef>(value.scalar.uint64);
+    }
+
+    static ConCommandRef Fallback() noexcept
+    {
+        return {};
+    }
+
+    static bool Write(KeelHookValue& value, const ConCommandRef& input) noexcept
+    {
+        value.scalar.uint64 = std::bit_cast<std::uint64_t>(input);
+        value.reserved = 0;
+        return true;
+    }
+};
 
 template <>
 struct ValueAdapter<CPlayerSlot>

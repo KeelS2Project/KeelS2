@@ -1563,6 +1563,54 @@ public:
         return KEEL_RESULT_OK;
     }
 
+    KeelResult PrintChat(std::int32_t slot, KeelBool broadcast, const char* text)
+    {
+        if (!OnMainThread())
+        {
+            return KEEL_RESULT_WRONG_THREAD;
+        }
+        KeelSource2InterfaceInfo engine{};
+        KeelSource2InterfaceInfo messages{};
+        KeelSource2InterfaceInfo events{};
+        KeelResult result = QueryNamedInterface(KEELS2_SOURCE2_FACTORY_ENGINE, "Source2EngineToServer001", engine);
+        if (result == KEEL_RESULT_OK)
+        {
+            result = QueryNamedInterface(KEELS2_SOURCE2_FACTORY_NETWORK, "NetworkMessagesVersion001", messages);
+        }
+        if (result == KEEL_RESULT_OK)
+        {
+            result = QueryNamedInterface(KEELS2_SOURCE2_FACTORY_ENGINE, "GameEventSystemServerV001", events);
+        }
+        return result == KEEL_RESULT_OK ? KeelCs2_PrintChat(engine.instance, messages.instance, events.instance,
+            slot, broadcast, text) : result;
+    }
+
+    KeelResult ReadPlayer(std::int32_t slot, KeelPlayerInfo& player)
+    {
+        if (!OnMainThread())
+        {
+            return KEEL_RESULT_WRONG_THREAD;
+        }
+        KeelSource2InterfaceInfo engine{};
+        const KeelResult query = QueryNamedInterface(
+            KEELS2_SOURCE2_FACTORY_ENGINE, "Source2EngineToServer001", engine);
+        if (query != KEEL_RESULT_OK)
+        {
+            return query;
+        }
+        void* entities{};
+        std::string error;
+        {
+            std::scoped_lock lock(schema_entity_mutex_);
+            if (CurrentEntitySystemLocked(entities, error) != KEEL_RESULT_OK)
+            {
+                entities = nullptr;
+            }
+        }
+        return KeelCs2_ReadPlayer(engine.instance, entities, schema_system_.instance,
+            schema_server_module_.c_str(), slot, &player);
+    }
+
     KeelResult PlayerAction(const GameEntityIdentity& entity, const KeelPlayerAction& action)
     {
         if (!OnMainThread())
@@ -3414,4 +3462,77 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_PlayerAction(
         return KEEL_RESULT_INVALID_ARGUMENT;
     try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->PlayerAction(*entity, *action); }
     catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayers(
+    std::uint32_t version, keels2::host::GameAdapterPlayersApi* api) noexcept
+{
+    if (!api || api->size != sizeof(*api))
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    *api = {};
+    if (version != keels2::host::kGameAdapterPlayersVersion)
+    {
+        return KEEL_RESULT_INCOMPATIBLE;
+    }
+    api->size = sizeof(*api);
+    api->api_version = version;
+    api->capacity = []() noexcept { return KeelCs2_PlayerCapacity(); };
+    api->read = [](keels2::host::GameAdapter* adapter, std::int32_t slot, KeelPlayerInfo* player) noexcept {
+        if (!player)
+        {
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+        *player = {};
+        player->size = sizeof(*player);
+        player->slot = -1;
+        player->user_id = -1;
+        player->controller_handle = UINT32_MAX;
+        player->pawn_handle = UINT32_MAX;
+        if (!adapter)
+        {
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->ReadPlayer(slot, *player);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
+    };
+    return KEEL_RESULT_OK;
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryMessaging(
+    std::uint32_t version, keels2::host::GameAdapterMessagingApi* api) noexcept
+{
+    if (!api || api->size != sizeof(*api))
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    *api = {};
+    if (version != keels2::host::kGameAdapterMessagingVersion)
+    {
+        return KEEL_RESULT_INCOMPATIBLE;
+    }
+    api->size = sizeof(*api);
+    api->api_version = version;
+    api->chat = [](keels2::host::GameAdapter* adapter, std::int32_t slot, KeelBool broadcast, const char* text) noexcept {
+        if (!adapter)
+        {
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->PrintChat(slot, broadcast, text);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
+    };
+    return KEEL_RESULT_OK;
 }

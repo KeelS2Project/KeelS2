@@ -47,6 +47,7 @@ private:
 class CUtlString
 {
 public:
+    KEELS2_FAKE_TIER0_EXPORT int Format(const char* format, ...);
     KEELS2_FAKE_TIER0_EXPORT void Set(const char* value);
     KEELS2_FAKE_TIER0_EXPORT void SetDirect(const char* value, int length);
     KEELS2_FAKE_TIER0_EXPORT void Purge();
@@ -179,6 +180,27 @@ const char* CBufferString::AppendFormat(const char* format, ...)
     return (allocated_size_ & (1 << 30)) != 0
         ? storage_.local_
         : storage_.pointer_;
+}
+
+int CUtlString::Format(const char* format, ...)
+{
+    std::va_list arguments;
+    va_start(arguments, format);
+    std::va_list measure;
+    va_copy(measure, arguments);
+    const int length = format ? std::vsnprintf(nullptr, 0, format, measure) : -1;
+    va_end(measure);
+    if (length < 0)
+    {
+        va_end(arguments);
+        Purge();
+        return length;
+    }
+    std::string text(static_cast<std::size_t>(length) + 1, '\0');
+    std::vsnprintf(text.data(), text.size(), format, arguments);
+    va_end(arguments);
+    SetDirect(text.data(), length);
+    return length;
 }
 
 void CUtlString::Set(const char* value)

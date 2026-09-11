@@ -511,6 +511,7 @@ PluginRecord* Host::StartPlugin(
             Write(KEEL_LOG_ERROR, "native resources could not be rolled back: " + record->name);
             return record;
         }
+        record->unload_callback_active = true;
         state_lock.unlock();
         try
         {
@@ -520,6 +521,7 @@ PluginRecord* Host::StartPlugin(
         {
         }
         state_lock.lock();
+        record->unload_callback_active = false;
         if (record->diagnostic.empty())
         {
             record->diagnostic = "load callback rejected startup";
@@ -613,9 +615,9 @@ bool Host::PluginCommandActive(KeelPluginHandle owner) const
 
 bool Host::HasRunningDependent(const PluginRecord& plugin, std::string& dependent) const
 {
-    if (plugin.active_entity_actions)
+    if (plugin.active_native_operations)
     {
-        dependent = "active native entity action";
+        dependent = "active native operation";
         return true;
     }
     if (PluginCommandActive(plugin.handle))
@@ -1008,6 +1010,7 @@ bool Host::UnloadPluginCommand(
     RemoveCommandsOwnedBy(handle);
     if (plugin->unload)
     {
+        plugin->unload_callback_active = true;
         state_lock.unlock();
         try
         {
@@ -1018,6 +1021,7 @@ bool Host::UnloadPluginCommand(
             Write(KEEL_LOG_ERROR, "plugin threw during unload: " + name);
         }
         state_lock.lock();
+        plugin->unload_callback_active = false;
     }
     plugin->load = nullptr;
     plugin->unload = nullptr;
