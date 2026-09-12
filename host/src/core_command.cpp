@@ -39,14 +39,29 @@ std::vector<std::string> CreditLines()
 
 bool Host::DeferPluginCommand(std::string_view operation, std::string_view selector)
 {
-    if (dispatching_deferred_plugin_commands_ || !lifecycle_ ||
-        !lifecycle_->GameFrameInstalled() || !keelhook_)
+    if (dispatching_deferred_plugin_commands_ || !keelhook_)
         return false;
     PluginRecord* plugin = SelectPlugin(selector);
     if (!plugin)
         return true;
     if (!keelhook_->OnCurrentTarget(plugin->handle))
         return false;
+    if (!lifecycle_)
+    {
+        const void* service{};
+        const KeelResult connected = QueryService(plugin->handle,
+            KEELS2_LIFECYCLE_SERVICE_NAME, KEELS2_LIFECYCLE_API_VERSION, &service);
+        if (connected != KEEL_RESULT_OK)
+        {
+            Write(KEEL_LOG_ERROR, "plugin command could not connect to the lifecycle service");
+            return true;
+        }
+    }
+    if (lifecycle_->EnsureEvent(KEELS2_LIFECYCLE_GAME_FRAME) != KEEL_RESULT_OK)
+    {
+        Write(KEEL_LOG_ERROR, "plugin command could not install the deferred game-frame dispatch");
+        return true;
+    }
     if (deferred_plugin_commands_.size() >= 32)
     {
         Write(KEEL_LOG_ERROR, "deferred plugin command queue is full");

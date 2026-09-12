@@ -1,4 +1,5 @@
 #include "convar_service.h"
+#include "game_adapter_loader.h"
 
 #include "host.h"
 
@@ -142,6 +143,9 @@ ConVarService::ConVarService(Host& host, GameAdapter& adapter)
     {
         throw std::runtime_error("ConVar service already exists");
     }
+    observe_api_.size = sizeof(observe_api_);
+    observe_api_.api_version = KEELS2_CONVAR_OBSERVE_API_VERSION;
+    observe_api_.observe = &ObserveEntry;
     access_api_ = {sizeof(KeelConVarAccessApi), KEELS2_CONVAR_ACCESS_API_VERSION, &InvokeEntry};
     api_ = {
         sizeof(KeelConVarApi),
@@ -169,6 +173,100 @@ const KeelConVarApi& ConVarService::Api() const noexcept
 const KeelConVarAccessApi& ConVarService::AccessApi() const noexcept
 {
     return access_api_;
+}
+
+const KeelConVarObserveApi& ConVarService::ObserveApi() const noexcept
+{
+    return observe_api_;
+}
+
+KeelResult ConVarService::ObserveEntry(KeelPluginHandle plugin, KeelConVarHandle convar,
+    KeelConVarChangeCallback callback, void* user_data)
+{
+    if (!convar || !callback)
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    try
+    {
+        Host& host = Host::Instance();
+        std::unique_lock lock(host.state_mutex_);
+        auto* service = host.convars_.get();
+        auto* owner = host.PluginByHandle(plugin);
+        if (!service || !host.adapter_module_ || !host.accepting_resources_ || !owner || !owner->accepting_resources)
+        {
+            return KEEL_RESULT_NOT_READY;
+        }
+        if (!service->adapter_.IsGameThread())
+        {
+            return KEEL_RESULT_WRONG_THREAD;
+        }
+        const auto record = service->OwnedRecord(plugin, convar);
+        if (!record || record->release_state.load(std::memory_order_acquire))
+        {
+            return KEEL_RESULT_NOT_FOUND;
+        }
+        if (record->callback || record->native_callback)
+        {
+            return KEEL_RESULT_ALREADY_EXISTS;
+        }
+        record->callback = callback;
+        record->user_data = user_data;
+        const KeelResult result = host.adapter_module_->ObserveConVar(
+            record->game_handle, &ObservedEntry, record.get());
+        if (result != KEEL_RESULT_OK)
+        {
+            record->callback = nullptr;
+            record->user_data = nullptr;
+        }
+        return result;
+    }
+    catch (...)
+    {
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+}
+
+void ConVarService::ObservedEntry(std::int32_t slot, const KeelConVarValue& current,
+    const KeelConVarValue& previous, void* user_data)
+{
+    auto* record = static_cast<Record*>(user_data);
+    if (!record || !record->enabled.load(std::memory_order_acquire))
+    {
+        return;
+    }
+    try
+    {
+        KeelConVarChange change{};
+        change.size = sizeof(change);
+        change.slot = slot;
+        change.convar = record->handle;
+        change.name = record->name.c_str();
+        change.old_value = previous;
+        change.new_value = current;
+        struct Notification
+        {
+            Record* record;
+            KeelConVarChange* change;
+        } notification;
+        notification.record = record;
+        notification.change = &change;
+        std::unique_lock lock(record->service->host_.state_mutex_);
+        const KeelResult result = record->service->Invoke(record->owner, record->handle,
+            [](const void*, void* context) -> KeelResult {
+                const auto& pending = *static_cast<Notification*>(context);
+                pending.record->callback(pending.change, pending.record->user_data);
+                return KEEL_RESULT_OK;
+            }, &notification, lock);
+        if (result == KEEL_RESULT_ENGINE_FAILURE)
+        {
+            record->service->host_.Write(KEEL_LOG_ERROR, "plugin threw during a ConVar observer callback");
+        }
+    }
+    catch (...)
+    {
+        record->service->host_.Write(KEEL_LOG_ERROR, "exception while delivering a ConVar observer callback");
+    }
 }
 
 KeelResult ConVarService::InvokeEntry(KeelPluginHandle plugin, KeelConVarHandle convar,
@@ -638,6 +736,11 @@ KeelResult ConVarService::CreateImpl(
         return KEEL_RESULT_NOT_READY;
     }
 
+    if (!adapter_.IsGameThread())
+    {
+        return KEEL_RESULT_WRONG_THREAD;
+    }
+
     std::scoped_lock registry_lock(registry_mutex_);
     if (shutting_down_)
     {
@@ -800,6 +903,11 @@ KeelResult ConVarService::FindImpl(
     if (!host_.accepting_resources_ || !owner || !owner->accepting_resources)
     {
         return KEEL_RESULT_NOT_READY;
+    }
+
+    if (!adapter_.IsGameThread())
+    {
+        return KEEL_RESULT_WRONG_THREAD;
     }
 
     std::scoped_lock registry_lock(registry_mutex_);

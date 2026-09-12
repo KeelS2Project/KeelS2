@@ -243,6 +243,20 @@ struct GameAdapterMessagingApi
 using GameAdapterQueryMessagingFn = KeelResult (*)(
     std::uint32_t version, GameAdapterMessagingApi* api) noexcept;
 
+inline constexpr const char* kGameAdapterConVarObserversSymbol = "KeelGameAdapter_QueryConVarObservers";
+inline constexpr std::uint32_t kGameAdapterConVarObserversVersion = 1;
+
+struct GameAdapterConVarObserversApi
+{
+    std::uint32_t size;
+    std::uint32_t api_version;
+    KeelResult (*observe)(GameAdapter* adapter, GameConVarHandle convar,
+        GameConVarCallback callback, void* user_data) noexcept;
+};
+
+using GameAdapterQueryConVarObserversFn = KeelResult (*)(
+    std::uint32_t version, GameAdapterConVarObserversApi* api) noexcept;
+
 
 struct GameAdapterProvider
 {

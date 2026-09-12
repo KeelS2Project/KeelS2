@@ -328,6 +328,7 @@ def sdk_entries() -> tuple[str, ...]:
         "KeelS2/SDK/include/keels2/players.hpp",
         "KeelS2/SDK/include/keels2/native_runtime.h",
         "KeelS2/SDK/include/keels2/convar_access.h",
+        "KeelS2/SDK/include/keels2/convar_observe.h",
         "KeelS2/SDK/include/keels2/native_runtime.hpp",
         "KeelS2/SDK/include/keels2/lifecycle.h",
         "KeelS2/SDK/include/keels2/player_actions.h",

@@ -1,5 +1,6 @@
 #include <keels2/bootstrap_api.h>
 #include <keels2/convar.h>
+#include <keels2/convar_observe.h>
 #include <keels2/cs2/cvar_abi.h>
 #include <keels2/entities.h>
 #include <keels2/game_adapter.hpp>
@@ -97,6 +98,10 @@ static_assert(sizeof(KeelConVarChange) == 56);
 static_assert(sizeof(KeelConVarSpec) == 112);
 static_assert(sizeof(KeelConVarInfo) == 96);
 static_assert(sizeof(KeelConVarApi) == 56);
+static_assert(sizeof(KeelConVarObserveApi) == 16);
+static_assert(offsetof(KeelConVarObserveApi, observe) == 8);
+static_assert(std::is_standard_layout_v<KeelConVarObserveApi>);
+static_assert(sizeof(keels2::host::GameAdapterConVarObserversApi) == 16);
 static_assert(sizeof(KeelSchemaFieldSpec) == 32);
 static_assert(sizeof(KeelSchemaFieldInfo) == 64);
 static_assert(sizeof(KeelSchemaApi) == 32);

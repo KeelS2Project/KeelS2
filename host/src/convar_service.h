@@ -5,6 +5,7 @@
 
 #include <keels2/convar.h>
 #include <keels2/convar_access.h>
+#include <keels2/convar_observe.h>
 #include <keels2/source2_authoring.h>
 
 #include <array>
@@ -42,6 +43,7 @@ public:
 
     const KeelConVarApi& Api() const noexcept;
     const KeelConVarAccessApi& AccessApi() const noexcept;
+    const KeelConVarObserveApi& ObserveApi() const noexcept;
     void Activate(KeelPluginHandle plugin);
     KeelResult Deactivate(KeelPluginHandle plugin);
     KeelResult ReleasePlugin(KeelPluginHandle plugin);
@@ -63,6 +65,10 @@ public:
     KeelResult ReleaseNative(KeelPluginHandle plugin, KeelConVarHandle convar);
 
 private:
+    static KeelResult ObserveEntry(KeelPluginHandle plugin, KeelConVarHandle convar,
+        KeelConVarChangeCallback callback, void* user_data);
+    static void ObservedEntry(std::int32_t slot, const KeelConVarValue& current,
+        const KeelConVarValue& previous, void* user_data);
     static KeelResult InvokeEntry(KeelPluginHandle plugin, KeelConVarHandle convar,
         KeelConVarAccessCallback callback, void* user_data);
     KeelResult Invoke(KeelPluginHandle plugin, KeelConVarHandle convar,
@@ -176,6 +182,7 @@ private:
     GameAdapter& adapter_;
     KeelConVarApi api_{};
     KeelConVarAccessApi access_api_{};
+    KeelConVarObserveApi observe_api_{};
     mutable std::mutex registry_mutex_;
     std::unordered_map<KeelConVarHandle, std::shared_ptr<Record>> records_;
     std::unordered_map<std::string, Definition> definitions_;

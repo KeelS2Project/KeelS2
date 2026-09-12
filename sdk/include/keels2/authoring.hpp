@@ -6,6 +6,9 @@
 namespace keels2::authoring
 {
 
+using keels2::Plugin;
+using keels2::PluginInfo;
+using keels2::ConVar;
 using Action = kh::Action;
 using keels2::Entity;
 using keels2::SchemaField;

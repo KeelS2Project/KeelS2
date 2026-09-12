@@ -140,6 +140,23 @@ bool GameAdapterModule::Load(
         library_.Symbol(kGameAdapterCommandCallerSymbol));
     player_action_ = SymbolFunction<GameAdapterPlayerActionFn>(
         library_.Symbol(kGameAdapterPlayerActionSymbol));
+    const auto query_observers = SymbolFunction<GameAdapterQueryConVarObserversFn>(
+        library_.Symbol(kGameAdapterConVarObserversSymbol));
+    if (query_observers)
+    {
+        GameAdapterConVarObserversApi observers{};
+        observers.size = sizeof(observers);
+        observers.api_version = kGameAdapterConVarObserversVersion;
+        if (query_observers(kGameAdapterConVarObserversVersion, &observers) != KEEL_RESULT_OK ||
+            observers.size != sizeof(observers) || observers.api_version != kGameAdapterConVarObserversVersion ||
+            !observers.observe)
+        {
+            error = "game adapter ConVar observer extension is incompatible";
+            Reset();
+            return false;
+        }
+        convar_observers_ = observers;
+    }
     const auto query_players = SymbolFunction<GameAdapterQueryPlayersFn>(
         library_.Symbol(kGameAdapterPlayersSymbol));
     if (query_players)
@@ -194,6 +211,7 @@ void GameAdapterModule::Reset() noexcept
     player_action_ = nullptr;
     players_ = {};
     messaging_ = {};
+    convar_observers_ = {};
     library_.Close();
     path_.clear();
 }
@@ -222,6 +240,14 @@ const std::filesystem::path& GameAdapterModule::Path() const noexcept
 KeelResult GameAdapterModule::PrintChat(std::int32_t slot, KeelBool broadcast, const char* text) const noexcept
 {
     return messaging_.chat ? messaging_.chat(adapter_, slot, broadcast, text) : KEEL_RESULT_UNSUPPORTED;
+}
+
+KeelResult GameAdapterModule::ObserveConVar(GameConVarHandle convar,
+    GameConVarCallback callback, void* user_data) const noexcept
+{
+    return convar_observers_.observe
+        ? convar_observers_.observe(adapter_, convar, callback, user_data)
+        : KEEL_RESULT_UNSUPPORTED;
 }
 
 std::uint32_t GameAdapterModule::PlayerCapacity() const noexcept

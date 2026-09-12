@@ -1,0 +1,2 @@
+keels2_add_plugin(keels2_authoring_regression plugin.cpp)
+target_link_libraries(keels2_authoring_regression PRIVATE KeelS2::SourceSDK)

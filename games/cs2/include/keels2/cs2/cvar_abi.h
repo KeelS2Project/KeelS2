@@ -243,6 +243,8 @@ private:
     std::int32_t registered_index_;
 };
 
+using GlobalConVarCallback = void (*)(ConVarObject*, std::int32_t, const char*, const char*, void*);
+
 class CvarInterface
 {
 public:
@@ -276,9 +278,9 @@ public:
     virtual void Slot17() = 0;
     virtual void Slot18() = 0;
     virtual void Slot19() = 0;
-    virtual void Slot20() = 0;
-    virtual void Slot21() = 0;
-    virtual void Slot22() = 0;
+    virtual void DispatchConCommand(CommandRef command, const void* context, const void* arguments) = 0;
+    virtual void InstallGlobalChangeCallback(GlobalConVarCallback callback) = 0;
+    virtual void RemoveGlobalChangeCallback(GlobalConVarCallback callback) = 0;
     virtual void CallGlobalChangeCallbacks(
         ConVarObject* reference,
         std::int32_t split_screen_slot,

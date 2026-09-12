@@ -1,5 +1,6 @@
 #include <keels2/convar.h>
 #include <keels2/convar_access.h>
+#include <keels2/convar_observe.h>
 
 #include <atomic>
 #include <cstdint>
@@ -428,6 +429,30 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
         access->invoke(plugin, g_integer, [](const void*, void*) -> KeelResult { throw 42; }, nullptr) !=
             KEEL_RESULT_ENGINE_FAILURE ||
         access->invoke(plugin, g_integer, inspect, &access_count) != KEEL_RESULT_OK || access_count != 2)
+    {
+        return KEEL_FALSE;
+    }
+    service = reinterpret_cast<const void*>(1);
+    if (host->query_service(plugin, KEELS2_CONVAR_OBSERVE_SERVICE_NAME,
+            KEELS2_CONVAR_OBSERVE_API_VERSION + 1, &service) != KEEL_RESULT_INCOMPATIBLE || service ||
+        host->query_service(plugin, KEELS2_CONVAR_OBSERVE_SERVICE_NAME,
+            KEELS2_CONVAR_OBSERVE_API_VERSION, &service) != KEEL_RESULT_OK || !service)
+    {
+        return KEEL_FALSE;
+    }
+    const auto* observers = static_cast<const KeelConVarObserveApi*>(service);
+    const auto notification = [](const KeelConVarChange*, void*) {};
+    KeelConVarHandle observed{};
+    if (observers->size != sizeof(*observers) || observers->api_version != KEELS2_CONVAR_OBSERVE_API_VERSION ||
+        !observers->observe ||
+        observers->observe(plugin, 0, notification, nullptr) != KEEL_RESULT_INVALID_ARGUMENT ||
+        observers->observe(plugin, g_integer, nullptr, nullptr) != KEEL_RESULT_INVALID_ARGUMENT ||
+        observers->observe(0, g_integer, notification, nullptr) != KEEL_RESULT_NOT_READY ||
+        observers->observe(plugin, UINT64_MAX, notification, nullptr) != KEEL_RESULT_NOT_FOUND ||
+        observers->observe(plugin, g_integer, notification, nullptr) != KEEL_RESULT_ALREADY_EXISTS ||
+        g_convars->find(plugin, "sv_keels2_existing", KEELS2_CONVAR_INT32, &observed) != KEEL_RESULT_OK ||
+        observers->observe(plugin, observed, notification, nullptr) != KEEL_RESULT_OK ||
+        observers->observe(plugin, observed, notification, nullptr) != KEEL_RESULT_ALREADY_EXISTS)
     {
         return KEEL_FALSE;
     }

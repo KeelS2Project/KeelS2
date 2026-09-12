@@ -55,10 +55,38 @@ const KeelLifecycleApi& LifecycleService::Api() const noexcept
     return api_;
 }
 
-bool LifecycleService::GameFrameInstalled() const
+KeelResult LifecycleService::EnsureEvent(KeelLifecycleEventType event)
 {
+    if (!ValidEvent(event))
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
     std::scoped_lock lock(registry_mutex_);
-    return installed_[KEELS2_LIFECYCLE_GAME_FRAME] && !shutting_down_;
+    if (shutting_down_)
+    {
+        return KEEL_RESULT_NOT_READY;
+    }
+    if (installed_[event])
+    {
+        return KEEL_RESULT_OK;
+    }
+    if (!adapter_.IsGameThread())
+    {
+        return KEEL_RESULT_WRONG_THREAD;
+    }
+    std::string error;
+    const KeelResult result = adapter_.EnableLifecycleEvent(
+        event, hooks_.Api(), 0, &DispatchEntry, this, error);
+    if (result != KEEL_RESULT_OK)
+    {
+        if (!error.empty())
+        {
+            host_.Write(KEEL_LOG_ERROR, error);
+        }
+        return result;
+    }
+    installed_[event] = true;
+    return KEEL_RESULT_OK;
 }
 
 KeelResult LifecycleService::EnsurePlayerTracking()
@@ -67,23 +95,12 @@ KeelResult LifecycleService::EnsurePlayerTracking()
     {
         return KEEL_RESULT_WRONG_THREAD;
     }
-    std::scoped_lock lock(registry_mutex_);
-    if (shutting_down_)
-    {
-        return KEEL_RESULT_NOT_READY;
-    }
     for (const auto event : {KEELS2_LIFECYCLE_CLIENT_CONNECTED, KEELS2_LIFECYCLE_CLIENT_DISCONNECTING})
     {
-        if (!installed_[event])
+        const KeelResult result = EnsureEvent(event);
+        if (result != KEEL_RESULT_OK)
         {
-            std::string error;
-            const KeelResult result = adapter_.EnableLifecycleEvent(
-                event, hooks_.Api(), 0, &DispatchEntry, this, error);
-            if (result != KEEL_RESULT_OK)
-            {
-                return result;
-            }
-            installed_[event] = true;
+            return result;
         }
     }
     return KEEL_RESULT_OK;
@@ -241,36 +258,10 @@ KeelResult LifecycleService::Subscribe(
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
     *output = 0;
+    const KeelResult installed = EnsureEvent(spec->event);
+    if (installed != KEEL_RESULT_OK)
     {
-        std::scoped_lock lock(registry_mutex_);
-        if (shutting_down_)
-        {
-            return KEEL_RESULT_NOT_READY;
-        }
-        if (!installed_[spec->event])
-        {
-            if (!adapter_.IsGameThread())
-            {
-                return KEEL_RESULT_WRONG_THREAD;
-            }
-            std::string error;
-            const KeelResult result = adapter_.EnableLifecycleEvent(
-                spec->event,
-                hooks_.Api(),
-                0,
-                &DispatchEntry,
-                this,
-                error);
-            if (result != KEEL_RESULT_OK)
-            {
-                if (!error.empty())
-                {
-                    host_.Write(KEEL_LOG_ERROR, error);
-                }
-                return result;
-            }
-            installed_[spec->event] = true;
-        }
+        return installed;
     }
 
     std::scoped_lock host_lock(host_.state_mutex_);

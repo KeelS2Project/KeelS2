@@ -153,6 +153,11 @@ private:
         GameConVarCallback callback{};
         GameNativeConVarCallback native_callback{};
         void* user_data{};
+        GameConVarCallback observer{};
+        void* observer_data{};
+        Cs2Adapter* observer_owner{};
+        KeelConVarValue observed_value{};
+        std::string observed_string;
         cs2::ConVarObject object;
         std::atomic<bool> active{};
         std::atomic<bool> registering{true};
@@ -161,6 +166,27 @@ private:
 
     inline static std::mutex convar_callback_mutex_;
     inline static std::unordered_map<const cs2::ConVarData*, ConVarEntry*> convar_callbacks_;
+    inline static std::vector<ConVarEntry*> convar_observers_;
+    inline static std::atomic<std::uint32_t> global_observers_active_{};
+
+    class ConVarProviderScope
+    {
+    public:
+        explicit ConVarProviderScope(std::atomic<std::uint32_t>& active) : active_(active)
+        {
+        }
+
+        ~ConVarProviderScope()
+        {
+            if (active_.fetch_sub(1, std::memory_order_acq_rel) == 1)
+            {
+                active_.notify_all();
+            }
+        }
+
+    private:
+        std::atomic<std::uint32_t>& active_;
+    };
 
     struct LifecycleHook
     {
@@ -569,6 +595,7 @@ public:
             platform::AppendShutdownTrace("cs2 retired command release complete");
             platform::AppendShutdownTrace("cs2 retired ConVar release begin");
         }
+        WaitForConVarProviders(global_observers_active_);
         retired_convars_.clear();
         if (trace)
         {
@@ -1410,6 +1437,46 @@ public:
         return KEEL_RESULT_OK;
     }
 
+    KeelResult ObserveConVar(GameConVarHandle convar, GameConVarCallback callback, void* user_data)
+    {
+        if (!OnMainThread())
+        {
+            return KEEL_RESULT_WRONG_THREAD;
+        }
+        if (!cvar_ || !callback)
+        {
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+        auto* entry = ConVarByHandle(convar);
+        if (!entry || !entry->object.data)
+        {
+            return KEEL_RESULT_NOT_FOUND;
+        }
+        KeelConVarValue value{};
+        const KeelResult read = ReadConVar(convar, KEELS2_CONVAR_GLOBAL_SLOT, value);
+        if (read != KEEL_RESULT_OK)
+        {
+            return read;
+        }
+        std::scoped_lock lock(convar_callback_mutex_);
+        if (entry->observer)
+        {
+            return KEEL_RESULT_ALREADY_EXISTS;
+        }
+        RetainPublicValue(value, entry->observed_value, entry->observed_string);
+        convar_observers_.reserve(convar_observers_.size() + 1);
+        if (observer_count_ == 0)
+        {
+            cvar_->InstallGlobalChangeCallback(&GlobalConVarChanged);
+        }
+        entry->observer = callback;
+        entry->observer_data = user_data;
+        entry->observer_owner = this;
+        convar_observers_.push_back(entry);
+        ++observer_count_;
+        return KEEL_RESULT_OK;
+    }
+
     void ReleaseConVar(GameConVarHandle convar) noexcept override
     {
         const auto iterator = convars_.find(convar);
@@ -1419,6 +1486,19 @@ public:
         }
         std::unique_ptr<ConVarEntry> entry = std::move(iterator->second);
         entry->active.store(false, std::memory_order_release);
+        {
+            std::scoped_lock lock(convar_callback_mutex_);
+            if (entry->observer)
+            {
+                std::erase(convar_observers_, entry.get());
+                entry->observer = nullptr;
+                --observer_count_;
+                if (observer_count_ == 0 && cvar_)
+                {
+                    cvar_->RemoveGlobalChangeCallback(&GlobalConVarChanged);
+                }
+            }
+        }
         if (entry->owned && cvar_ && entry->object.reference.IsValid())
         {
             cvar_->UnregisterConVarCallbacks(entry->object.reference);
@@ -2255,6 +2335,67 @@ private:
         return KEEL_RESULT_OK;
     }
 
+    static void GlobalConVarChanged(cs2::ConVarObject* reference, std::int32_t slot,
+        const char*, const char*, void*)
+    {
+        global_observers_active_.fetch_add(1, std::memory_order_acq_rel);
+        ConVarProviderScope global_scope(global_observers_active_);
+        if (!reference || !reference->data || (slot != 0 && slot != KEELS2_CONVAR_GLOBAL_SLOT))
+        {
+            return;
+        }
+        try
+        {
+            std::vector<ConVarEntry*> selected;
+            {
+                std::scoped_lock lock(convar_callback_mutex_);
+                for (auto* entry : convar_observers_)
+                {
+                    if (entry->object.data == reference->data)
+                    {
+                        selected.push_back(entry);
+                    }
+                }
+            }
+            for (auto* entry : selected)
+            {
+                GameConVarCallback callback{};
+                void* user_data{};
+                {
+                    std::scoped_lock lock(convar_callback_mutex_);
+                    if (!entry->observer)
+                    {
+                        continue;
+                    }
+                    callback = entry->observer;
+                    user_data = entry->observer_data;
+                    entry->provider_active.fetch_add(1, std::memory_order_acq_rel);
+                }
+                ConVarProviderScope provider_scope(entry->provider_active);
+                if (!entry->observer_owner->OnMainThread())
+                {
+                    continue;
+                }
+                cs2::ConVarValue native_current{};
+                KeelConVarValue current{};
+                if (!LoadLiveEngineValue(entry->type, entry->object.data->values, native_current) ||
+                    LoadPublicValue(entry->type, &native_current, current) != KEEL_RESULT_OK)
+                {
+                    continue;
+                }
+                KeelConVarValue previous{};
+                std::string previous_string;
+                RetainPublicValue(entry->observed_value, previous, previous_string);
+                RetainPublicValue(current, entry->observed_value, entry->observed_string);
+                callback(slot, entry->observed_value, previous, user_data);
+            }
+        }
+        catch (...)
+        {
+            platform::WriteEngineConsole("[KeelS2] ConVar observer notification failed\n");
+        }
+    }
+
     static void ConVarChange(
         cs2::ConVarObject*,
         std::int32_t,
@@ -2288,18 +2429,7 @@ private:
             {
                 return;
             }
-            struct ProviderScope
-            {
-                ~ProviderScope()
-                {
-                    if (active->fetch_sub(1, std::memory_order_acq_rel) == 1)
-                    {
-                        active->notify_all();
-                    }
-                }
-
-                std::atomic<std::uint32_t>* active;
-            } provider_scope{&entry->provider_active};
+            ConVarProviderScope provider_scope(entry->provider_active);
             if (entry->registering.load(std::memory_order_acquire) ||
                 !entry->active.load(std::memory_order_acquire) ||
                 (!entry->callback && !entry->native_callback))
@@ -3383,6 +3513,7 @@ private:
     std::unordered_set<void*> initialized_loops_;
     std::unordered_set<void*> hooked_factory_vtables_;
     std::unordered_set<void*> hooked_loop_vtables_;
+    std::size_t observer_count_{};
     GameConVarHandle next_convar_{1};
     std::unordered_map<GameConVarHandle, std::unique_ptr<ConVarEntry>> convars_;
     std::vector<std::unique_ptr<ConVarEntry>> retired_convars_;
@@ -3528,6 +3659,38 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryMessaging(
         try
         {
             return static_cast<keels2::host::Cs2Adapter*>(adapter)->PrintChat(slot, broadcast, text);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
+    };
+    return KEEL_RESULT_OK;
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryConVarObservers(
+    std::uint32_t version, keels2::host::GameAdapterConVarObserversApi* api) noexcept
+{
+    if (!api || api->size != sizeof(*api))
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    *api = {};
+    if (version != keels2::host::kGameAdapterConVarObserversVersion)
+    {
+        return KEEL_RESULT_INCOMPATIBLE;
+    }
+    api->size = sizeof(*api);
+    api->api_version = version;
+    api->observe = [](keels2::host::GameAdapter* adapter, keels2::host::GameConVarHandle convar,
+        keels2::host::GameConVarCallback callback, void* user_data) noexcept {
+        if (!adapter)
+        {
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->ObserveConVar(convar, callback, user_data);
         }
         catch (...)
         {

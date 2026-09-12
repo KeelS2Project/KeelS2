@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.25)
+project(KeelS2AuthoringDiagnostics LANGUAGES CXX)
+find_package(KeelS2 1.2 CONFIG REQUIRED)
+foreach(contract positive command event hook_return hook_argument convar metadata_missing metadata_invalid)
+    add_library(${contract} OBJECT EXCLUDE_FROM_ALL ${contract}.cpp)
+    target_link_libraries(${contract} PRIVATE KeelS2::SDK)
+endforeach()

@@ -29,7 +29,7 @@ public:
     LifecycleService& operator=(const LifecycleService&) = delete;
 
     const KeelLifecycleApi& Api() const noexcept;
-    bool GameFrameInstalled() const;
+    KeelResult EnsureEvent(KeelLifecycleEventType event);
     KeelResult EnsurePlayerTracking();
     void Activate(KeelPluginHandle plugin);
     KeelResult Deactivate(KeelPluginHandle plugin);

@@ -12,6 +12,8 @@ std::uint32_t g_callbackCount{};
 std::uint32_t g_invalidCount{};
 std::uint32_t g_busyCount{};
 bool g_unloadInvalid{};
+std::uint32_t g_observerCount{};
+bool g_observerValid{true};
 keels2::ConVar<int> g_integerCopy;
 keels2::ConVar<int> g_previousCopy;
 keels2::ConVar<int> g_foundCopy;
@@ -64,13 +66,14 @@ public:
             5,
             "C++ authoring unbounded integer");
         limitTeams = FindConVar<int>("MP_LIMITTEAMS");
+        observedTeams = FindConVar<int>("mp_limitteams", &ConVarAuthoringPlugin::TeamsChanged);
 
         g_integerCopy = integer;
         g_foundCopy = limitTeams;
         g_unboundedCopy = unbounded;
 
         const bool valid = integer && floating && boolean && string &&
-            unbounded && limitTeams && integer.GetName() &&
+            unbounded && limitTeams && observedTeams && integer.GetName() &&
             std::strcmp(integer.GetName(), "keels2_authoring_int") == 0 &&
             integer.HasMin() && integer.HasMax() &&
             integer.Min() == 1 && integer.Max() == 11 &&
@@ -111,6 +114,66 @@ public:
         g_plugin = nullptr;
     }
 
+    bool CheckObserver(int stage)
+    {
+        if (stage == 0)
+        {
+            const bool initially_valid = observedTeams && g_observerCount == 0;
+            const bool changed = observedTeams.Set(3);
+            const int current = observedTeams.Get();
+            const bool valid = initially_valid && changed && current == 4 &&
+                g_observerCount == 2 && g_observerValid;
+            if (!valid)
+            {
+                LogError("observer initial={} set={} current={} callbacks={} valid={}",
+                    initially_valid, changed, current, g_observerCount, g_observerValid);
+            }
+            return valid;
+        }
+        if (stage == 1)
+        {
+            if (observedTeams.Get() != 4 || g_observerCount != 2 || !g_observerValid ||
+                !observedTeams.Set(2) || g_observerCount != 3 || !RemoveConVar(observedTeams) || observedTeams)
+            {
+                return false;
+            }
+            auto plain = FindConVar<int>("mp_limitteams");
+            return plain.Set(5) && g_observerCount == 3 && plain.Set(2) && g_observerCount == 3;
+        }
+        if (stage == 3)
+        {
+            auto rejected = FindConVar<int>("mp_limitteams", &ConVarAuthoringPlugin::TeamsChanged);
+            if (rejected || LastResult() != KEEL_RESULT_WRONG_THREAD)
+            {
+                return false;
+            }
+            auto created = CreateConVar<int>("keels2_worker_rejected", 1, "wrong thread");
+            return !created && LastResult() == KEEL_RESULT_WRONG_THREAD;
+        }
+        if (stage == 2)
+        {
+            observedFloat = FindConVar<float>("keels2_authoring_float", &ConVarAuthoringPlugin::FloatChanged);
+            observedBool = FindConVar<bool>("keels2_authoring_bool", &ConVarAuthoringPlugin::BoolChanged);
+            observedString = FindConVar<CUtlString>("keels2_authoring_string", &ConVarAuthoringPlugin::StringChanged);
+            firstPeer = FindConVar<int>("keels2_authoring_unbounded", &ConVarAuthoringPlugin::FirstChanged);
+            secondPeer = FindConVar<int>("keels2_authoring_unbounded", &ConVarAuthoringPlugin::SecondChanged);
+            if (!observedFloat || !observedBool || !observedString || !firstPeer || !secondPeer ||
+                !floating.Set(1.234567f) || !floating.Set(2.345678f) || floatCount != 2 ||
+                !boolean.Set(false) || !boolean.Set(true) || boolCount != 2 ||
+                !string.Set(CUtlString("100% {literal}; quit")) ||
+                !string.Set(CUtlString("retained")) || stringCount != 2 ||
+                !unbounded.Set(17) || firstCount != 1 || secondCount != 0 ||
+                !unbounded.Set(18) || firstCount != 2 || secondCount != 0 || !observerValuesValid)
+            {
+                LogError("typed observers: float={} bool={} string={} first={} second={} valid={}",
+                    floatCount, boolCount, stringCount, firstCount, secondCount, observerValuesValid);
+                return false;
+            }
+            return true;
+        }
+        return false;
+    }
+
     bool RemoveIntegerCopy()
     {
         return RemoveConVar(g_integerCopy) && !integer && !g_integerCopy;
@@ -138,6 +201,64 @@ public:
     }
 
 private:
+    void FloatChanged(ConVar<float>& convar, CSplitScreenSlot, float current, float previous)
+    {
+        ++floatCount;
+        const float expectedPrevious = floatCount == 1 ? 2.5f : 1.234567f;
+        const float expectedCurrent = floatCount == 1 ? 1.234567f : 2.345678f;
+        observerValuesValid = observerValuesValid && previous == expectedPrevious &&
+            current == expectedCurrent && convar.Get() == current;
+    }
+
+    void BoolChanged(ConVar<bool>& convar, CSplitScreenSlot, bool current, bool previous)
+    {
+        ++boolCount;
+        observerValuesValid = observerValuesValid && previous != current &&
+            current == (boolCount == 2) && convar.Get() == current;
+    }
+
+    void StringChanged(ConVar<CUtlString>& convar, CSplitScreenSlot, CUtlString current, CUtlString previous)
+    {
+        ++stringCount;
+        const char* expectedPrevious = stringCount == 1 ? "worker" : "100% {literal}; quit";
+        const char* expectedCurrent = stringCount == 1 ? "100% {literal}; quit" : "retained";
+        observerValuesValid = observerValuesValid && V_strcmp(previous.Get(), expectedPrevious) == 0 &&
+            V_strcmp(current.Get(), expectedCurrent) == 0 && convar.Get() == current;
+    }
+
+    void FirstChanged(ConVar<int>&, CSplitScreenSlot, int current, int previous)
+    {
+        ++firstCount;
+        observerValuesValid = observerValuesValid && previous == (firstCount == 1 ? 5 : 17) &&
+            current == (firstCount == 1 ? 17 : 18) && !RemoveConVar(unbounded) && unbounded;
+        if (firstCount == 1)
+        {
+            observerValuesValid = observerValuesValid && RemoveConVar(secondPeer) && !secondPeer;
+        }
+    }
+
+    void SecondChanged(ConVar<int>&, CSplitScreenSlot, int, int)
+    {
+        ++secondCount;
+    }
+
+    void TeamsChanged(ConVar<int>& convar, CSplitScreenSlot slot, int newValue, int oldValue)
+    {
+        ++g_observerCount;
+        if (!convar || slot.Get() != 0 || newValue == oldValue || convar.Get() != newValue)
+        {
+            g_observerValid = false;
+        }
+        if (newValue == 3)
+        {
+            if (RemoveConVar(observedTeams) || !observedTeams || !observedTeams.Set(4) ||
+                observedTeams.Get() != 3 || g_observerCount != 1)
+            {
+                g_observerValid = false;
+            }
+        }
+    }
+
     void IntegerChanged(
         ConVar<int>& convar,
         CSplitScreenSlot slot,
@@ -173,6 +294,18 @@ private:
     ConVar<CUtlString> string;
     ConVar<int> unbounded;
     ConVar<int> limitTeams;
+    ConVar<int> observedTeams;
+    ConVar<float> observedFloat;
+    ConVar<bool> observedBool;
+    ConVar<CUtlString> observedString;
+    ConVar<int> firstPeer;
+    ConVar<int> secondPeer;
+    int floatCount{};
+    int boolCount{};
+    int stringCount{};
+    int firstCount{};
+    int secondCount{};
+    bool observerValuesValid{true};
 };
 
 }
@@ -253,4 +386,9 @@ extern "C" KEELS2_PLUGIN_EXPORT std::uint32_t KeelTest_ConVarAuthoringStringEqua
     const char* value)
 {
     return g_plugin && g_plugin->StringEquals(value) ? 1u : 0u;
+}
+
+extern "C" KEELS2_PLUGIN_EXPORT std::uint32_t KeelTest_ConVarObserverCheck(int stage)
+{
+    return g_plugin && g_plugin->CheckObserver(stage) ? 1u : 0u;
 }

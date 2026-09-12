@@ -3,94 +3,33 @@
 
 #include <keels2/authoring.hpp>
 
-using keels2::authoring::PlayerInfo;
+namespace sample
+{
+using namespace keels2::authoring;
 
-class SamplePlugin final : public keels2::Plugin
+class SamplePlugin final : public Plugin
 {
 public:
-    static constexpr keels2::PluginInfo Info{
-        "KeelS2 Source 2 Sample",
-        "KeelS2 Project",
-        "1.1.0",
-        "Source 2 lifecycle, players, text, commands, events, and ConVars"
+    static constexpr PluginInfo Info{
+        .name = "KeelS2 Sample",
+        .author = "KeelS2 Project",
+        .version = "1.2.0",
+        .description = "Commands, players, text, ConVars, events, and native hooks"
     };
 
     bool Load() override;
-    void Unload() override;
-
-    void OnLevelInit(
-        KeyValues* keyValues,
-        ILoopModePrerequisiteRegistry* prerequisiteRegistry) override;
-
-    void OnLevelShutdown() override;
-
-    bool OnClientConnect(
-        CPlayerSlot slot,
-        const char* name,
-        uint64 xuid,
-        const char* networkId,
-        bool unknown,
-        CBufferString* rejectionMessage) override;
-
-    bool OnClientCommand(
-        CPlayerSlot slot,
-        const CCommand& command) override;
-
-    void OnGameFrame(
-        bool simulating,
-        bool firstTick,
-        bool lastTick) override;
-
-    void OnClientConnected(
-        CPlayerSlot slot,
-        const char* name,
-        uint64 xuid,
-        const char* networkId,
-        const char* address,
-        bool fakePlayer) override;
-
-    void OnClientPutInServer(
-        CPlayerSlot slot,
-        const char* name,
-        int clientType,
-        uint64 xuid) override;
-
-    void OnClientActive(
-        CPlayerSlot slot,
-        bool loadGame,
-        const char* name,
-        uint64 xuid) override;
-
-    void OnClientFullyConnected(CPlayerSlot slot) override;
-
-    void OnClientDisconnecting(
-        CPlayerSlot slot,
-        ENetworkDisconnectionReason reason,
-        const char* name,
-        uint64 xuid,
-        const char* networkId) override;
-
-    void OnClientSettingsChanged(CPlayerSlot slot) override;
-    void OnAllPluginsLoaded() override;
 
 private:
-    void Command(
-        const CCommandContext& context,
-        const CCommand& command);
-
-    void DescribePlayer(CPlayerSlot slot);
-
-    void IntegerChanged(
-        ConVar<int>& convar,
-        CSplitScreenSlot slot,
-        int newValue,
-        int oldValue);
-
+    void Command(const CCommandContext& context, const CCommand& command);
+    void DescribePlayer(const PlayerConnection& connection);
+    int CountPlayers();
+    void ConVarChanged(ConVar<int32>& convar, CSplitScreenSlot slot, int32 newValue, int32 oldValue);
     void OnRoundStart(IGameEvent* event);
+    Action OnCommand(ConCommandRef reference, const CCommandContext& context, const CCommand& command);
 
-    ConVar<int> integer;
-    ConVar<float> floating;
-    ConVar<int> limitTeams;
+    ConVar<int32> integer;
+    ConVar<int32> limitTeams;
 };
+}
 
 #endif

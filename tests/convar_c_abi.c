@@ -1,5 +1,6 @@
 #include <keels2/convar.h>
 #include <keels2/convar_access.h>
+#include <keels2/convar_observe.h>
 
 #include <stddef.h>
 
@@ -21,6 +22,8 @@ static void Changed(const KeelConVarChange* change, void* user_data)
 
 _Static_assert(sizeof(KeelConVarAccessApi) == 16, "native ConVar access layout changed");
 _Static_assert(offsetof(KeelConVarAccessApi, invoke) == 8, "native ConVar invoke offset changed");
+_Static_assert(sizeof(KeelConVarObserveApi) == 16, "ConVar observer layout changed");
+_Static_assert(offsetof(KeelConVarObserveApi, observe) == 8, "ConVar observer offset changed");
 
 int main(void)
 {

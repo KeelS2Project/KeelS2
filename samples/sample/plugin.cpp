@@ -1,288 +1,131 @@
 #include "plugin.h"
 
+namespace sample
+{
 bool SamplePlugin::Load()
 {
-    auto* engine = GetEngineInterface<IVEngineServer2>(INTERFACEVERSION_VENGINESERVER);
-    auto* server = GetSource2Server<IServerGameDLL>();
-    auto* clients = GetSource2GameClients<IServerGameClients>();
+    integer = CreateConVar<int32>("keels2_sample_int", 42,
+        "Sample bounded integer", FCVAR_NOTIFY, 0, 100, &SamplePlugin::ConVarChanged);
+    if (!integer)
+    {
+        return false;
+    }
+    limitTeams = FindConVar<int32>("mp_limitteams", &SamplePlugin::ConVarChanged);
+    if (!limitTeams)
+    {
+        LogError("mp_limitteams: {}", LastError());
+        return false;
+    }
+    if (!CreateCommand("keel_sample", "Shows players and ConVars; optional bump", &SamplePlugin::Command) ||
+        !ListenForGameEvent("round_start", &SamplePlugin::OnRoundStart))
+    {
+        return false;
+    }
     auto* cvars = GetCVarSystem<ICvar>();
-    auto* network = GetEngineInterface<INetworkServerService>(
-        NETWORKSERVERSERVICE_INTERFACE_VERSION);
-    if (!engine || !server || !clients || !cvars || !network)
+    if (!cvars || !HookPre(cvars, &ICvar::DispatchConCommand, &SamplePlugin::OnCommand))
     {
-        LogError("required Source 2 interfaces are unavailable");
+        LogError("DispatchConCommand hook: {}", LastError());
         return false;
     }
-
-    integer = CreateConVar<int>(
-        "keels2_sample_int",
-        42,
-        "KeelS2 sample bounded integer",
-        FCVAR_NOTIFY,
-        0,
-        100,
-        &SamplePlugin::IntegerChanged);
-
-    floating = CreateConVar<float>(
-        "keels2_sample_float",
-        1.25f,
-        "KeelS2 sample bounded float",
-        FCVAR_NONE,
-        0.25f,
-        4.0f);
-
-    limitTeams = FindConVar<int>("mp_limitteams");
-
-    const bool commandCreated = CreateCommand(
-        "keel_sample",
-        "Runs the KeelS2 Source 2 sample",
-        &SamplePlugin::Command);
-
-    const bool eventListening = ListenForGameEvent(
-        "round_start",
-        &SamplePlugin::OnRoundStart);
-
-    if (!integer || !floating || !limitTeams ||
-        !commandCreated || !eventListening)
-    {
-        LogError("registration failed");
-        return false;
-    }
-
-    const KeelResult nativeAccess = limitTeams.WithNative([this](CConVarRef<int32>& typed) {
-        const ConVarRefAbstract& untyped = typed;
-        LogMessage("mp_limitteams typed={} untyped={}", typed.Get(), untyped.GetInt());
-    });
-    if (nativeAccess != KEEL_RESULT_OK)
-    {
-        LogError("native ConVar access service version 1 is required: {}", nativeAccess);
-        return false;
-    }
-
-    LogMessage(
-        "ready command=keel_sample "
-        "event=round_start convar=mp_limitteams");
-
+    LogMessage("ready command=keel_sample event=round_start");
     return true;
 }
 
-void SamplePlugin::Unload()
+void SamplePlugin::Command(const CCommandContext& context, const CCommand& command)
 {
-    LogMessage("unloaded; ordinary resources required no manual cleanup");
-}
-
-void SamplePlugin::OnLevelInit(
-    KeyValues* keyValues,
-    ILoopModePrerequisiteRegistry* prerequisiteRegistry)
-{
-    LogMessage(
-        keyValues && prerequisiteRegistry
-            ? "LevelInit context=complete"
-            : "LevelInit context=partial");
-}
-
-void SamplePlugin::OnLevelShutdown()
-{
-    LogMessage("LevelShutdown");
-}
-
-bool SamplePlugin::OnClientConnect(
-    CPlayerSlot slot,
-    const char* name,
-    uint64 xuid,
-    const char* networkId,
-    bool unknown,
-    CBufferString*)
-{
-    LogMessage(
-        "ClientConnect slot={} name={} xuid={} "
-        "network_id={} unknown={} decision=accept",
-        slot.Get(),
-        name,
-        xuid,
-        networkId,
-        unknown);
-
-    return true;
-}
-
-bool SamplePlugin::OnClientCommand(
-    CPlayerSlot slot,
-    const CCommand& command)
-{
-    const char* verb = command.ArgC() > 0 ? command[0] : "";
-    const char* argument = command.ArgC() > 1 ? command[1] : "";
-
-    LogMessage(
-        "ClientCommand slot={} verb={} argument={} decision=accept",
-        slot.Get(),
-        verb,
-        argument);
-
-    return true;
-}
-
-void SamplePlugin::OnGameFrame(bool, bool, bool)
-{
-}
-
-void SamplePlugin::OnClientConnected(
-    CPlayerSlot slot,
-    const char* name,
-    uint64 xuid,
-    const char* networkId,
-    const char* address,
-    bool fakePlayer)
-{
-    LogMessage(
-        "ClientConnected slot={} name={} xuid={} "
-        "network_id={} address={} fake={}",
-        slot.Get(),
-        name,
-        xuid,
-        networkId,
-        address,
-        fakePlayer);
-}
-
-void SamplePlugin::OnClientPutInServer(
-    CPlayerSlot slot,
-    const char* name,
-    int clientType,
-    uint64 xuid)
-{
-    LogMessage(
-        "ClientPutInServer client_type={} slot={} name={} xuid={}",
-        clientType,
-        slot.Get(),
-        name,
-        xuid);
-}
-
-void SamplePlugin::OnClientActive(
-    CPlayerSlot slot,
-    bool loadGame,
-    const char* name,
-    uint64 xuid)
-{
-    LogMessage(
-        "ClientActive load_game={} slot={} name={} xuid={}",
-        loadGame,
-        slot.Get(),
-        name,
-        xuid);
-}
-
-void SamplePlugin::OnClientFullyConnected(CPlayerSlot slot)
-{
-    LogMessage("ClientFullyConnected slot={}", slot.Get());
-}
-
-void SamplePlugin::OnClientDisconnecting(
-    CPlayerSlot slot,
-    ENetworkDisconnectionReason reason,
-    const char* name,
-    uint64 xuid,
-    const char* networkId)
-{
-    LogMessage(
-        "ClientDisconnecting slot={} name={} xuid={} "
-        "network_id={} reason={}",
-        slot.Get(),
-        name,
-        xuid,
-        networkId,
-        reason);
-}
-
-void SamplePlugin::OnClientSettingsChanged(CPlayerSlot slot)
-{
-    LogMessage("ClientSettingsChanged slot={}", slot.Get());
-}
-
-void SamplePlugin::OnAllPluginsLoaded()
-{
-    LogMessage("AllPluginsLoaded");
-}
-
-void SamplePlugin::Command(
-    const CCommandContext& context,
-    const CCommand& command)
-{
-    if (command.ArgC() == 2 && V_strcmp(command[1], "player") == 0)
+    if (command.ArgC() > 2 || (command.ArgC() == 2 && V_strcmp(command[1], "bump") != 0))
     {
-        DescribePlayer(context.GetPlayerSlot());
+        LogMessage("usage: keel_sample [bump]");
         return;
     }
-    if (command.ArgC() > 2 ||
-        (command.ArgC() == 2 && V_strcmp(command[1], "bump") != 0))
-    {
-        LogError("usage: keel_sample [bump|player]");
-        return;
-    }
-
     if (command.ArgC() == 2)
     {
-        const KeelResult integerSet = integer.WithNative([this](CConVarRef<int32>& native) {
-            const int32 next = native.Get() == integer.Max() ? integer.Min() : native.Get() + 1;
-            native.Set(next);
-        });
-        const KeelResult floatingSet = floating.WithNative([](CConVarRef<float>& native) {
-            native.Set(native.Get() + 0.25f);
-        });
-        if (integerSet != KEEL_RESULT_OK || floatingSet != KEEL_RESULT_OK)
+        int32 next = integer.Get() + 1;
+        if (next > integer.Max())
         {
-            LogError("sample ConVar update was rejected");
+            next = integer.Min();
+        }
+        if (!integer.Set(next))
+        {
+            LogError("{}: {}", integer.GetName(), integer.LastError());
+            return;
         }
     }
-
-    LogMessage(
-        "caller={} int={} float={} mp_limitteams={}",
-        context.GetPlayerSlot().Get(),
-        integer.Get(),
-        floating.Get(),
-        limitTeams.Get());
-}
-
-void SamplePlugin::DescribePlayer(CPlayerSlot slot)
-{
-    PlayerInfo player;
-    if (!GetPlayer(slot, player))
+    LogMessage("caller={} int={} mp_limitteams={} players={}",
+        context.GetPlayerSlot(), integer.Get(), limitTeams.Get(), CountPlayers());
+    if (!context.GetPlayerSlot().IsValid())
     {
-        LogError("keel_sample player requires a current connected client");
         return;
     }
-    CUtlString text;
-    text.Format("#%d %s | team=%d authenticated=%d\n", player.user_id,
-        player.name.Get(), player.team, player.authenticated ? 1 : 0);
-    const KeelResult console = PrintToConsole(player.slot, text.Get());
-    if (console != KEEL_RESULT_OK)
+    PlayerInfo player;
+    if (!GetPlayer(context.GetPlayerSlot(), player))
     {
-        LogError("player console output is unavailable: {}", console);
+        if (LastResult() != KEEL_RESULT_NOT_FOUND)
+        {
+            LogWarning("player lookup: {}", LastError());
+        }
+        return;
     }
-    if (PrintToChat(player.slot, "Player details printed to your console.") != KEEL_RESULT_OK)
+    DescribePlayer(player.Connection());
+}
+
+void SamplePlugin::DescribePlayer(const PlayerConnection& connection)
+{
+    PlayerInfo player;
+    if (!GetPlayer(connection, player))
     {
-        LogError("player chat output is unavailable");
+        return;
+    }
+    if (!SendToConsole(player.slot, "#{} {} | team={} authenticated={}\n",
+            player.user_id, player.name, player.team, player.authenticated) ||
+        !SendToChat(player.slot, "Hello {}, player details are in your console.", player.name))
+    {
+        LogWarning("player output: {}", LastError());
     }
 }
 
-void SamplePlugin::IntegerChanged(
-    ConVar<int>& convar,
-    CSplitScreenSlot slot,
-    int newValue,
-    int oldValue)
+int SamplePlugin::CountPlayers()
 {
-    LogMessage(
-        "{} changed slot={} old={} new={}",
-        convar.GetName(),
-        slot.Get(),
-        oldValue,
-        newValue);
+    int count{};
+    PlayerInfo player;
+    CPlayerSlot after(-1);
+    while (GetNextPlayer(after, player))
+    {
+        after = player.slot;
+        if (player.connected && !player.source_tv)
+        {
+            ++count;
+        }
+    }
+    if (LastResult() != KEEL_RESULT_NOT_FOUND)
+    {
+        LogWarning("player iteration: {}", LastError());
+    }
+    return count;
+}
+
+void SamplePlugin::ConVarChanged(ConVar<int32>& convar, CSplitScreenSlot slot,
+    int32 newValue, int32 oldValue)
+{
+    LogMessage("{} changed slot={} old={} new={}", convar.GetName(), slot, oldValue, newValue);
 }
 
 void SamplePlugin::OnRoundStart(IGameEvent*)
 {
-    LogMessage("event=round_start");
+    if (!SendToChatAll("A new round has started."))
+    {
+        LogWarning("round chat: {}", LastError());
+    }
 }
 
-KEELS2_PLUGIN(SamplePlugin)
+Action SamplePlugin::OnCommand(ConCommandRef, const CCommandContext&, const CCommand& command)
+{
+    if (command.ArgC() > 0 && V_strcmp(command[0], "keel_sample") == 0)
+    {
+        LogMessage("keel_sample observed by the native command hook");
+    }
+    return PLUGIN_CONTINUE;
+}
+}
+
+KEELS2_PLUGIN(sample::SamplePlugin)

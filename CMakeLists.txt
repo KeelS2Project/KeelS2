@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(KeelS2 VERSION 1.1.0 LANGUAGES C CXX)
+project(KeelS2 VERSION 1.2.0 LANGUAGES C CXX)
 
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
@@ -532,6 +532,7 @@ if(BUILD_TESTING)
     add_subdirectory(tests/fixtures/hooks)
     add_subdirectory(tests/fixtures/no_damage)
     add_subdirectory(tests/fixtures/adapter)
+    add_subdirectory(tests/fixtures/authoring)
 
     add_test(
         NAME live_packaging_self_test
@@ -965,6 +966,11 @@ if(BUILD_TESTING)
         OUTPUT_NAME keels2_authoring_contract_plugin
     )
     keels2_enable_warnings(keels2_authoring_contract_plugin)
+    add_executable(keels2_clean_authoring_contract tests/clean_authoring_contract.cpp)
+    target_link_libraries(keels2_clean_authoring_contract PRIVATE KeelS2::SDK KeelS2::SourceSDK keels2_fake_tier0)
+    keels2_enable_warnings(keels2_clean_authoring_contract)
+    add_test(NAME clean_authoring_contract COMMAND keels2_clean_authoring_contract)
+
     add_executable(keels2_authoring_contract tests/authoring_contract.cpp)
     target_include_directories(keels2_authoring_contract PRIVATE platform/include sdk/include)
     target_link_libraries(keels2_authoring_contract PRIVATE keels2_platform)
@@ -1076,6 +1082,17 @@ if(BUILD_TESTING)
     if(NOT KEELS2_MULTI_CONFIG)
         list(APPEND KEELS2_STANDALONE_CONFIGURE "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
     endif()
+    add_test(NAME authoring_diagnostics
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/authoring_diagnostics.py
+            --source ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/diagnostics
+            --build ${CMAKE_BINARY_DIR}/authoring-diagnostics
+            --sdk ${KEELS2_SDK_INSTALL_DIR}/${KEELS2_CMAKE_INSTALL_DIR}
+            --source-sdk ${KEELS2_SOURCE_SDK_RESOLVED_ROOT}
+            --generator "${CMAKE_GENERATOR}"
+            --platform=${CMAKE_GENERATOR_PLATFORM}
+            --toolset=${CMAKE_GENERATOR_TOOLSET}
+            --configuration $<CONFIG>)
+    set_tests_properties(authoring_diagnostics PROPERTIES DEPENDS sdk_install)
     add_test(NAME sdk_out_of_tree_configure COMMAND ${KEELS2_STANDALONE_CONFIGURE})
     set_tests_properties(sdk_out_of_tree_configure PROPERTIES DEPENDS sdk_install)
     add_test(
@@ -1957,6 +1974,7 @@ if(BUILD_TESTING)
         convar_service
         convar_failed_load
         convar_facade
+        clean_sample
         convar_authoring
         convar_native_access
         plugin_runtime_service
@@ -2002,7 +2020,7 @@ if(BUILD_TESTING)
                 $<TARGET_FILE:keels2_lifecycle_service_plugin>
                 $<TARGET_FILE:keels2_authoring_concurrency_plugin>
                 $<TARGET_FILE:keels2_convar_service_plugin>
-                $<TARGET_FILE:keels2_sample>
+                $<TARGET_FILE:keels2_authoring_regression>
                 $<TARGET_FILE:keels2_plugin_runtime_service_plugin>
                 $<TARGET_FILE:keels2_dependency_core>
                 $<TARGET_FILE:keels2_dependency_middle>
@@ -2026,6 +2044,7 @@ if(BUILD_TESTING)
                 ${CMAKE_BINARY_DIR}/integration-fixture
                 $<TARGET_FILE:keels2_convar_native_provider>
                 $<TARGET_FILE:keels2_convar_native_consumer>
+                $<TARGET_FILE:keels2_sample>
         )
     endforeach()
     get_property(KEELS2_REGISTERED_TESTS DIRECTORY PROPERTY TESTS)

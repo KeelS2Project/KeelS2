@@ -553,7 +553,7 @@ def validate_client_console(text: str, stage: str, revision: str, platform_label
         raise GateFailure("client console usage output is missing or server output was pasted")
     if stage == "information":
         required = (
-            "KeelS2 1.1.0", "Built: ", " UTC", f"Git revision: {revision.split('-')[0]}",
+            "KeelS2 1.2.0", "Built: ", " UTC", f"Git revision: {revision.split('-')[0]}",
             f"Target: {platform_label.capitalize()}/x86_64", "Plugin ABI: 4",
             "Created and developed by Peter Brev", "Official website: https://www.keels2.com/",
             "Listing 8 active plugins:", "KeelS2 Basic", "Source2 Service Test",
@@ -689,7 +689,7 @@ def self_test() -> None:
         valid_paused = menu + "\nListing 7 active plugins:\n" + "\n".join(rows[:3] + rows[4:])
         for platform in ("linux", "windows"):
             valid_information = "\n".join((
-                menu, "KeelS2 1.1.0", "Built: test UTC", "Git revision: test",
+                menu, "KeelS2 1.2.0", "Built: test UTC", "Git revision: test",
                 f"Target: {platform.capitalize()}/x86_64", "Plugin ABI: 4",
                 "Created and developed by Peter Brev", "Official website: https://www.keels2.com/",
                 "Listing 8 active plugins:", *rows))
@@ -932,20 +932,20 @@ def run_gate(args: argparse.Namespace) -> int:
         for example in ("stub", "sample"):
             target = "12_" + example
             stage(fixture_root, plugin_root, example + extension, target + extension)
-            name = "KeelS2 Stub" if example == "stub" else "KeelS2 Source 2 Sample"
+            name = "KeelS2 Stub" if example == "stub" else "KeelS2 Sample"
             server.expect(f'keel plugins load "{target}"', f"plugin loaded: {name}")
             if example == "sample":
-                server.expect("keel_sample", "caller=-1 int=42 float=1.25")
-                server.expect("keel_sample bump", "caller=-1 int=43 float=1.5")
+                server.expect("keel_sample", "caller=-1 int=42 mp_limitteams=")
+                server.expect("keel_sample bump", "caller=-1 int=43 mp_limitteams=")
                 server.expect("keel_sample invalid", "usage: keel_sample [bump]")
             server.expect(f'keel plugins reload "{name}"', f"plugin reloaded transactionally: {name}")
             if example == "sample":
-                server.expect("keel_sample", "caller=-1 int=43 float=1.5")
-                server.expect("keel_sample bump", "caller=-1 int=44 float=1.75")
+                server.expect("keel_sample", "caller=-1 int=43 mp_limitteams=")
+                server.expect("keel_sample bump", "caller=-1 int=44 mp_limitteams=")
             server.expect(f'keel plugins unload "{name}"', "plugin unloaded:")
             server.expect(f'keel plugins load "{target}"', f"plugin loaded: {name}")
             if example == "sample":
-                server.expect("keel_sample", "caller=-1 int=44 float=1.75")
+                server.expect("keel_sample", "caller=-1 int=44 mp_limitteams=")
             server.expect(f'keel plugins unload "{name}"', "plugin unloaded:")
         result["examples_gate_passed"] = True
         print("AUTOMATED PHASE 2/3: PASS")

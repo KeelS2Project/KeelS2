@@ -3,6 +3,7 @@
 #include <keels2/convar.h>
 #include <keels2/cs2/cvar_abi.h>
 #include <igameevents.h>
+#include <icvar.h>
 #include <networksystem/inetworkserializer.h>
 #include <playerslot.h>
 #include <keels2/lifecycle.h>
@@ -224,11 +225,27 @@ public:
     KEELS2_EMPTY_SLOT(17)
     KEELS2_EMPTY_SLOT(18)
     KEELS2_EMPTY_SLOT(19)
-    KEELS2_EMPTY_SLOT(20)
-    KEELS2_EMPTY_SLOT(21)
-    KEELS2_EMPTY_SLOT(22)
+    void DispatchConCommand(keels2::cs2::CommandRef command, const void* context, const void* arguments) override
+    {
+        const auto found = std::find_if(entries.begin(), entries.end(), [command](const Entry& entry) {
+            return entry.active && entry.reference.AccessIndex() == command.AccessIndex();
+        });
+        if (found != entries.end() && found->callback)
+        {
+            found->callback->CommandCallback(context, arguments);
+        }
+    }
+    void InstallGlobalChangeCallback(keels2::cs2::GlobalConVarCallback callback) override
+    {
+        global_callbacks.push_back(callback);
+    }
+
+    void RemoveGlobalChangeCallback(keels2::cs2::GlobalConVarCallback callback) override
+    {
+        std::erase(global_callbacks, callback);
+    }
     void CallGlobalChangeCallbacks(
-        keels2::cs2::ConVarObject*,
+        keels2::cs2::ConVarObject* reference,
         std::int32_t slot,
         const char* new_value,
         const char* old_value,
@@ -238,6 +255,16 @@ public:
         last_global_slot = slot;
         last_global_new = new_value ? new_value : "";
         last_global_old = old_value ? old_value : "";
+        const auto callbacks = global_callbacks;
+        if (reference && reference->data)
+        {
+            reference->data->flags |= keels2::cs2::kPerformingCallbacksFlag;
+            for (const auto callback : callbacks)
+            {
+                callback(reference, slot, new_value, old_value, nullptr);
+            }
+            reference->data->flags &= ~keels2::cs2::kPerformingCallbacksFlag;
+        }
         DrainQueuedValues();
     }
     KEELS2_EMPTY_SLOT(24)
@@ -651,7 +678,7 @@ public:
             return false;
         }
 
-        return DispatchCallback(iterator->callback, arguments, slot);
+        return DispatchCallback(iterator->callback, arguments, slot, -1, this, iterator->reference);
     }
 
     bool DispatchRetired(std::initializer_list<const char*> arguments)
@@ -1008,14 +1035,16 @@ public:
         keels2::cs2::ICommandCallback* callback,
         std::initializer_list<const char*> arguments,
         std::int32_t slot = -1,
-        std::int32_t target = -1)
+        std::int32_t target = -1,
+        FakeCvar* cvars = nullptr,
+        keels2::cs2::CommandRef reference = {})
     {
         if (!callback || arguments.size() == 0 || !*arguments.begin())
         {
             return false;
         }
         std::vector<const char*> values(arguments);
-        std::array<unsigned char, keels2::cs2::kCommandSize> command{};
+        alignas(CCommand) std::array<unsigned char, keels2::cs2::kCommandSize> command{};
         const auto count = static_cast<std::int32_t>(values.size());
         const char* const* value_pointer = values.data();
         std::memcpy(
@@ -1029,7 +1058,15 @@ public:
             sizeof(value_pointer)
         );
         const std::array<std::int32_t, 2> context{target, slot};
-        callback->CommandCallback(context.data(), command.data());
+        if (cvars)
+        {
+            keels2::cs2::CvarInterface* volatile dispatch = cvars;
+            dispatch->DispatchConCommand(reference, context.data(), command.data());
+        }
+        else
+        {
+            callback->CommandCallback(context.data(), command.data());
+        }
         return true;
     }
     struct Entry
@@ -1047,6 +1084,7 @@ public:
     std::vector<std::shared_ptr<ConVarEntry>> convars;
     std::vector<PendingValue> queued_values;
     bool draining_queued_values{};
+    std::vector<keels2::cs2::GlobalConVarCallback> global_callbacks;
     bool reject_next_filter{};
     std::string reject_convar_registration_name;
     std::uint16_t next_convar_access{1};
@@ -1593,7 +1631,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
     if (scenario == "core_commands" || scenario == "client_console")
     {
         return selected_profile && Contains(messages, "KeelS2 Menu") &&
-            Contains(messages, "KeelS2 Plugins Menu") && Contains(messages, "KeelS2 1.1.0") &&
+            Contains(messages, "KeelS2 Plugins Menu") && Contains(messages, "KeelS2 1.2.0") &&
             Contains(messages, "load <file>     - Load a plugin module") &&
             Contains(messages, "unload <plugin> - Unload a loaded plugin") &&
             Contains(messages, "Game: cs2") && Contains(messages, "KeelS2 status: running") &&
@@ -1809,6 +1847,14 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "unloaded after ConVar callback drain") &&
             !Contains(messages, "native resources could not be rolled back") &&
             Contains(messages, "host stopped");
+    }
+    if (scenario == "clean_sample")
+    {
+        return selected_profile && Contains(messages, "plugin loaded: KeelS2 Sample 1.2.0") &&
+            Contains(messages, "plugin reloaded transactionally: KeelS2 Sample") &&
+            Contains(messages, "keel_sample observed by the native command hook") &&
+            Contains(messages, "mp_limitteams changed slot=0 old=2 new=3") &&
+            Contains(messages, "host stopped") && !Contains(messages, "plugin load was rejected");
     }
     if (scenario == "convar_facade")
     {
@@ -2114,7 +2160,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
 
 int main(int argument_count, char** arguments)
 {
-    if (argument_count != 44)
+    if (argument_count != 45)
     {
         return 1;
     }
@@ -2162,6 +2208,7 @@ int main(int argument_count, char** arguments)
     const std::filesystem::path fixture = std::filesystem::path(arguments[41]) / scenario;
     const std::filesystem::path native_convar_provider_source = arguments[42];
     const std::filesystem::path native_convar_consumer_source = arguments[43];
+    const std::filesystem::path clean_sample_source = arguments[44];
     const std::filesystem::path shutdown_trace = fixture / "shutdown.trace";
 
 #if defined(_WIN32)
@@ -2208,6 +2255,7 @@ int main(int argument_count, char** arguments)
     const bool authoring_concurrency = scenario == "authoring_concurrency";
     const bool convar_service = scenario == "convar_service";
     const bool convar_failed_load = scenario == "convar_failed_load";
+    const bool clean_sample = scenario == "clean_sample";
     const bool convar_facade = scenario == "convar_facade";
     const bool convar_authoring = scenario == "convar_authoring";
     const bool convar_native_access = scenario == "convar_native_access";
@@ -2235,7 +2283,7 @@ int main(int argument_count, char** arguments)
         !lifecycle_service &&
         !source2_callbacks &&
         !authoring_concurrency && !convar_service && !convar_failed_load && !convar_facade &&
-        !convar_authoring && !convar_native_access &&
+        !convar_authoring && !convar_native_access && !clean_sample &&
         !plugin_runtime_service && !plugin_runtime_concurrency &&
         !plugin_transition_shutdown_retry && !plugin_dependencies && !published_services &&
         !reload_retry && !abi_v4_compatibility &&
@@ -2297,7 +2345,7 @@ int main(int argument_count, char** arguments)
         schema_entity_fixture.Symbol("KeelTest_ConsoleOutput"));
     const auto reset_console = reinterpret_cast<SchemaEntityVoidFunction>(
         schema_entity_fixture.Symbol("KeelTest_ResetConsoleOutput"));
-    if (client_console || convar_facade)
+    if (client_console || convar_facade || clean_sample)
     {
         if (!console_engine || !console_output || !reset_console ||
             !(g_client_console_engine = console_engine()))
@@ -2321,7 +2369,7 @@ int main(int argument_count, char** arguments)
     {
         return 74;
     }
-    if ((convar_facade || convar_authoring) &&
+    if ((convar_facade || convar_authoring || clean_sample) &&
         !g_cvar.SeedInt32("mp_limitteams", 2))
     {
         return 74;
@@ -2581,6 +2629,10 @@ int main(int argument_count, char** arguments)
     {
         return 92;
     }
+    if (clean_sample && !CopyFile(clean_sample_source, convar_facade_plugin_path))
+    {
+        return 168;
+    }
     if (convar_native_access &&
         (!CopyFile(native_convar_provider_source, native_convar_provider_path) ||
          !CopyFile(native_convar_consumer_source, native_convar_consumer_path)))
@@ -2677,7 +2729,7 @@ int main(int argument_count, char** arguments)
     }
 
     g_expose_cvar = !missing_cvar;
-    g_expose_sample_engine = convar_facade;
+    g_expose_sample_engine = convar_facade || clean_sample;
     using ConnectFunction = bool (*)(void*, KeelCreateInterfaceFn);
     const auto connect = config ? VtableFunction<ConnectFunction>(config, 0) : nullptr;
     if (!config || return_code != 0 || !connect || !connect(config, &EngineFactory))
@@ -2769,7 +2821,7 @@ int main(int argument_count, char** arguments)
     Source2CountFunction game_event_remove_count{};
     Source2BoolFunction game_event_listener_active{};
     if (lifecycle_service || lifecycle_failed_load || authoring_concurrency ||
-        source2_callbacks || convar_facade || schema_entity_service || source2_service)
+        source2_callbacks || convar_facade || clean_sample || schema_entity_service || source2_service)
     {
         if (!lifecycle_fixture.Open(real_server_path, loader_error))
         {
@@ -2786,7 +2838,7 @@ int main(int argument_count, char** arguments)
             return 48;
         }
         reset_lifecycle_calls();
-        if (source2_callbacks || convar_facade)
+        if (source2_callbacks || convar_facade || clean_sample)
         {
             dispatch_client_connect = reinterpret_cast<DispatchClientConnectFunction>(
                 lifecycle_fixture.Symbol("KeelTest_DispatchClientConnect"));
@@ -2848,7 +2900,7 @@ int main(int argument_count, char** arguments)
         expected_registrations = 1;
         expected_active = 1;
         if (success || duplicate_command || duplicate_plugin_name || plugin_lifecycle ||
-            command_removal || source2_service || schema_entity_service || convar_facade)
+            command_removal || source2_service || schema_entity_service || convar_facade || clean_sample)
         {
             expected_registrations = 2;
             expected_active = 2;
@@ -2981,7 +3033,7 @@ int main(int argument_count, char** arguments)
             !ContainsInOrder(plugins.c_str(), "[01] KeelS2 Basic (1.0.0) by KeelS2 Project",
                 "[02] Lifecycle First") ||
             !ContainsInOrder(plugins.c_str(), "[02] Lifecycle First", "[03] Lifecycle Second") ||
-            !Contains(version.c_str(), "KeelS2 1.1.0\nBuilt: ") ||
+            !Contains(version.c_str(), "KeelS2 1.2.0\nBuilt: ") ||
             !Contains(version.c_str(), " UTC\nGit revision: ") ||
             !Contains(version.c_str(), "/x86_64\nPlugin ABI: 4\n") ||
             !Contains(credits.c_str(), "Created and developed by Peter Brev") ||
@@ -4427,6 +4479,7 @@ int main(int argument_count, char** arguments)
         using Remove = bool (*)();
         using Unloads = std::uint32_t (*)();
         const auto access = reinterpret_cast<Access>(consumer.Symbol("KeelTest_NativeConVarAccess"));
+        const auto observed_change = reinterpret_cast<Access>(consumer.Symbol("KeelTest_ConVarObservedChange"));
         const auto read = reinterpret_cast<Read>(consumer.Symbol("KeelTest_NativeConVarAbstract"));
         const auto throwing = reinterpret_cast<Throw>(consumer.Symbol("KeelTest_NativeConVarThrow"));
         auto provider_remove = reinterpret_cast<Remove>(provider.Symbol("KeelTest_NativeConVarRemove"));
@@ -4435,7 +4488,7 @@ int main(int argument_count, char** arguments)
         const auto provider_unloads = reinterpret_cast<Unloads>(provider.Symbol("KeelTest_NativeConVarUnloads"));
         const auto consumer_unloads = reinterpret_cast<Unloads>(consumer.Symbol("KeelTest_NativeConVarUnloads"));
         std::int32_t observed = -1;
-        if (!access || !read || !throwing || !provider_remove || !consumer_remove || !refresh ||
+        if (!access || !observed_change || !read || !throwing || !provider_remove || !consumer_remove || !refresh ||
             !provider_unloads || !consumer_unloads ||
             read(&observed) != KEEL_RESULT_OK || observed != 7 ||
             access(nullptr, nullptr, &observed) != KEEL_RESULT_OK || observed != 23 ||
@@ -4464,6 +4517,18 @@ int main(int argument_count, char** arguments)
         {
             std::fputs(messages(), stderr);
             return 162;
+        }
+        during.valid = false;
+        if (observed_change([](void* context) {
+                auto& check = *static_cast<DuringAccess*>(context);
+                check.valid = !check.provider_remove() && !check.consumer_remove() &&
+                    g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) &&
+                    g_cvar.Dispatch({"keel", "plugins", "unload", "2"});
+            }, &during, &observed) != KEEL_RESULT_OK || observed != 23 || !during.valid ||
+            provider_unloads() != 0 || consumer_unloads() != 0)
+        {
+            std::fputs(messages(), stderr);
+            return 167;
         }
         observed = -1;
         KeelResult worker_result = KEEL_RESULT_OK;
@@ -4689,6 +4754,23 @@ int main(int argument_count, char** arguments)
             return 143;
         }
 
+        using ObserverCheck = std::uint32_t (*)(int);
+        auto observer_check = reinterpret_cast<ObserverCheck>(authoring_plugin.Symbol("KeelTest_ConVarObserverCheck"));
+        if (!observer_check || observer_check(0) != 1)
+        {
+            std::fputs(messages(), stderr);
+            return 166;
+        }
+        g_cvar.DrainQueuedConVarValues();
+        std::uint32_t worker_observation{};
+        std::thread observer_worker([&] { worker_observation = observer_check(3); });
+        observer_worker.join();
+        if (observer_check(1) != 1 || observer_check(2) != 1 || worker_observation != 1)
+        {
+            std::fputs(messages(), stderr);
+            return 167;
+        }
+
         if (!g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
             value(0) != 1 || value(1) != 1 || value(2) != 2 || value(3) != 0 ||
             value(4) != 1 || value(5) != 0 || value(6) != 0 || value(7) != 0 ||
@@ -4696,12 +4778,59 @@ int main(int argument_count, char** arguments)
             value(13) != 1 || set(5) != -1 ||
             g_cvar.ActiveConVarCallbacks("keels2_authoring_int") != 0 ||
             g_cvar.convar_unregister_count != 10 || g_cvar.ActiveCount() != 1 ||
-            EngineInvalidFreeCount() != 0)
+            !g_cvar.global_callbacks.empty() || EngineInvalidFreeCount() != 0)
         {
             std::fputs(messages(), stderr);
             return 141;
         }
         authoring_plugin.Close();
+    }
+    if (clean_sample)
+    {
+        const auto set_player = reinterpret_cast<void (*)(int, int, std::uint64_t, bool)>(
+            schema_entity_fixture.Symbol("KeelTest_SetPlayer"));
+        if (!set_player || !reset_console || !console_output || !dispatch_game_event)
+        {
+            return 168;
+        }
+        reset_console();
+        set_player(3, 4301, 76561198000000004ull, false);
+        std::int32_t integer_value{};
+        if (!g_cvar.Dispatch({"keel_sample"}, 3) ||
+            std::strcmp(console_output(3), "#4301 Late player | team=0 authenticated=true\n") != 0 ||
+            !g_cvar.Dispatch({"keel_sample", "bump"}) ||
+            !g_cvar.ReadInt32("keels2_sample_int", integer_value) || integer_value != 43 ||
+            !g_cvar.SetInt32("mp_limitteams", 3) ||
+            !dispatch_game_event(&g_game_event_instance) ||
+            !g_cvar.Dispatch({"keel_sample", "invalid"}) ||
+            !Contains(messages(), "usage: keel_sample [bump]") ||
+            !g_cvar.Dispatch({"keel", "plugins", "reload", "KeelS2 Sample"}) ||
+            !Contains(messages(), "plugin reload queued for the next game frame after the current hook: KeelS2 Sample"))
+        {
+            std::fputs(messages(), stderr);
+            return 169;
+        }
+        dispatch_lifecycle();
+        if (!Contains(messages(), "plugin reloaded transactionally: KeelS2 Sample") ||
+            !g_cvar.Dispatch({"keel_sample", "bump"}) ||
+            !g_cvar.ReadInt32("keels2_sample_int", integer_value) || integer_value != 44 ||
+            !g_cvar.Dispatch({"keel", "plugins", "unload", "KeelS2 Sample"}))
+        {
+            std::fputs(messages(), stderr);
+            return 169;
+        }
+        dispatch_lifecycle();
+        const std::size_t before_retired_event = std::strlen(messages());
+        if (!dispatch_game_event(&g_game_event_instance) || std::strlen(messages()) != before_retired_event ||
+            g_cvar.Dispatch({"keel_sample"}) || !g_cvar.global_callbacks.empty() ||
+            game_event_remove_count() != 0 ||
+            g_cvar.ActiveConVarCallbacks("keels2_sample_int") != 0)
+        {
+            std::fputs(messages(), stderr);
+            std::fprintf(stderr, "clean sample console: %s\n", console_output(3));
+            return 169;
+        }
+        expected_registrations = 3;
     }
     if (convar_facade)
     {
@@ -5015,7 +5144,7 @@ int main(int argument_count, char** arguments)
     const auto repeated_disconnect = VtableFunction<DisconnectFunction>(config, 1);
     repeated_disconnect(config);
 
-    if ((source2_callbacks || convar_facade) &&
+    if ((source2_callbacks || convar_facade || clean_sample) &&
         (game_event_remove_count() != 1 || game_event_listener_active()))
     {
         return 117;
@@ -5182,7 +5311,7 @@ int main(int argument_count, char** arguments)
             stdout);
         std::fputc('\n', stdout);
     }
-    if (convar_service || convar_failed_load || convar_facade || convar_authoring || convar_native_access)
+    if (convar_service || convar_failed_load || convar_facade || convar_authoring || convar_native_access || clean_sample)
     {
         g_cvar.Reset();
         if (EngineOutstandingAllocationCount() != 0 ||

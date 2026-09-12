@@ -28,7 +28,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: keels2-${{ runner.os }}-${{ github.sha }}
-          path: out/releases/v1.1.0-ci/*
+          path: out/releases/v1.2.0-ci/*
           if-no-files-found: error
           retention-days: 30
 

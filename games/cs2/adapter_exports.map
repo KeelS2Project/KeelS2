@@ -5,6 +5,7 @@
         KeelGameAdapter_PlayerAction;
         KeelGameAdapter_QueryPlayers;
         KeelGameAdapter_QueryMessaging;
+        KeelGameAdapter_QueryConVarObservers;
     local:
         *;
 };

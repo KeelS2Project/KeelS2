@@ -942,6 +942,19 @@ KeelResult Host::QueryService(
         *service = &players_->Api();
         return KEEL_RESULT_OK;
     }
+    if (std::strcmp(name, KEELS2_CONVAR_OBSERVE_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_CONVAR_OBSERVE_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!convars_)
+        {
+            convars_ = std::make_unique<ConVarService>(*this, *adapter_);
+        }
+        *service = &convars_->ObserveApi();
+        return KEEL_RESULT_OK;
+    }
     if (std::strcmp(name, KEELS2_CONVAR_ACCESS_SERVICE_NAME) == 0)
     {
         if (version != KEELS2_CONVAR_ACCESS_API_VERSION)
