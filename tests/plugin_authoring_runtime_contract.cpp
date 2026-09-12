@@ -370,6 +370,20 @@ int main(int argument_count, char** arguments)
     {
         return Failure(5, "dependency manifest mapping failed");
     }
+    const auto static_manifest = reinterpret_cast<KeelPluginManifestFn>(
+        library.Symbol("KeelTest_StaticRequirements"));
+    KeelPluginManifest declared{};
+    declared.size = sizeof(declared);
+    if (!static_manifest || static_manifest(&host_query, &declared) != KEEL_TRUE ||
+        declared.dependency_count != 2 || !declared.dependencies ||
+        std::strcmp(declared.dependencies[0].name, "Core Plugin") != 0 ||
+        std::strcmp(declared.dependencies[0].version, "1.2.3") != 0 ||
+        declared.dependencies[0].requirement != KEELS2_PLUGIN_DEPENDENCY_EXACT ||
+        std::strcmp(declared.dependencies[1].name, "Utility Plugin") != 0 ||
+        declared.dependencies[1].requirement != KEELS2_PLUGIN_DEPENDENCY_AT_LEAST)
+    {
+        return Failure(18, "static dependency manifest mapping failed");
+    }
     mode(1);
     dependency_manifest = {};
     dependency_manifest.size = sizeof(dependency_manifest);

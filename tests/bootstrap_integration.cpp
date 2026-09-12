@@ -1631,7 +1631,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
     if (scenario == "core_commands" || scenario == "client_console")
     {
         return selected_profile && Contains(messages, "KeelS2 Menu") &&
-            Contains(messages, "KeelS2 Plugins Menu") && Contains(messages, "KeelS2 1.2.0") &&
+            Contains(messages, "KeelS2 Plugins Menu") && Contains(messages, "KeelS2 1.0.0") &&
             Contains(messages, "load <file>     - Load a plugin module") &&
             Contains(messages, "unload <plugin> - Unload a loaded plugin") &&
             Contains(messages, "Game: cs2") && Contains(messages, "KeelS2 status: running") &&
@@ -1850,7 +1850,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
     }
     if (scenario == "clean_sample")
     {
-        return selected_profile && Contains(messages, "plugin loaded: KeelS2 Sample 1.2.0") &&
+        return selected_profile && Contains(messages, "plugin loaded: KeelS2 Sample 1.0.0") &&
             Contains(messages, "plugin reloaded transactionally: KeelS2 Sample") &&
             Contains(messages, "keel_sample observed by the native command hook") &&
             Contains(messages, "mp_limitteams changed slot=0 old=2 new=3") &&
@@ -3033,7 +3033,7 @@ int main(int argument_count, char** arguments)
             !ContainsInOrder(plugins.c_str(), "[01] KeelS2 Basic (1.0.0) by KeelS2 Project",
                 "[02] Lifecycle First") ||
             !ContainsInOrder(plugins.c_str(), "[02] Lifecycle First", "[03] Lifecycle Second") ||
-            !Contains(version.c_str(), "KeelS2 1.2.0\nBuilt: ") ||
+            !Contains(version.c_str(), "KeelS2 1.0.0\nBuilt: ") ||
             !Contains(version.c_str(), " UTC\nGit revision: ") ||
             !Contains(version.c_str(), "/x86_64\nPlugin ABI: 4\n") ||
             !Contains(credits.c_str(), "Created and developed by Peter Brev") ||

@@ -40,6 +40,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -85,6 +86,15 @@ struct PluginDependency
 
 namespace keels2
 {
+
+using PluginDetails = KeelPluginSnapshot;
+
+struct PluginRequirement
+{
+    const char* name;
+    const char* version;
+    DependencyRequirement requirement{DependencyRequirement::at_least};
+};
 
 template <typename Value>
 class ConVar;
@@ -1759,6 +1769,37 @@ protected:
         return result == KEEL_RESULT_OK || result == KEEL_RESULT_NOT_FOUND;
     }
 
+    bool GetPlugin(const char* name, PluginDetails& output)
+    {
+        output = {};
+        if (!name || !name[0])
+        {
+            return status_.Set(KEEL_RESULT_INVALID_ARGUMENT);
+        }
+        return ReadPlugin(output, [&](const KeelPluginsApi& api, PluginDetails& snapshot) {
+            return api.find(context_.PluginHandle(), name, &snapshot);
+        });
+    }
+
+    bool GetPlugin(PluginId target, PluginDetails& output)
+    {
+        output = {};
+        if (!target)
+        {
+            return status_.Set(KEEL_RESULT_INVALID_ARGUMENT);
+        }
+        return ReadPlugin(output, [&](const KeelPluginsApi& api, PluginDetails& snapshot) {
+            return api.get(context_.PluginHandle(), target, &snapshot);
+        });
+    }
+
+    bool GetPluginAt(uint32 index, PluginDetails& output)
+    {
+        return ReadPlugin(output, [&](const KeelPluginsApi& api, PluginDetails& snapshot) {
+            return api.at(context_.PluginHandle(), index, &snapshot);
+        });
+    }
+
     std::vector<PluginSnapshot> Plugins()
     {
         std::vector<PluginSnapshot> snapshots;
@@ -2828,6 +2869,43 @@ private:
         }
     }
 
+    template <typename Lookup>
+    bool ReadPlugin(PluginDetails& output, Lookup lookup)
+    {
+        output = {};
+        const KeelPluginsApi* service = PluginRuntimeService();
+        if (!service || !context_)
+        {
+            return status_.Set(KEEL_RESULT_NOT_READY);
+        }
+        try
+        {
+            PluginDetails snapshot{};
+            snapshot.size = sizeof(snapshot);
+            const KeelResult result = lookup(*service, snapshot);
+            if (result != KEEL_RESULT_OK)
+            {
+                return status_.Set(result);
+            }
+            if (snapshot.size != sizeof(snapshot) || !snapshot.handle ||
+                !std::memchr(snapshot.name, 0, sizeof(snapshot.name)) ||
+                !std::memchr(snapshot.author, 0, sizeof(snapshot.author)) ||
+                !std::memchr(snapshot.version, 0, sizeof(snapshot.version)) ||
+                !std::memchr(snapshot.description, 0, sizeof(snapshot.description)) ||
+                !std::memchr(snapshot.file, 0, sizeof(snapshot.file)) ||
+                !std::memchr(snapshot.diagnostic, 0, sizeof(snapshot.diagnostic)))
+            {
+                return status_.Set(KEEL_RESULT_INCOMPATIBLE);
+            }
+            output = snapshot;
+            return status_.Set(KEEL_RESULT_OK);
+        }
+        catch (...)
+        {
+            return status_.Set(KEEL_RESULT_ENGINE_FAILURE);
+        }
+    }
+
     std::vector<std::unique_ptr<keels2::detail::AuthoringCommandBinding>> commands_;
     std::list<std::unique_ptr<keels2::detail::AuthoringConVarResource>> convar_resources_;
     std::vector<std::unique_ptr<keels2::detail::GameEventBinding>> game_events_;
@@ -3061,6 +3139,35 @@ public:
         }
     }
 
+    static auto DeclaredDependencies()
+    {
+        if constexpr (requires { Type::Requirements; })
+        {
+            static_assert(std::is_array_v<decltype(Type::Requirements)> &&
+                    std::is_same_v<std::remove_cv_t<std::remove_extent_t<decltype(Type::Requirements)>>,
+                        PluginRequirement>,
+                "KeelS2 Requirements must be a static constexpr PluginRequirement array");
+            static_assert([] {
+                for (const auto& requirement : Type::Requirements)
+                {
+                    if (!requirement.name || !requirement.name[0] ||
+                        !requirement.version || !requirement.version[0] ||
+                        (requirement.requirement != DependencyRequirement::exact &&
+                            requirement.requirement != DependencyRequirement::at_least))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }(), "KeelS2 Requirements need nonempty names, versions, and a valid dependency requirement");
+            return std::span<const PluginRequirement>(Type::Requirements);
+        }
+        else
+        {
+            return Instance().Dependencies();
+        }
+    }
+
     static KeelBool Manifest(
         const KeelHostQuery* query,
         KeelPluginManifest* output) noexcept
@@ -3074,7 +3181,7 @@ public:
         try
         {
             State& state = PluginState();
-            const auto dependencies = Instance().Dependencies();
+            const auto dependencies = DeclaredDependencies();
             if (dependencies.size() > UINT32_MAX)
             {
                 return KEEL_FALSE;

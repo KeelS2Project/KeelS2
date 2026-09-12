@@ -1,4 +1,6 @@
-#include <keels2/keels2.hpp>
+#include <keels2/authoring.hpp>
+
+#include <cstring>
 
 #include <cstdint>
 #include <stdexcept>
@@ -6,6 +8,8 @@
 
 namespace
 {
+
+using namespace keels2::authoring;
 
 std::uint32_t g_mode{};
 std::uint32_t g_load_count{};
@@ -51,12 +55,29 @@ public:
             target->author == "KeelS2 Tests" && target->version == "3.4.5" &&
             target->description == "Runtime target" && target->file == "target.so" &&
             target->diagnostic.empty();
+        PluginDetails details;
+        g_helpers_valid = g_helpers_valid && GetPlugin("Target Plugin", details) &&
+            details.handle == 22 && std::strcmp(details.name, "Target Plugin") == 0 &&
+            GetPlugin(PluginId{22}, details) && details.state == KEELS2_PLUGIN_STATE_RUNNING;
+        uint32 count{};
+        while (GetPluginAt(count, details))
+        {
+            ++count;
+        }
+        g_helpers_valid = g_helpers_valid && count == 2 &&
+            LastResult() == KEEL_RESULT_NOT_FOUND && details.handle == 0 && details.name[0] == 0 &&
+            !GetPlugin("Missing Plugin", details) && LastResult() == KEEL_RESULT_NOT_FOUND &&
+            !GetPlugin(static_cast<const char*>(nullptr), details) && LastResult() == KEEL_RESULT_INVALID_ARGUMENT &&
+            !GetPlugin(PluginId{}, details) && LastResult() == KEEL_RESULT_INVALID_ARGUMENT;
         return g_helpers_valid;
     }
 
     void Unload() override
     {
         ++g_unload_count;
+        PluginDetails details;
+        g_helpers_valid = g_helpers_valid && !GetPlugin("Target Plugin", details) &&
+            LastResult() == KEEL_RESULT_NOT_READY && details.handle == 0;
         g_unload_helpers_disabled = Plugins().empty() && !FindPlugin("Target Plugin") &&
             !PausePlugin(22) && !ResumePlugin(22);
     }
@@ -103,9 +124,30 @@ private:
     }
 };
 
+class StaticRequirements final : public Plugin
+{
+public:
+    static constexpr PluginInfo Info{
+        .name = "Static Requirements",
+        .author = "KeelS2 Tests",
+        .version = "1.0.0",
+        .description = "Validates compile-time dependency declarations"
+    };
+    static constexpr PluginRequirement Requirements[]{
+        {.name = "Core Plugin", .version = "1.2.3", .requirement = DependencyRequirement::exact},
+        {.name = "Utility Plugin", .version = "2.0.0"}
+    };
+};
+
 }
 
 KEELS2_PLUGIN(PluginAuthoringRuntime)
+
+extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelTest_StaticRequirements(
+    const KeelHostQuery* query, KeelPluginManifest* output)
+{
+    return keels2::detail::AuthoringAdapter<StaticRequirements>::Manifest(query, output);
+}
 
 extern "C" KEELS2_PLUGIN_EXPORT void KeelTest_PluginAuthoringRuntimeReset()
 {

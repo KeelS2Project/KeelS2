@@ -284,7 +284,7 @@ def live_bundle(
 
     gate = {
         "schema": 1,
-        "version": "1.1.0",
+        "version": "1.0.0",
         "factory_probe_required": True,
         "client_console_required": True,
         "examples_required": True,

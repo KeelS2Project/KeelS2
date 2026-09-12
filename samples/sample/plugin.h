@@ -13,7 +13,7 @@ public:
     static constexpr PluginInfo Info{
         .name = "KeelS2 Sample",
         .author = "KeelS2 Project",
-        .version = "1.2.0",
+        .version = "1.0.0",
         .description = "Commands, players, text, ConVars, events, and native hooks"
     };
 
