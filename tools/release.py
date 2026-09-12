@@ -315,6 +315,7 @@ def sdk_entries() -> tuple[str, ...]:
         "KeelS2/SDK/THIRD_PARTY_NOTICES.md",
         "KeelS2/SDK/include/keels2/bootstrap_api.h",
         "KeelS2/SDK/include/keels2/convar.h",
+        "KeelS2/SDK/include/keels2/detail/authoring_status.hpp",
         "KeelS2/SDK/include/keels2/entities.h",
         "KeelS2/SDK/include/keels2/entities.hpp",
         "KeelS2/SDK/include/keels2/factories.h",
