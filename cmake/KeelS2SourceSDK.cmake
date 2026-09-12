@@ -136,9 +136,22 @@ function(keels2_provide_source_sdk)
             COMPILER_MSVC64
             WIN32
             WIN64
+            NOMINMAX
         )
+        set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+        set(protobuf_INSTALL OFF)
+        set(protobuf_BUILD_TESTS OFF)
+        set(protobuf_BUILD_CONFORMANCE OFF)
+        set(protobuf_BUILD_EXAMPLES OFF)
+        set(protobuf_BUILD_PROTOC_BINARIES OFF)
+        set(protobuf_BUILD_LIBPROTOC OFF)
+        set(protobuf_BUILD_SHARED_LIBS OFF)
+        set(protobuf_MSVC_STATIC_RUNTIME OFF)
+        set(protobuf_WITH_ZLIB OFF)
+        add_subdirectory("${_keels2_source_sdk_root}/thirdparty/protobuf-3.21.8"
+            "${CMAKE_BINARY_DIR}/_keels2/protobuf" EXCLUDE_FROM_ALL)
         set(_keels2_source_sdk_libraries
-            "${_keels2_source_sdk_root}/lib/public/win64/2015/libprotobuf.lib"
+            protobuf::libprotobuf
             "${_keels2_source_sdk_root}/lib/public/win64/mathlib.lib"
             "${_keels2_source_sdk_root}/lib/public/win64/tier0.lib"
             "${_keels2_source_sdk_root}/lib/public/win64/interfaces.lib"

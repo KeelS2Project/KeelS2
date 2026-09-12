@@ -1084,9 +1084,9 @@ public:
         Method method)
         : AuthoringTypedConVarResource<Value>(plugin, std::move(name)),
           owner_(owner),
-          method_(method),
-          convar_(this->Handle())
+          method_(method)
     {
+        convar_ = this->Handle();
     }
 
     KeelResult Observe(const Context& context)
