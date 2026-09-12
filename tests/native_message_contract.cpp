@@ -53,10 +53,14 @@ bool GetPlayer(void*, CPlayerSlot slot, google::protobuf::Message& info)
     return true;
 }
 
-CPlayerUserId GetUser(void*, CPlayerSlot slot)
+class UserIdFixture final
 {
-    return CPlayerUserId(500 + slot.Get());
-}
+public:
+    virtual CPlayerUserId GetUser(CPlayerSlot slot)
+    {
+        return CPlayerUserId(500 + slot.Get());
+    }
+};
 
 INetworkMessageInternal* FindMessage(void*, const char* name)
 {
@@ -152,7 +156,10 @@ int main()
         std::unique_ptr<google::protobuf::Message> proto(factory.GetPrototype(schema->message_type(0))->New());
         payload = proto.get();
         Install<&IVEngineServer2::GetPlayerInfo>(engine_table, &GetPlayer);
-        Install<&IVEngineServer2::GetPlayerUserId>(engine_table, &GetUser);
+        UserIdFixture user_id;
+        void** user_id_table{};
+        std::memcpy(&user_id_table, &user_id, sizeof(user_id_table));
+        Install<&IVEngineServer2::GetPlayerUserId>(engine_table, user_id_table[0]);
         Install<&INetworkMessages::FindNetworkMessagePartial>(messages_table, &FindMessage);
         Install<&INetworkMessages::DeallocateNetMessageAbstract>(messages_table, &Release);
         Install<&INetworkMessageInternal::AllocateMessage>(definition_table, &Allocate);

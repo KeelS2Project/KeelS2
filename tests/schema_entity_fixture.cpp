@@ -924,10 +924,14 @@ bool PlayerInfo(void*, CPlayerSlot slot, google::protobuf::Message& info)
     return true;
 }
 
-CPlayerUserId PlayerUser(void*, CPlayerSlot slot)
+class UserIdFixture final
 {
-    return CPlayerUserId(slot.Get() == g_player_slot ? g_player_user : -1);
-}
+public:
+    virtual CPlayerUserId GetUser(CPlayerSlot slot)
+    {
+        return CPlayerUserId(slot.Get() == g_player_slot ? g_player_user : -1);
+    }
+};
 
 bool PlayerAuthenticated(void*, CPlayerSlot slot)
 {
@@ -962,7 +966,10 @@ extern "C" KEELS2_SCHEMA_FIXTURE_EXPORT void* KeelTest_ConsoleEngine()
     g_console_vtable[0] = FunctionAddress(&ValidationSlot);
     g_console_vtable[*index] = FunctionAddress(&ConsolePrint);
     g_console_vtable[*info] = FunctionAddress(&PlayerInfo);
-    g_console_vtable[*user] = FunctionAddress(&PlayerUser);
+    UserIdFixture user_id;
+    void** user_id_table{};
+    std::memcpy(&user_id_table, &user_id, sizeof(user_id_table));
+    g_console_vtable[*user] = user_id_table[0];
     g_console_vtable[*auth] = FunctionAddress(&PlayerAuthenticated);
     g_console_vtable[*identity] = FunctionAddress(&PlayerIdentity);
     return &g_console_engine;

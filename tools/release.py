@@ -726,7 +726,6 @@ def build_release(args: argparse.Namespace) -> None:
             configuration,
             "--verbose",
             "--output-on-failure",
-            "--stop-on-failure",
             "--parallel",
             "2",
             "--timeout",
