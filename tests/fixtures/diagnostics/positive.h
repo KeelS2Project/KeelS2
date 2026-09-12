@@ -15,7 +15,7 @@ public:
         .description = "Compile diagnostic"
     };
     static constexpr PluginRequirement Requirements[]{
-        {.name = "Core Plugin", .version = "1.0.0"}
+        PluginRequirement{"Core Plugin", "1.0.0"}
     };
     bool Load() override;
     Action OnCommand(ConCommandRef, const CCommandContext&, const CCommand&);

@@ -134,8 +134,8 @@ public:
         .description = "Validates compile-time dependency declarations"
     };
     static constexpr PluginRequirement Requirements[]{
-        {.name = "Core Plugin", .version = "1.2.3", .requirement = DependencyRequirement::exact},
-        {.name = "Utility Plugin", .version = "2.0.0"}
+        PluginRequirement{"Core Plugin", "1.2.3", DependencyRequirement::exact},
+        PluginRequirement{"Utility Plugin", "2.0.0"}
     };
 };
 

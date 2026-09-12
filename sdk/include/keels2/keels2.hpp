@@ -91,9 +91,15 @@ using PluginDetails = KeelPluginSnapshot;
 
 struct PluginRequirement
 {
+    constexpr PluginRequirement(const char* plugin_name, const char* plugin_version,
+        DependencyRequirement version_requirement = DependencyRequirement::at_least)
+        : name(plugin_name), version(plugin_version), requirement(version_requirement)
+    {
+    }
+
     const char* name;
     const char* version;
-    DependencyRequirement requirement{DependencyRequirement::at_least};
+    DependencyRequirement requirement;
 };
 
 template <typename Value>
