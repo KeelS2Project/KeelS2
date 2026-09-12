@@ -19,6 +19,13 @@ unsigned registrations{};
 unsigned removals{};
 bool throwRegistration{};
 bool failLoad{};
+bool throwPlayer{};
+bool repeatPlayer{};
+bool retiredEntity{};
+KeelResult actionResult = KEEL_RESULT_OK;
+KeelPlayerAction lastAction{};
+unsigned actionCalls{};
+unsigned entityReleases{};
 
 class Probe final : public Plugin
 {
@@ -36,6 +43,8 @@ public:
     using Plugin::PrintToConsole;
     using Plugin::GetPlayer;
     using Plugin::GetNextPlayer;
+    using Plugin::GetPlayerByUserId;
+    using Plugin::FindEntity;
     using Plugin::CreateCommand;
     using Plugin::ListenForGameEvent;
     using Plugin::LastResult;
@@ -67,6 +76,11 @@ Probe* Probe::current{};
 using Adapter = keels2::detail::AuthoringAdapter<Probe>;
 static_assert(std::is_same_v<decltype(Probe::current->SendToChat(CPlayerSlot(0), "text")), bool>);
 static_assert(std::is_same_v<decltype(Probe::current->PrintToConsole(CPlayerSlot(0), "text")), KeelResult>);
+static_assert(std::is_same_v<decltype(Probe::current->GetPlayerByUserId(42, std::declval<PlayerInfo&>())), bool>);
+static_assert(std::is_same_v<decltype(std::declval<Entity&>().TryKill()), bool>);
+static_assert(std::is_same_v<decltype(std::declval<Entity&>().TryApplyImpulse(Vector())), bool>);
+static_assert(std::is_same_v<decltype(std::declval<Entity&>().Kill()), KeelResult>);
+static_assert(std::is_same_v<decltype(std::declval<Entity&>().ApplyImpulse(Vector())), KeelResult>);
 static_assert(static_cast<KeelHookAction>(PLUGIN_CONTINUE) == KH_ACTION_CONTINUE);
 static_assert(static_cast<KeelHookAction>(PLUGIN_OVERRIDE) == KH_ACTION_OVERRIDE);
 static_assert(static_cast<KeelHookAction>(PLUGIN_SUPERSEDE) == KH_ACTION_SUPERSEDE);
@@ -98,9 +112,78 @@ KeelResult GetPlayer(KeelPluginHandle, int32, KeelPlayerInfo*)
     return playerResult;
 }
 
+KeelResult NextPlayer(KeelPluginHandle, int32 after, KeelPlayerInfo* player)
+{
+    if (throwPlayer)
+    {
+        throw std::runtime_error("injected player lookup failure");
+    }
+    if (playerResult != KEEL_RESULT_OK)
+    {
+        return playerResult;
+    }
+    if (after >= 7 && !repeatPlayer)
+    {
+        return KEEL_RESULT_NOT_FOUND;
+    }
+    *player = {};
+    player->size = sizeof(*player);
+    player->slot = after < 0 || repeatPlayer ? 0 : 7;
+    player->user_id = player->slot == 0 ? 7 : 42;
+    player->connection = 10u + static_cast<uint64>(player->slot);
+    player->flags = KEELS2_PLAYER_CONNECTED;
+    std::memcpy(player->name, "Lookup player", sizeof("Lookup player"));
+    return KEEL_RESULT_OK;
+}
+
 KeelResult Validate(KeelPluginHandle, const KeelPlayerConnection*, KeelPlayerInfo*)
 {
     return playerResult;
+}
+
+KeelResult FindEntity(KeelPluginHandle, int32 index, KeelEntityHandle* entity)
+{
+    *entity = index == 7 && !retiredEntity ? 99 : 0;
+    return *entity ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
+}
+
+KeelResult FindSource2Entity(KeelPluginHandle plugin, uint32 handle, KeelEntityHandle* entity)
+{
+    return FindEntity(plugin, handle == 0x12007u ? 7 : -1, entity);
+}
+
+KeelResult ReleaseEntity(KeelPluginHandle, KeelEntityHandle)
+{
+    ++entityReleases;
+    return KEEL_RESULT_OK;
+}
+
+KeelResult DescribeEntity(KeelPluginHandle, KeelEntityHandle entity, KeelEntityInfo* info)
+{
+    *info = {sizeof(*info), 7, 0x12007u, 0, 1};
+    return entity == 99 && !retiredEntity ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
+}
+
+KeelResult EqualEntities(KeelPluginHandle, KeelEntityHandle left, KeelEntityHandle right, KeelBool* equal)
+{
+    *equal = left == right ? KEEL_TRUE : KEEL_FALSE;
+    return KEEL_RESULT_OK;
+}
+
+KeelResult ReadEntity(KeelPluginHandle, KeelEntityHandle, KeelSchemaFieldHandle, void*, uint32)
+{
+    return KEEL_RESULT_UNSUPPORTED;
+}
+
+KeelResult ApplyAction(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelPlayerAction* action)
+{
+    if (plugin != 77 || entity != 99 || !action || action->size != sizeof(*action))
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    ++actionCalls;
+    lastAction = *action;
+    return retiredEntity ? KEEL_RESULT_NOT_FOUND : actionResult;
 }
 
 KeelResult Register(KeelPluginHandle, const KeelSource2CommandSpec* spec, KeelCommandHandle* handle)
@@ -148,6 +231,8 @@ KeelNativeRuntimeApi nativeApi;
 KeelPlayersApi playersApi;
 KeelSource2AuthoringApi authoringApi;
 KeelSource2CallbacksApi callbacksApi;
+KeelEntitiesApi entitiesApi;
+KeelPlayerActionsApi actionsApi;
 
 KeelResult Query(KeelPluginHandle, const char* name, uint32, const void** output)
 {
@@ -167,6 +252,14 @@ KeelResult Query(KeelPluginHandle, const char* name, uint32, const void** output
     else if (std::strcmp(name, KEELS2_SOURCE2_CALLBACKS_SERVICE_NAME) == 0)
     {
         *output = &callbacksApi;
+    }
+    else if (std::strcmp(name, KEELS2_ENTITIES_SERVICE_NAME) == 0)
+    {
+        *output = &entitiesApi;
+    }
+    else if (std::strcmp(name, KEELS2_PLAYER_ACTIONS_SERVICE_NAME) == 0)
+    {
+        *output = &actionsApi;
     }
     return *output ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
 }
@@ -189,7 +282,7 @@ int main()
     playersApi.size = sizeof(playersApi);
     playersApi.api_version = KEELS2_PLAYERS_API_VERSION;
     playersApi.get_player = &GetPlayer;
-    playersApi.get_next_player = &GetPlayer;
+    playersApi.get_next_player = &NextPlayer;
     playersApi.validate_connection = &Validate;
     authoringApi.size = sizeof(authoringApi);
     authoringApi.api_version = KEELS2_SOURCE2_AUTHORING_API_VERSION;
@@ -202,6 +295,9 @@ int main()
     callbacksApi.api_version = KEELS2_SOURCE2_CALLBACKS_API_VERSION;
     callbacksApi.subscribe = &Subscribe;
     callbacksApi.unsubscribe = &Remove;
+    entitiesApi = {sizeof(entitiesApi), KEELS2_ENTITIES_API_VERSION,
+        &FindEntity, &FindSource2Entity, &ReleaseEntity, &DescribeEntity, &EqualEntities, &ReadEntity};
+    actionsApi = {sizeof(actionsApi), KEELS2_PLAYER_ACTIONS_API_VERSION, &ApplyAction};
     KeelHostApi host{};
     host.size = sizeof(host);
     host.abi_version = KEELS2_PLUGIN_ABI_VERSION;
@@ -248,11 +344,82 @@ int main()
     {
         return Failure(5, "missing players were logged or confused with success");
     }
+    playerResult = KEEL_RESULT_OK;
+    if (!plugin.GetPlayerByUserId(42, player) || player.slot.Get() != 7 || player.user_id != 42 ||
+        !plugin.GetPlayerByUserId(7, player) || player.slot.Get() != 0 || player.user_id != 7 ||
+        plugin.GetPlayerByUserId(123, player) || player.user_id != -1 || player.name.Length() ||
+        plugin.LastResult() != KEEL_RESULT_NOT_FOUND || logText != previousLog ||
+        plugin.GetPlayerByUserId(-1, player) || plugin.LastResult() != KEEL_RESULT_INVALID_ARGUMENT)
+    {
+        return Failure(12, "user ID lookup confused identities, retained absent data, or logged absence");
+    }
+    repeatPlayer = true;
+    if (plugin.GetPlayerByUserId(42, player) || plugin.LastResult() != KEEL_RESULT_INCOMPATIBLE ||
+        player.user_id != -1 || player.connection)
+    {
+        return Failure(13, "malformed player iteration was accepted");
+    }
+    repeatPlayer = false;
+    throwPlayer = true;
+    if (plugin.GetPlayerByUserId(42, player) || plugin.LastResult() != KEEL_RESULT_ENGINE_FAILURE ||
+        player.user_id != -1 || player.name.Length())
+    {
+        return Failure(14, "player lookup exception escaped or retained output");
+    }
+    throwPlayer = false;
     playerResult = KEEL_RESULT_WRONG_THREAD;
-    if (plugin.GetPlayer(slot, player) || plugin.LastResult() != KEEL_RESULT_WRONG_THREAD)
+    if (plugin.GetPlayer(slot, player) || plugin.LastResult() != KEEL_RESULT_WRONG_THREAD ||
+        plugin.GetPlayerByUserId(42, player) || plugin.LastResult() != KEEL_RESULT_WRONG_THREAD ||
+        !std::strstr(plugin.LastError(), "game thread"))
     {
         return Failure(6, "player failure was confused with ordinary absence");
     }
+    Entity pawn;
+    if (pawn.TryKill() || pawn.LastResult() != KEEL_RESULT_NOT_READY || actionCalls ||
+        !plugin.FindEntity(7, pawn) || !pawn.TryApplyImpulse(Vector(1, 2, 3), 5) ||
+        lastAction.kind != KEELS2_PLAYER_ACTION_IMPULSE || lastAction.impulse[0] != 1 ||
+        lastAction.impulse[1] != 2 || lastAction.impulse[2] != 3 || lastAction.damage != 5 ||
+        pawn.LastResult() != KEEL_RESULT_OK || pawn.LastError()[0] || !pawn.TryKill() ||
+        lastAction.kind != KEELS2_PLAYER_ACTION_KILL || pawn.Kill() != KEEL_RESULT_OK)
+    {
+        return Failure(15, "Boolean actions lost arguments, inverted success, or broke the result API");
+    }
+    actionResult = KEEL_RESULT_WRONG_THREAD;
+    if (pawn.TryKill() || pawn.LastResult() != KEEL_RESULT_WRONG_THREAD ||
+        !std::strstr(pawn.LastError(), "game thread") || pawn.Kill() != KEEL_RESULT_WRONG_THREAD)
+    {
+        return Failure(16, "entity action lost its failure diagnostic or legacy result");
+    }
+    Entity moved(std::move(pawn));
+    if (pawn || pawn.LastResult() != KEEL_RESULT_NOT_READY || entityReleases ||
+        moved.LastResult() != KEEL_RESULT_WRONG_THREAD)
+    {
+        return Failure(17, "moving an entity lost the action diagnostic or released its handle");
+    }
+    actionResult = KEEL_RESULT_INVALID_ARGUMENT;
+    if (moved.TryApplyImpulse(Vector(1, 2, 3), -1) ||
+        moved.LastResult() != KEEL_RESULT_INVALID_ARGUMENT || !moved.LastError()[0])
+    {
+        return Failure(18, "invalid impulse was reported as success");
+    }
+    actionResult = KEEL_RESULT_OK;
+    if (!moved.TryKill() || moved.LastResult() != KEEL_RESULT_OK || moved.LastError()[0])
+    {
+        return Failure(19, "successful action retained a previous error");
+    }
+    ++actionsApi.api_version;
+    const unsigned beforeIncompatible = actionCalls;
+    if (moved.TryKill() || moved.LastResult() != KEEL_RESULT_INCOMPATIBLE || actionCalls != beforeIncompatible)
+    {
+        return Failure(20, "incompatible action service was invoked");
+    }
+    --actionsApi.api_version;
+    retiredEntity = true;
+    if (moved.TryKill() || moved.LastResult() != KEEL_RESULT_NOT_FOUND)
+    {
+        return Failure(21, "retired pawn was reported as a successful action");
+    }
+    retiredEntity = false;
     if (plugin.CreateCommand("reserved", "test", &Probe::Command) ||
         plugin.LastResult() != KEEL_RESULT_RESERVED_NAME ||
         logText.find("command 'reserved': name is reserved") == std::string::npos ||
@@ -275,8 +442,11 @@ int main()
         return Failure(9, "command ownership or duplicate rejection failed");
     }
     Adapter::Unload(77);
+    const unsigned beforeUnloadedAction = actionCalls;
     if (removals != 1 || plugin.SendToChat(slot, "after unload") ||
-        plugin.LastResult() != KEEL_RESULT_NOT_READY)
+        plugin.LastResult() != KEEL_RESULT_NOT_READY || moved.TryKill() ||
+        moved.LastResult() != KEEL_RESULT_NOT_READY || actionCalls != beforeUnloadedAction ||
+        plugin.GetPlayerByUserId(42, player) || plugin.LastResult() != KEEL_RESULT_NOT_READY)
     {
         return Failure(10, "unload did not retire the command or disable text");
     }

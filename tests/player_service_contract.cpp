@@ -28,6 +28,7 @@ bool PlayerServiceContract::Check(keels2::Context& context, const char* stage)
     const KeelPluginHandle plugin = context.PluginHandle();
     KeelPlayerInfo player{};
     player.size = sizeof(player);
+    keels2::PlayerInfo native;
     if (std::strcmp(stage, "late") == 0)
     {
         const void* service = reinterpret_cast<const void*>(1);
@@ -44,7 +45,6 @@ bool PlayerServiceContract::Check(keels2::Context& context, const char* stage)
         {
             return false;
         }
-        keels2::PlayerInfo native;
         if (runtime_.Connect(context) != KEEL_RESULT_OK || runtime_.CheckGameThread() != KEEL_RESULT_OK ||
             service_.Connect(context) != KEEL_RESULT_OK ||
             service_.Get(CPlayerSlot(3), native) != KEEL_RESULT_OK ||
@@ -62,6 +62,13 @@ bool PlayerServiceContract::Check(keels2::Context& context, const char* stage)
         {
             return false;
         }
+        if (service_.GetByUserId(4301, native) != KEEL_RESULT_OK || native.slot.Get() != 3 ||
+            native.user_id != 4301 || native.connection != connection.generation ||
+            service_.GetByUserId(3, native) != KEEL_RESULT_NOT_FOUND || native.user_id != -1 ||
+            service_.GetByUserId(-1, native) != KEEL_RESULT_INVALID_ARGUMENT || native.connection)
+        {
+            return false;
+        }
         first_ = player;
         current_ = player;
         if (api_->get_next_player(plugin, -1, &player) != KEEL_RESULT_OK ||
@@ -74,9 +81,14 @@ bool PlayerServiceContract::Check(keels2::Context& context, const char* stage)
             return false;
         }
         KeelResult wrong_thread{};
-        std::thread worker([&] { wrong_thread = api_->get_player(plugin, 3, &player); });
+        KeelResult wrong_lookup_thread{};
+        std::thread worker([&] {
+            wrong_thread = api_->get_player(plugin, 3, &player);
+            wrong_lookup_thread = service_.GetByUserId(4301, native);
+        });
         worker.join();
-        return wrong_thread == KEEL_RESULT_WRONG_THREAD && Empty(player);
+        return wrong_thread == KEEL_RESULT_WRONG_THREAD && Empty(player) &&
+            wrong_lookup_thread == KEEL_RESULT_WRONG_THREAD && native.user_id == -1 && !native.connection;
     }
     if (!api_)
     {
@@ -112,7 +124,8 @@ bool PlayerServiceContract::Check(keels2::Context& context, const char* stage)
     {
         const auto connection = Connection(first_);
         return api_->get_player(plugin, 3, &player) == KEEL_RESULT_NOT_FOUND && Empty(player) &&
-            api_->validate_connection(plugin, &connection, &player) == KEEL_RESULT_NOT_FOUND && Empty(player);
+            api_->validate_connection(plugin, &connection, &player) == KEEL_RESULT_NOT_FOUND && Empty(player) &&
+            service_.GetByUserId(4301, native) == KEEL_RESULT_NOT_FOUND && native.user_id == -1 && !native.connection;
     }
     if (std::strcmp(stage, "reconnect") == 0 || std::strcmp(stage, "reuse") == 0)
     {
@@ -124,6 +137,12 @@ bool PlayerServiceContract::Check(keels2::Context& context, const char* stage)
             return false;
         }
         current_ = player;
+        if (service_.GetByUserId(current_.user_id, native) != KEEL_RESULT_OK ||
+            native.slot.Get() != 3 || native.connection != current_.connection ||
+            (current_.user_id != 4301 && service_.GetByUserId(4301, native) != KEEL_RESULT_NOT_FOUND))
+        {
+            return false;
+        }
         return api_->validate_connection(plugin, &previous, &player) == KEEL_RESULT_NOT_FOUND && Empty(player);
     }
     if (std::strcmp(stage, "throw") == 0)

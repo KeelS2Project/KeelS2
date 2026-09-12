@@ -4,6 +4,7 @@
 #include <keels2/convar.h>
 #include <keels2/convar_access.h>
 #include <keels2/convar_observe.h>
+#include <keels2/detail/authoring_status.hpp>
 #include <keels2/entities.hpp>
 #include <keels2/factories.hpp>
 #include <keels2/lifecycle.h>
@@ -92,51 +93,6 @@ class ConVar;
 
 namespace keels2::detail
 {
-
-inline const char* ResultDescription(KeelResult result) noexcept
-{
-    switch (result)
-    {
-        case KEEL_RESULT_OK: return "";
-        case KEEL_RESULT_INVALID_ARGUMENT: return "invalid argument";
-        case KEEL_RESULT_NOT_READY: return "service or resource is unavailable";
-        case KEEL_RESULT_NOT_FOUND: return "not found";
-        case KEEL_RESULT_ALREADY_EXISTS: return "already registered";
-        case KEEL_RESULT_ENGINE_FAILURE: return "engine operation failed";
-        case KEEL_RESULT_RESERVED_NAME: return "name is reserved";
-        case KEEL_RESULT_INCOMPATIBLE: return "incompatible type, service, or game profile";
-        case KEEL_RESULT_UNSUPPORTED: return "operation is unsupported";
-        case KEEL_RESULT_AMBIGUOUS: return "multiple matches";
-        case KEEL_RESULT_BUSY: return "resource is in use; retry after the callback";
-        case KEEL_RESULT_WRONG_THREAD: return "operation requires the game thread";
-        default: return "unknown service result";
-    }
-}
-
-class AuthoringStatus final
-{
-public:
-    bool Set(KeelResult result, const char* reason = nullptr) noexcept
-    {
-        reason_.store(reason ? reason : ResultDescription(result), std::memory_order_release);
-        result_.store(result, std::memory_order_release);
-        return result == KEEL_RESULT_OK;
-    }
-
-    KeelResult Result() const noexcept
-    {
-        return result_.load(std::memory_order_acquire);
-    }
-
-    const char* Error() const noexcept
-    {
-        return reason_.load(std::memory_order_acquire);
-    }
-
-private:
-    std::atomic<KeelResult> result_{KEEL_RESULT_OK};
-    std::atomic<const char*> reason_{""};
-};
 
 template <typename Type>
 consteval bool ValidPluginInfo()
@@ -2086,6 +2042,26 @@ protected:
         catch (...)
         {
             return status_.Set(KEEL_RESULT_ENGINE_FAILURE, "could not validate the player connection");
+        }
+    }
+
+    bool GetPlayerByUserId(int user_id, PlayerInfo& player)
+    {
+        try
+        {
+            player = {};
+            if (user_id < 0)
+            {
+                return status_.Set(KEEL_RESULT_INVALID_ARGUMENT, "user ID must be non-negative");
+            }
+            players::Service service;
+            const KeelResult result = ConnectPlayers(service);
+            return status_.Set(result == KEEL_RESULT_OK ? service.GetByUserId(user_id, player) : result);
+        }
+        catch (...)
+        {
+            player = {};
+            return status_.Set(KEEL_RESULT_ENGINE_FAILURE, "could not read the player by user ID");
         }
     }
 

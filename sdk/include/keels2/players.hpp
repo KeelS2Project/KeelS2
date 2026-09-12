@@ -10,6 +10,7 @@
 #include <tier1/utlstring.h>
 
 #include <cstring>
+#include <utility>
 
 namespace keels2
 {
@@ -93,6 +94,35 @@ public:
         info.size = sizeof(info);
         const KeelResult result = *this ? api_->get_next_player(context_->plugin, after.Get(), &info) : KEEL_RESULT_NOT_READY;
         return Copy(result, info, player);
+    }
+
+    KeelResult GetByUserId(int user_id, PlayerInfo& player) const
+    {
+        player = {};
+        if (user_id < 0)
+        {
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+        CPlayerSlot after(-1);
+        PlayerInfo candidate;
+        for (;;)
+        {
+            const KeelResult result = Next(after, candidate);
+            if (result != KEEL_RESULT_OK)
+            {
+                return result;
+            }
+            if (candidate.slot.Get() <= after.Get())
+            {
+                return KEEL_RESULT_INCOMPATIBLE;
+            }
+            if (candidate.user_id == user_id)
+            {
+                player = std::move(candidate);
+                return KEEL_RESULT_OK;
+            }
+            after = candidate.slot;
+        }
     }
 
     KeelResult Validate(const PlayerConnection& connection, PlayerInfo& player) const

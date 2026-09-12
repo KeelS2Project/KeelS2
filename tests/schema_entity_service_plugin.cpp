@@ -123,7 +123,8 @@ private:
     {
         int32 health;
         LogMessage(!retained_.Valid() && !retained_.Read(health_, health) &&
-                !retained_.Same(retained_) && retained_.Kill() == KEEL_RESULT_NOT_FOUND
+                !retained_.Same(retained_) && retained_.Kill() == KEEL_RESULT_NOT_FOUND &&
+                !retained_.TryKill() && retained_.LastResult() == KEEL_RESULT_NOT_FOUND
             ? "entity destruction invalidation passed"
             : "entity destruction invalidation failed");
     }
@@ -136,7 +137,8 @@ private:
         LogMessage(!FindSchemaField("CBaseEntity", "m_iHealth", field) &&
                 !FindEntity(7, entity) && !retained_.Valid() &&
                 !retained_.Read(health_, health) && health == 0 &&
-                retained_.Kill() == KEEL_RESULT_WRONG_THREAD
+                retained_.Kill() == KEEL_RESULT_WRONG_THREAD && !retained_.TryKill() &&
+                retained_.LastResult() == KEEL_RESULT_WRONG_THREAD
             ? "wrong-thread access rejected"
             : "wrong-thread access was accepted");
     }

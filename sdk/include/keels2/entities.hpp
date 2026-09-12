@@ -2,6 +2,7 @@
 #define KEELS2_ENTITIES_HPP
 
 #include <keels2/entities.h>
+#include <keels2/detail/authoring_status.hpp>
 #include <keels2/player_actions.h>
 #include <keels2/plugin.hpp>
 #include <keels2/schema.hpp>
@@ -115,13 +116,37 @@ public:
     {
         const KeelPlayerAction action{sizeof(KeelPlayerAction), KEELS2_PLAYER_ACTION_IMPULSE,
             {impulse.x, impulse.y, impulse.z}, damage};
-        return ApplyAction(action);
+        const KeelResult result = ApplyAction(action);
+        status_.Set(result);
+        return result;
     }
 
     KeelResult Kill() const noexcept
     {
         const KeelPlayerAction action{sizeof(KeelPlayerAction), KEELS2_PLAYER_ACTION_KILL, {}, 0.0f};
-        return ApplyAction(action);
+        const KeelResult result = ApplyAction(action);
+        status_.Set(result);
+        return result;
+    }
+
+    bool TryApplyImpulse(const Vector& impulse, float damage = 0.0f) const noexcept
+    {
+        return ApplyImpulse(impulse, damage) == KEEL_RESULT_OK;
+    }
+
+    bool TryKill() const noexcept
+    {
+        return Kill() == KEEL_RESULT_OK;
+    }
+
+    KeelResult LastResult() const noexcept
+    {
+        return status_.Result();
+    }
+
+    const char* LastError() const noexcept
+    {
+        return status_.Error();
     }
 
     bool Same(const Entity& other) const noexcept
@@ -172,6 +197,7 @@ private:
         api_ = api;
         handle_ = handle;
         info_ = info;
+        status_.Set(KEEL_RESULT_OK);
     }
 
     void Clear() noexcept
@@ -180,6 +206,7 @@ private:
         api_ = nullptr;
         handle_ = 0;
         info_ = {};
+        status_.Set(KEEL_RESULT_NOT_READY);
     }
 
     void MoveFrom(Entity& other) noexcept
@@ -188,12 +215,15 @@ private:
         api_ = std::exchange(other.api_, nullptr);
         handle_ = std::exchange(other.handle_, 0);
         info_ = std::exchange(other.info_, KeelEntityInfo{});
+        status_.Set(other.LastResult());
+        other.status_.Set(KEEL_RESULT_NOT_READY);
     }
 
     std::shared_ptr<keels2::detail::ContextState> context_;
     const KeelEntitiesApi* api_{};
     KeelEntityHandle handle_{};
     KeelEntityInfo info_{};
+    mutable keels2::detail::AuthoringStatus status_;
 };
 
 class Service final
