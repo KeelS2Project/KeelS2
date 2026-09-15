@@ -92,7 +92,6 @@ extern "C" KeelResult KeelCs2_PrintChat(void* engine_server, void* network_messa
         }
         proto->Clear();
         reflection->SetUInt32(proto, destination, 3);
-        reflection->AddString(proto, parameters, "%s");
         reflection->AddString(proto, parameters, text);
         events->PostEventAbstract(CSplitScreenSlot(-1), false, ABSOLUTE_PLAYER_LIMIT,
             recipients.data(), definition, message.get(), 0, BUF_RELIABLE);

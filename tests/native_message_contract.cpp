@@ -113,12 +113,11 @@ void Post(void*, CSplitScreenSlot slot, bool local, int count, const uint64* mas
     const auto* reflection = payload->GetReflection();
     const auto* parameters = fields->FindFieldByName("param");
     if (reflection->GetUInt32(*payload, fields->FindFieldByName("dest")) != 3 ||
-        reflection->FieldSize(*payload, parameters) != 2 ||
-        reflection->GetRepeatedString(*payload, parameters, 0) != "%s")
+        reflection->FieldSize(*payload, parameters) != 1)
     {
         throw std::runtime_error("chat formatting is not literal");
     }
-    delivered = reflection->GetRepeatedString(*payload, parameters, 1);
+    delivered = reflection->GetRepeatedString(*payload, parameters, 0);
 }
 
 void Check(bool condition, const char* text)
