@@ -601,6 +601,42 @@ int RunPlayerInputChecks()
     if (DeclaredClass("CInButtonState") || controlled() != KEEL_RESULT_OK || active != pawn.source2_handle ||
         buttons != (KEELS2_BUTTON_FORWARD | KEELS2_BUTTON_SCORE) || component != g_movement_storage.data()) return 234;
     g_buttons_registered = true;
+    g_movement_class.m_nAlignment = UINT8_MAX;
+    g_buttons_class.m_nAlignment = UINT8_MAX;
+    if (controlled() != KEEL_RESULT_OK || active != pawn.source2_handle ||
+        buttons != (KEELS2_BUTTON_FORWARD | KEELS2_BUTTON_SCORE) ||
+        component != g_movement_storage.data() || original != g_movement_storage) return 238;
+    const auto reject_alignment = [&] {
+        return controlled() == KEEL_RESULT_INCOMPATIBLE && !buttons && !component && active == UINT32_MAX;
+    };
+    const auto pointer_offset = static_cast<std::size_t>(g_input_pointer.m_nSingleInheritanceOffset);
+    StorePointer(g_entity_storage.data() + pointer_offset, g_movement_storage.data() + 1);
+    if (!reject_alignment()) return 239;
+    StorePointer(g_entity_storage.data() + pointer_offset, g_movement_storage.data());
+    g_input_state.m_nSingleInheritanceOffset = 17;
+    if (!reject_alignment()) return 240;
+    g_input_state.m_nSingleInheritanceOffset = 40;
+    if (!reject_alignment()) return 241;
+    g_input_state.m_nSingleInheritanceOffset = 16;
+    g_input_masks.m_nSingleInheritanceOffset = 1;
+    if (!reject_alignment()) return 242;
+    g_input_masks.m_nSingleInheritanceOffset = 8;
+    for (const auto alignment : {0, 3, 7, 129, 254}) {
+        g_movement_class.m_nAlignment = static_cast<std::uint8_t>(alignment);
+        if (!reject_alignment()) return 243;
+        g_movement_class.m_nAlignment = UINT8_MAX;
+        g_buttons_class.m_nAlignment = static_cast<std::uint8_t>(alignment);
+        if (!reject_alignment()) return 244;
+        g_buttons_class.m_nAlignment = UINT8_MAX;
+    }
+    g_input_array_type.Get()->m_nElementAlignment = UINT8_MAX;
+    if (!reject_alignment()) return 245;
+    g_input_array_type.Get()->m_nElementAlignment = 8;
+    g_input_pawn_class.m_nAlignment = UINT8_MAX;
+    if (!reject_alignment()) return 246;
+    g_input_pawn_class.m_nAlignment = 16;
+    g_movement_class.m_nAlignment = 16;
+    g_buttons_class.m_nAlignment = 8;
     g_input_state_type.Get()->m_pClassInfo = nullptr;
     if (controlled() != KEEL_RESULT_INCOMPATIBLE || buttons || component || active != UINT32_MAX) return 235;
     g_input_state_type.Get()->m_pClassInfo = &g_movement_class;

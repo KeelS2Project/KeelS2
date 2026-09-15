@@ -143,10 +143,11 @@ bool PowerOfTwo(std::uint32_t value) noexcept
     return value && (value & (value - 1)) == 0;
 }
 
-bool ValidClass(const CSchemaClassInfo* info) noexcept
+bool ValidClass(const CSchemaClassInfo* info, bool allow_unknown_alignment = false) noexcept
 {
     return info && info->m_nSize > 0 && info->m_nSize <= 16 * 1024 * 1024 &&
-        PowerOfTwo(info->m_nAlignment) && info->m_nAlignment <= 128 &&
+        ((PowerOfTwo(info->m_nAlignment) && info->m_nAlignment <= 128) ||
+            (allow_unknown_alignment && info->m_nAlignment == UINT8_MAX)) &&
         info->m_nFieldCount <= 8192 &&
         (info->m_nFieldCount == 0 || info->m_pFields) &&
         (info->m_nBaseClassCount == 0 || info->m_pBaseClasses);
@@ -810,7 +811,7 @@ extern "C" KeelResult KeelCs2_ReadPlayerButtons(void* entity_system, void* schem
         auto* pawn_class = scope->FindDeclaredClass("CBasePlayerPawn").Get();
         auto* movement_class = scope->FindDeclaredClass("CPlayer_MovementServices").Get();
         if (!pawn_class || !movement_class) return KEEL_RESULT_NOT_FOUND;
-        if (!ValidClass(pawn_class) || !ValidClass(movement_class))
+        if (!ValidClass(pawn_class) || !ValidClass(movement_class, true))
             return KEEL_RESULT_INCOMPATIBLE;
         const auto field = [](const CSchemaClassInfo* type, const char* name) -> const SchemaClassFieldData_t* {
             const SchemaClassFieldData_t* result{};
@@ -837,7 +838,7 @@ extern "C" KeelResult KeelCs2_ReadPlayerButtons(void* entity_system, void* schem
         };
         if (!category(state->m_pType, SCHEMA_TYPE_DECLARED_CLASS)) return KEEL_RESULT_INCOMPATIBLE;
         const auto* buttons_class = static_cast<const CSchemaType_DeclaredClass*>(state->m_pType)->m_pClassInfo;
-        if (!ValidClass(buttons_class) || !buttons_class->m_pszName ||
+        if (!ValidClass(buttons_class, true) || !buttons_class->m_pszName ||
             std::strcmp(buttons_class->m_pszName, "CInButtonState") != 0)
             return KEEL_RESULT_INCOMPATIBLE;
         const auto* masks = field(buttons_class, "m_pButtonStates");
@@ -856,10 +857,13 @@ extern "C" KeelResult KeelCs2_ReadPlayerButtons(void* entity_system, void* schem
         const auto fits = [](const CSchemaClassInfo* type, const SchemaClassFieldData_t* member, std::size_t size, std::size_t alignment) {
             return member->m_nSingleInheritanceOffset >= 0 &&
                 static_cast<std::uint64_t>(member->m_nSingleInheritanceOffset) + size <= static_cast<std::uint64_t>(type->m_nSize) &&
-                static_cast<std::uint32_t>(member->m_nSingleInheritanceOffset) % alignment == 0 && type->m_nAlignment >= alignment;
+                static_cast<std::uint32_t>(member->m_nSingleInheritanceOffset) % alignment == 0 &&
+                (type->m_nAlignment == UINT8_MAX || type->m_nAlignment >= alignment);
         };
+        const auto button_alignment = buttons_class->m_nAlignment == UINT8_MAX
+            ? alignof(uint64_t) : buttons_class->m_nAlignment;
         if (!fits(pawn_class, movement, sizeof(void*), alignof(void*)) ||
-            !fits(movement_class, state, static_cast<std::size_t>(buttons_class->m_nSize), buttons_class->m_nAlignment) ||
+            !fits(movement_class, state, static_cast<std::size_t>(buttons_class->m_nSize), button_alignment) ||
             !fits(buttons_class, masks, sizeof(uint64_t) * 3, alignof(uint64_t)))
             return KEEL_RESULT_INCOMPATIBLE;
         const KeelCs2SchemaField pointer_field{pawn_class, movement->m_nSingleInheritanceOffset,
@@ -870,7 +874,9 @@ extern "C" KeelResult KeelCs2_ReadPlayerButtons(void* entity_system, void* schem
         if (!movement_object) return KEEL_RESULT_NOT_READY;
         const auto base = reinterpret_cast<std::uintptr_t>(movement_object);
         const auto offset = static_cast<std::uint64_t>(state->m_nSingleInheritanceOffset) + static_cast<std::uint64_t>(masks->m_nSingleInheritanceOffset);
-        if (base % movement_class->m_nAlignment != 0 || offset > UINTPTR_MAX - base ||
+        const auto component_alignment = movement_class->m_nAlignment == UINT8_MAX
+            ? button_alignment : movement_class->m_nAlignment;
+        if (base % component_alignment != 0 || offset > UINTPTR_MAX - base ||
             sizeof(uint64_t) > UINTPTR_MAX - (base + offset) || (base + offset) % alignof(uint64_t))
             return KEEL_RESULT_INCOMPATIBLE;
         uint64_t held{};
