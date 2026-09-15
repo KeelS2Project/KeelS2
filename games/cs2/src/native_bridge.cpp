@@ -809,11 +809,10 @@ extern "C" KeelResult KeelCs2_ReadPlayerButtons(void* entity_system, void* schem
         if (!scope) return KEEL_RESULT_NOT_FOUND;
         auto* pawn_class = scope->FindDeclaredClass("CBasePlayerPawn").Get();
         auto* movement_class = scope->FindDeclaredClass("CPlayer_MovementServices").Get();
-        auto* buttons_class = scope->FindDeclaredClass("CInButtonState").Get();
-        if (!pawn_class || !movement_class || !buttons_class) return KEEL_RESULT_NOT_FOUND;
-        if (!ValidClass(pawn_class) || !ValidClass(movement_class) || !ValidClass(buttons_class))
+        if (!pawn_class || !movement_class) return KEEL_RESULT_NOT_FOUND;
+        if (!ValidClass(pawn_class) || !ValidClass(movement_class))
             return KEEL_RESULT_INCOMPATIBLE;
-        const auto field = [](CSchemaClassInfo* type, const char* name) -> const SchemaClassFieldData_t* {
+        const auto field = [](const CSchemaClassInfo* type, const char* name) -> const SchemaClassFieldData_t* {
             const SchemaClassFieldData_t* result{};
             for (std::uint32_t i = 0; i < type->m_nFieldCount; ++i)
             {
@@ -828,8 +827,7 @@ extern "C" KeelResult KeelCs2_ReadPlayerButtons(void* entity_system, void* schem
         };
         const auto* movement = field(pawn_class, "m_pMovementServices");
         const auto* state = field(movement_class, "m_nButtons");
-        const auto* masks = field(buttons_class, "m_pButtonStates");
-        if (!movement || !state || !masks) return KEEL_RESULT_NOT_FOUND;
+        if (!movement || !state) return KEEL_RESULT_NOT_FOUND;
         const auto category = [](const CSchemaType* type, SchemaTypeCategory_t expected) {
             return type && type->m_eTypeCategory == expected && type->m_eAtomicCategory == SCHEMA_ATOMIC_INVALID;
         };
@@ -837,9 +835,16 @@ extern "C" KeelResult KeelCs2_ReadPlayerButtons(void* entity_system, void* schem
             return category(type, SCHEMA_TYPE_DECLARED_CLASS) &&
                 static_cast<const CSchemaType_DeclaredClass*>(type)->m_pClassInfo == expected;
         };
+        if (!category(state->m_pType, SCHEMA_TYPE_DECLARED_CLASS)) return KEEL_RESULT_INCOMPATIBLE;
+        const auto* buttons_class = static_cast<const CSchemaType_DeclaredClass*>(state->m_pType)->m_pClassInfo;
+        if (!ValidClass(buttons_class) || !buttons_class->m_pszName ||
+            std::strcmp(buttons_class->m_pszName, "CInButtonState") != 0)
+            return KEEL_RESULT_INCOMPATIBLE;
+        const auto* masks = field(buttons_class, "m_pButtonStates");
+        if (!masks) return KEEL_RESULT_NOT_FOUND;
         if (!category(movement->m_pType, SCHEMA_TYPE_POINTER) ||
             !declared(static_cast<const CSchemaType_Ptr*>(movement->m_pType)->m_pObjectType, movement_class) ||
-            !declared(state->m_pType, buttons_class) || !category(masks->m_pType, SCHEMA_TYPE_FIXED_ARRAY))
+            !category(masks->m_pType, SCHEMA_TYPE_FIXED_ARRAY))
             return KEEL_RESULT_INCOMPATIBLE;
         const auto* array = static_cast<const CSchemaType_FixedArray*>(masks->m_pType);
         if (array->m_nElementCount != 3 || array->m_nElementSize != sizeof(uint64_t) ||

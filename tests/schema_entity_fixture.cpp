@@ -60,6 +60,7 @@ CSchemaClassInfo g_derived_class{};
 std::uint32_t g_schema_lookup_count{};
 void (*g_input_read_callback)(){};
 CSchemaClassInfo g_input_pawn_class{}, g_movement_class{}, g_buttons_class{};
+bool g_buttons_registered = true;
 SchemaClassFieldData_t g_input_pointer{}, g_input_state{}, g_input_masks{};
 SchemaBaseClassInfoData_t g_input_pawn_base{};
 CSchemaClassInfo g_controller_base{}, g_controller_class{};
@@ -95,6 +96,7 @@ CSchemaClassInfo* DeclaredClass(const char* name)
     }
     if (name && std::strcmp(name, "CTakeDamageInfo") == 0)
         return &g_damage_class;
+    if (!g_buttons_registered && name && std::strcmp(name, "CInButtonState") == 0) return nullptr;
     for (auto* type : {&g_input_pawn_class, &g_movement_class, &g_buttons_class, &g_controller_base, &g_controller_class})
         if (name && type->m_pszName && std::strcmp(name, type->m_pszName) == 0) return type;
     return nullptr;
@@ -293,6 +295,7 @@ void Reset()
 void InputFixture(std::uint64_t held)
 {
     Reset();
+    g_buttons_registered = true;
     const auto declared = [](CSchemaType_DeclaredClass* type, CSchemaClassInfo* info) {
         type->m_eTypeCategory = SCHEMA_TYPE_DECLARED_CLASS; type->m_eAtomicCategory = SCHEMA_ATOMIC_INVALID; type->m_pClassInfo = info;
     };
@@ -594,6 +597,18 @@ int RunPlayerInputChecks()
     };
     if (controlled() != KEEL_RESULT_OK || active != pawn.source2_handle ||
         buttons != (KEELS2_BUTTON_FORWARD | KEELS2_BUTTON_SCORE)) return 231;
+    g_buttons_registered = false;
+    if (DeclaredClass("CInButtonState") || controlled() != KEEL_RESULT_OK || active != pawn.source2_handle ||
+        buttons != (KEELS2_BUTTON_FORWARD | KEELS2_BUTTON_SCORE) || component != g_movement_storage.data()) return 234;
+    g_buttons_registered = true;
+    g_input_state_type.Get()->m_pClassInfo = nullptr;
+    if (controlled() != KEEL_RESULT_INCOMPATIBLE || buttons || component || active != UINT32_MAX) return 235;
+    g_input_state_type.Get()->m_pClassInfo = &g_movement_class;
+    if (controlled() != KEEL_RESULT_INCOMPATIBLE || buttons || component || active != UINT32_MAX) return 236;
+    g_input_state_type.Get()->m_pClassInfo = &g_buttons_class;
+    g_input_state_type.Get()->m_eTypeCategory = SCHEMA_TYPE_POINTER;
+    if (controlled() != KEEL_RESULT_INCOMPATIBLE || buttons || component || active != UINT32_MAX) return 237;
+    g_input_state_type.Get()->m_eTypeCategory = SCHEMA_TYPE_DECLARED_CLASS;
     const CEntityHandle invalid;
     std::memcpy(g_controller_storage.data() + kHealthOffset + 16, &invalid, sizeof(invalid));
     if (controlled() != KEEL_RESULT_NOT_READY || buttons || component || active != UINT32_MAX) return 232;
