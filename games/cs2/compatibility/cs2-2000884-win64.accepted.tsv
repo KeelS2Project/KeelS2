@@ -1,0 +1,26 @@
+keels2-compatibility-profile	1
+status	accepted
+review	complete
+game	cs2
+version	2000884
+platform	win64
+module	server	server.dll	32824984	286e997327894e53
+interface	game_clients	Source2GameClients001	server
+interface	game_event_manager	CGameEventManager	server
+interface	server	Source2Server001	server
+interface	server_config	Source2ServerConfig001	server
+slot	game_clients	ClientActive	14
+slot	game_clients	ClientCommand	17
+slot	game_clients	ClientConnect	12
+slot	game_clients	ClientDisconnecting	16
+slot	game_clients	ClientFullyConnected	15
+slot	game_clients	ClientPutInServer	13
+slot	game_clients	ClientSettingsChanged	19
+slot	game_clients	GameFrame	19
+slot	game_clients	OnClientConnected	11
+slot	game_clients	Validation	0
+slot	game_event_manager	AddListener	3
+slot	game_event_manager	LoadEventsFromFile	1
+slot	server	Init	3
+slot	server_config	Connect	0
+slot	server_config	Disconnect	1

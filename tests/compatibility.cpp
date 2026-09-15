@@ -1,0 +1,484 @@
+#include <keels2/cs2/compatibility.h>
+#include <keels2/cs2/cvar_abi.h>
+
+#include <cstring>
+
+namespace
+{
+
+bool ValidConVarProfile(const keels2::cs2::CompatibilityProfile& profile)
+{
+    using namespace keels2::cs2;
+    return profile.find_convar_slot == kFindConVarSlot &&
+        profile.register_convar_slot == kRegisterConVarSlot &&
+        profile.unregister_convar_slot == kUnregisterConVarSlot &&
+        profile.get_convar_data_slot == kGetConVarDataSlot &&
+        profile.call_convar_change_slot == kCallChangeCallbackSlot &&
+        profile.call_convar_filter_slot == kCallFilterCallbackSlot &&
+        profile.call_global_convar_change_slot == kCallGlobalChangeCallbacksSlot &&
+        profile.queue_thread_set_value_slot == kQueueThreadSetValueSlot &&
+        profile.convar_value_size == sizeof(ConVarValue) &&
+        profile.convar_value_info_size == sizeof(ConVarValueInfo) &&
+        profile.convar_creation_size == sizeof(ConVarCreation) &&
+        profile.convar_ref_size == sizeof(ConVarRef) &&
+        profile.convar_data_size == sizeof(ConVarData) &&
+        profile.convar_object_size == sizeof(ConVarObject) &&
+        profile.convar_data_type_offset == kConVarDataTypeOffset &&
+        profile.convar_data_flags_offset == kConVarDataFlagsOffset &&
+        profile.convar_data_value_offset == kConVarDataValueOffset &&
+        profile.convar_value_info_change_provider_offset == kConVarValueInfoChangeProviderOffset &&
+        profile.convar_value_info_custom_data_offset == kConVarValueInfoCustomDataOffset &&
+        profile.convar_data_custom_data_offset == kConVarDataCustomDataOffset &&
+        profile.convar_object_data_offset == kConVarObjectDataOffset &&
+        profile.convar_bool_type == static_cast<std::int32_t>(ConVarType::boolean) &&
+        profile.convar_int32_type == static_cast<std::int32_t>(ConVarType::int32) &&
+        profile.convar_float32_type == static_cast<std::int32_t>(ConVarType::float32) &&
+        profile.convar_string_type == static_cast<std::int32_t>(ConVarType::string);
+}
+
+bool ValidLifecycleProfile(const keels2::cs2::CompatibilityProfile& profile)
+{
+    using namespace keels2::cs2;
+    const bool windows = std::strcmp(profile.platform, "win64") == 0;
+    return profile.connect_slot == 0 &&
+        profile.disconnect_slot == 1 &&
+        profile.init_slot == 3 &&
+        std::strcmp(profile.server_interface, "Source2Server001") == 0 &&
+        std::strcmp(profile.game_clients_interface, "Source2GameClients001") == 0 &&
+        profile.game_clients_validation_slot == 0 &&
+        profile.game_frame_slot == 19 &&
+        profile.client_connected_slot == 11 &&
+        profile.client_put_in_server_slot == 13 &&
+        profile.client_active_slot == 14 &&
+        profile.client_fully_connected_slot == 15 &&
+        profile.client_disconnecting_slot == 16 &&
+        profile.client_settings_changed_slot == 19 &&
+        std::strcmp(profile.game_event_manager_class, "CGameEventManager") == 0 &&
+        std::strcmp(profile.game_event_module, profile.server_module) == 0 &&
+        profile.game_event_load_events_slot == (windows ? 1u : 2u) &&
+        profile.game_event_add_listener_slot == (windows ? 3u : 4u) &&
+        profile.register_command_slot == kRegisterConCommandSlot &&
+        profile.unregister_command_slot == kUnregisterConCommandSlot &&
+        ValidConVarProfile(profile);
+}
+
+bool ValidSchemaEntityProfile(const keels2::cs2::CompatibilityProfile& profile)
+{
+    const bool windows = std::strcmp(profile.platform, "win64") == 0;
+    return profile.schema_interface && profile.schema_module && profile.schema_server_module &&
+        profile.game_resource_interface && profile.game_resource_module &&
+        profile.entity_system_module &&
+        std::strcmp(profile.schema_interface, "SchemaSystem_001") == 0 &&
+        std::strcmp(profile.schema_module, windows ? "schemasystem.dll" : "libschemasystem.so") == 0 &&
+        std::strcmp(profile.schema_server_module, profile.server_module) == 0 &&
+        profile.schema_validation_slot == 0 &&
+        std::strcmp(profile.game_resource_interface, "GameResourceServiceServerV001") == 0 &&
+        std::strcmp(profile.game_resource_module, profile.engine_service_module) == 0 &&
+        std::strcmp(profile.entity_system_module, profile.server_module) == 0 &&
+        profile.game_resource_validation_slot == 0 &&
+        profile.game_entity_system_offset == (windows ? 88u : 80u);
+}
+
+bool ValidDamageTarget(const keels2::cs2::CompatibilityProfile& profile)
+{
+    const bool windows = std::strcmp(profile.platform, "win64") == 0;
+    return profile.targets && profile.target_count == 1 &&
+        std::strcmp(profile.targets[0].name, "cs2.base_entity.take_damage") == 0 &&
+        std::strcmp(
+            profile.targets[0].module,
+            windows ? "server.dll" : "libserver.so") == 0 &&
+        profile.targets[0].pattern && profile.targets[0].pattern[0] &&
+        profile.targets[0].offset == 0 && profile.targets[0].occurrence == 0;
+}
+
+}
+
+int main()
+{
+    const auto* linux_profile = keels2::cs2::FindCompatibilityProfile(
+        {40344184, 0xd9145056b00162faull},
+        "linuxsteamrt64");
+    if (!linux_profile || std::strcmp(linux_profile->game_version, "2000880") != 0 ||
+        std::strcmp(
+            linux_profile->id,
+            "cs2-2000880-linuxsteamrt64-17a2d48e2444bf4f8ecf6a126a36e8753dcfcb81") != 0 ||
+        std::strcmp(linux_profile->server_module, "libserver.so") != 0 ||
+        std::strcmp(linux_profile->cvar_module, "libtier0.so") != 0 ||
+        !ValidLifecycleProfile(*linux_profile))
+    {
+        return 1;
+    }
+
+    const auto* current_linux_profile = keels2::cs2::FindCompatibilityProfile(
+        {40352056, 0x023a563a82a10f52ull},
+        "linuxsteamrt64");
+    if (!current_linux_profile ||
+        std::strcmp(current_linux_profile->game_version, "2000884") != 0 ||
+        std::strcmp(
+            current_linux_profile->id,
+            "cs2-2000884-linuxsteamrt64-60a107b12af1a8d752ec462200852a2e7470913d") != 0 ||
+        std::strcmp(current_linux_profile->server_module, "libserver.so") != 0 ||
+        std::strcmp(current_linux_profile->cvar_module, "libtier0.so") != 0 ||
+        !ValidLifecycleProfile(*current_linux_profile))
+    {
+        return 2;
+    }
+
+    const auto* next_linux_profile = keels2::cs2::FindCompatibilityProfile(
+        {40353400, 0x3aa4e49b8b45ac19ull},
+        "linuxsteamrt64");
+    if (!next_linux_profile ||
+        std::strcmp(next_linux_profile->game_version, "2000885") != 0 ||
+        std::strcmp(
+            next_linux_profile->id,
+            "cs2-2000885-linuxsteamrt64-d05aa2d65efa96e06e3ded6dd2a95b5220a993a8") != 0 ||
+        std::strcmp(next_linux_profile->server_module, "libserver.so") != 0 ||
+        std::strcmp(next_linux_profile->cvar_module, "libtier0.so") != 0 ||
+        !ValidLifecycleProfile(*next_linux_profile) ||
+        !ValidSchemaEntityProfile(*next_linux_profile))
+    {
+        return 3;
+    }
+
+    const auto* latest_linux_profile = keels2::cs2::FindCompatibilityProfile(
+        {40541272, 0x6311ef1c33faf243ull},
+        "linuxsteamrt64");
+    if (!latest_linux_profile ||
+        std::strcmp(latest_linux_profile->game_version, "2000888") != 0 ||
+        std::strcmp(
+            latest_linux_profile->id,
+            "cs2-2000888-linuxsteamrt64-40541272-6311ef1c33faf243") != 0 ||
+        std::strcmp(latest_linux_profile->server_module, "libserver.so") != 0 ||
+        std::strcmp(latest_linux_profile->cvar_module, "libtier0.so") != 0 ||
+        !ValidLifecycleProfile(*latest_linux_profile) ||
+        !ValidSchemaEntityProfile(*latest_linux_profile))
+    {
+        return 4;
+    }
+
+    const auto* updated_linux_profile = keels2::cs2::FindCompatibilityProfile(
+        {40541720, 0x9abcbab46e54de8eull},
+        "linuxsteamrt64");
+    if (!updated_linux_profile ||
+        std::strcmp(updated_linux_profile->game_version, "2000897") != 0 ||
+        std::strcmp(
+            updated_linux_profile->id,
+            "cs2-2000897-linuxsteamrt64-40541720-9abcbab46e54de8e") != 0 ||
+        std::strcmp(updated_linux_profile->server_module, "libserver.so") != 0 ||
+        std::strcmp(updated_linux_profile->cvar_module, "libtier0.so") != 0 ||
+        !ValidLifecycleProfile(*updated_linux_profile) ||
+        !ValidSchemaEntityProfile(*updated_linux_profile))
+    {
+        return 10;
+    }
+
+    const auto* damage_linux_profile = keels2::cs2::FindCompatibilityProfile(
+        {40540568, 0x542cc63d17821e66ull},
+        "linuxsteamrt64");
+    if (!damage_linux_profile ||
+        std::strcmp(damage_linux_profile->game_version, "2000899") != 0 ||
+        std::strcmp(
+            damage_linux_profile->id,
+            "cs2-2000899-linuxsteamrt64-40540568-542cc63d17821e66") != 0 ||
+        !ValidLifecycleProfile(*damage_linux_profile) ||
+        !ValidSchemaEntityProfile(*damage_linux_profile) ||
+        !ValidDamageTarget(*damage_linux_profile))
+    {
+        return 13;
+    }
+
+    const auto* current_damage_linux_profile = keels2::cs2::FindCompatibilityProfile(
+        {40540568, 0xeefe3404272fed75ull},
+        "linuxsteamrt64");
+    if (!current_damage_linux_profile ||
+        std::strcmp(current_damage_linux_profile->game_version, "25175329") != 0 ||
+        std::strcmp(
+            current_damage_linux_profile->id,
+            "cs2-25175329-linuxsteamrt64-40540568-eefe3404272fed75") != 0 ||
+        !ValidLifecycleProfile(*current_damage_linux_profile) ||
+        !ValidSchemaEntityProfile(*current_damage_linux_profile) ||
+        !ValidDamageTarget(*current_damage_linux_profile))
+    {
+        return 15;
+    }
+
+    const auto* latest_damage_linux_profile = keels2::cs2::FindCompatibilityProfile(
+        {40575640, 0xb2ce91a0f330222aull},
+        "linuxsteamrt64");
+    if (!latest_damage_linux_profile ||
+        std::strcmp(latest_damage_linux_profile->game_version, "25218825") != 0 ||
+        std::strcmp(
+            latest_damage_linux_profile->id,
+            "cs2-25218825-linuxsteamrt64-40575640-b2ce91a0f330222a") != 0 ||
+        !ValidLifecycleProfile(*latest_damage_linux_profile) ||
+        !ValidSchemaEntityProfile(*latest_damage_linux_profile) ||
+        !ValidDamageTarget(*latest_damage_linux_profile))
+    {
+        return 17;
+    }
+
+    const auto* previous_windows_profile = keels2::cs2::FindCompatibilityProfile(
+        {32794264, 0x63eca0729c4fd8a9ull},
+        "win64");
+    if (!previous_windows_profile ||
+        std::strcmp(previous_windows_profile->game_version, "2000879") != 0)
+    {
+        return 5;
+    }
+
+    const auto* windows_profile = keels2::cs2::FindCompatibilityProfile(
+        {32818840, 0xda8eb43f77d5c62full},
+        "win64");
+    if (!windows_profile || std::strcmp(windows_profile->game_version, "2000880") != 0 ||
+        std::strcmp(
+            windows_profile->id,
+            "cs2-2000880-win64-2369e67d8d0e4475a49dc6f4e8c99d28-52") != 0 ||
+        std::strcmp(windows_profile->server_module, "server.dll") != 0 ||
+        std::strcmp(windows_profile->cvar_module, "tier0.dll") != 0 ||
+        !ValidLifecycleProfile(*windows_profile))
+    {
+        return 6;
+    }
+
+    const auto* current_windows_profile = keels2::cs2::FindCompatibilityProfile(
+        {32824984, 0x286e997327894e53ull},
+        "win64");
+    if (!current_windows_profile ||
+        std::strcmp(current_windows_profile->game_version, "2000884") != 0 ||
+        std::strcmp(
+            current_windows_profile->id,
+            "cs2-2000884-win64-2369e67d8d0e4475a49dc6f4e8c99d28-54") != 0 ||
+        std::strcmp(current_windows_profile->server_module, "server.dll") != 0 ||
+        std::strcmp(current_windows_profile->cvar_module, "tier0.dll") != 0 ||
+        !ValidLifecycleProfile(*current_windows_profile))
+    {
+        return 7;
+    }
+
+    const auto* next_windows_profile = keels2::cs2::FindCompatibilityProfile(
+        {32826008, 0xb3f810b3507341c6ull},
+        "win64");
+    if (!next_windows_profile ||
+        std::strcmp(next_windows_profile->game_version, "2000885") != 0 ||
+        std::strcmp(
+            next_windows_profile->id,
+            "cs2-2000885-win64-2369e67d8d0e4475a49dc6f4e8c99d28-55") != 0 ||
+        std::strcmp(next_windows_profile->server_module, "server.dll") != 0 ||
+        std::strcmp(next_windows_profile->cvar_module, "tier0.dll") != 0 ||
+        !ValidLifecycleProfile(*next_windows_profile) ||
+        !ValidSchemaEntityProfile(*next_windows_profile))
+    {
+        return 8;
+    }
+
+    const auto* latest_windows_profile = keels2::cs2::FindCompatibilityProfile(
+        {33003672, 0x02e0bdaaa3f43453ull},
+        "win64");
+    if (!latest_windows_profile ||
+        std::strcmp(latest_windows_profile->game_version, "2000888") != 0 ||
+        std::strcmp(
+            latest_windows_profile->id,
+            "cs2-2000888-win64-33003672-02e0bdaaa3f43453") != 0 ||
+        std::strcmp(latest_windows_profile->server_module, "server.dll") != 0 ||
+        std::strcmp(latest_windows_profile->cvar_module, "tier0.dll") != 0 ||
+        !ValidLifecycleProfile(*latest_windows_profile) ||
+        !ValidSchemaEntityProfile(*latest_windows_profile))
+    {
+        return 9;
+    }
+
+    const auto* updated_windows_profile = keels2::cs2::FindCompatibilityProfile(
+        {33003672, 0xd94e9db0d5b9b5c9ull},
+        "win64");
+    if (!updated_windows_profile ||
+        std::strcmp(updated_windows_profile->game_version, "2000897") != 0 ||
+        std::strcmp(
+            updated_windows_profile->id,
+            "cs2-2000897-win64-33003672-d94e9db0d5b9b5c9") != 0 ||
+        std::strcmp(updated_windows_profile->server_module, "server.dll") != 0 ||
+        std::strcmp(updated_windows_profile->cvar_module, "tier0.dll") != 0 ||
+        !ValidLifecycleProfile(*updated_windows_profile) ||
+        !ValidSchemaEntityProfile(*updated_windows_profile))
+    {
+        return 12;
+    }
+
+    const auto* damage_windows_profile = keels2::cs2::FindCompatibilityProfile(
+        {33002648, 0x43286dc938300339ull},
+        "win64");
+    if (!damage_windows_profile ||
+        std::strcmp(damage_windows_profile->game_version, "2000899") != 0 ||
+        std::strcmp(
+            damage_windows_profile->id,
+            "cs2-2000899-win64-33002648-43286dc938300339") != 0 ||
+        !ValidLifecycleProfile(*damage_windows_profile) ||
+        !ValidSchemaEntityProfile(*damage_windows_profile) ||
+        !ValidDamageTarget(*damage_windows_profile))
+    {
+        return 14;
+    }
+
+    const auto* current_damage_windows_profile = keels2::cs2::FindCompatibilityProfile(
+        {33002648, 0x859eff2ae36ba752ull},
+        "win64");
+    if (!current_damage_windows_profile ||
+        std::strcmp(current_damage_windows_profile->game_version, "25175329") != 0 ||
+        std::strcmp(
+            current_damage_windows_profile->id,
+            "cs2-25175329-win64-33002648-859eff2ae36ba752") != 0 ||
+        !ValidLifecycleProfile(*current_damage_windows_profile) ||
+        !ValidSchemaEntityProfile(*current_damage_windows_profile) ||
+        !ValidDamageTarget(*current_damage_windows_profile))
+    {
+        return 16;
+    }
+
+    const auto* latest_damage_windows_profile = keels2::cs2::FindCompatibilityProfile(
+        {33042584, 0x2212b672d2410a30ull},
+        "win64");
+    if (!latest_damage_windows_profile ||
+        std::strcmp(latest_damage_windows_profile->game_version, "25218825") != 0 ||
+        std::strcmp(
+            latest_damage_windows_profile->id,
+            "cs2-25218825-win64-33042584-2212b672d2410a30") != 0 ||
+        !ValidLifecycleProfile(*latest_damage_windows_profile) ||
+        !ValidSchemaEntityProfile(*latest_damage_windows_profile) ||
+        !ValidDamageTarget(*latest_damage_windows_profile))
+    {
+        return 18;
+    }
+
+    if (keels2::cs2::FindCompatibilityProfile(linux_profile->server, "win64") ||
+        keels2::cs2::FindCompatibilityProfile(current_linux_profile->server, "win64") ||
+        keels2::cs2::FindCompatibilityProfile(next_linux_profile->server, "win64") ||
+        keels2::cs2::FindCompatibilityProfile(latest_linux_profile->server, "win64") ||
+        keels2::cs2::FindCompatibilityProfile(updated_linux_profile->server, "win64") ||
+        keels2::cs2::FindCompatibilityProfile(damage_linux_profile->server, "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            current_damage_linux_profile->server,
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            latest_damage_linux_profile->server,
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(windows_profile->server, "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            current_windows_profile->server,
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            next_windows_profile->server,
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            latest_windows_profile->server,
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            updated_windows_profile->server,
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            damage_windows_profile->server,
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            current_damage_windows_profile->server,
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            latest_damage_windows_profile->server,
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {current_linux_profile->server.size + 1, current_linux_profile->server.fnv1a64},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {current_linux_profile->server.size, current_linux_profile->server.fnv1a64 + 1},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {current_windows_profile->server.size + 1, current_windows_profile->server.fnv1a64},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {current_windows_profile->server.size, current_windows_profile->server.fnv1a64 + 1},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {next_linux_profile->server.size + 1, next_linux_profile->server.fnv1a64},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {next_linux_profile->server.size, next_linux_profile->server.fnv1a64 + 1},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {next_windows_profile->server.size + 1, next_windows_profile->server.fnv1a64},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {next_windows_profile->server.size, next_windows_profile->server.fnv1a64 + 1},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {latest_linux_profile->server.size + 1, latest_linux_profile->server.fnv1a64},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {latest_linux_profile->server.size, latest_linux_profile->server.fnv1a64 + 1},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {updated_linux_profile->server.size + 1, updated_linux_profile->server.fnv1a64},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {updated_linux_profile->server.size, updated_linux_profile->server.fnv1a64 + 1},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {latest_windows_profile->server.size + 1, latest_windows_profile->server.fnv1a64},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {latest_windows_profile->server.size, latest_windows_profile->server.fnv1a64 + 1},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {updated_windows_profile->server.size + 1, updated_windows_profile->server.fnv1a64},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {updated_windows_profile->server.size, updated_windows_profile->server.fnv1a64 + 1},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {damage_linux_profile->server.size + 1, damage_linux_profile->server.fnv1a64},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {damage_linux_profile->server.size, damage_linux_profile->server.fnv1a64 + 1},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {damage_windows_profile->server.size + 1, damage_windows_profile->server.fnv1a64},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {damage_windows_profile->server.size, damage_windows_profile->server.fnv1a64 + 1},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {current_damage_linux_profile->server.size + 1,
+                current_damage_linux_profile->server.fnv1a64},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {current_damage_linux_profile->server.size,
+                current_damage_linux_profile->server.fnv1a64 + 1},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {current_damage_windows_profile->server.size + 1,
+                current_damage_windows_profile->server.fnv1a64},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {current_damage_windows_profile->server.size,
+                current_damage_windows_profile->server.fnv1a64 + 1},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {latest_damage_linux_profile->server.size + 1,
+                latest_damage_linux_profile->server.fnv1a64},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {latest_damage_linux_profile->server.size,
+                latest_damage_linux_profile->server.fnv1a64 + 1},
+            "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {latest_damage_windows_profile->server.size + 1,
+                latest_damage_windows_profile->server.fnv1a64},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile(
+            {latest_damage_windows_profile->server.size,
+                latest_damage_windows_profile->server.fnv1a64 + 1},
+            "win64") ||
+        keels2::cs2::FindCompatibilityProfile({1, 2}, "linuxsteamrt64") ||
+        keels2::cs2::FindCompatibilityProfile(linux_profile->server, nullptr))
+    {
+        return 11;
+    }
+
+    return 0;
+}

@@ -1,0 +1,8 @@
+{
+    global:
+        KeelHost_Start;
+        KeelHost_CompleteStartup;
+        KeelHost_Stop;
+    local:
+        *;
+};

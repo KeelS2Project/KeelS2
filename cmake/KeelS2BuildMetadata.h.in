@@ -1,0 +1,11 @@
+#ifndef KEELS2_BUILD_METADATA_H
+#define KEELS2_BUILD_METADATA_H
+
+namespace keels2::host
+{
+inline constexpr const char* kBuildTime = "@KEELS2_BUILD_TIME@";
+inline constexpr const char* kBuildRevision = "@KEELS2_BUILD_REVISION@";
+inline constexpr const char* kBuildPlatform = "@CMAKE_SYSTEM_NAME@/@KEELS2_BUILD_ARCH@";
+}
+
+#endif

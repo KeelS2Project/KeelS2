@@ -1,0 +1,12 @@
+{
+    global:
+        KeelGameAdapter_Query;
+        KeelGameAdapter_CommandCaller;
+        KeelGameAdapter_PlayerAction;
+        KeelGameAdapter_QueryPlayers;
+        KeelGameAdapter_QueryPlayerInput;
+        KeelGameAdapter_QueryMessaging;
+        KeelGameAdapter_QueryConVarObservers;
+    local:
+        *;
+};

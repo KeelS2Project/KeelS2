@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.25)
+project(KeelS2PlayerInputExample VERSION 1.0.0 LANGUAGES C CXX)
+find_package(KeelS2 1.0.0 EXACT CONFIG REQUIRED)
+keels2_add_plugin(input_watch input_watch.cpp)
+target_link_libraries(input_watch PRIVATE KeelS2::SourceSDK)

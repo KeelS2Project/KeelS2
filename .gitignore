@@ -1,0 +1,11 @@
+/build/
+/build-*/
+/out/
+/.cache/
+/.vs/
+/.vscode/
+*.user
+*.suo
+*.VC.db
+compile_commands.json
+

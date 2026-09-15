@@ -1,0 +1,1727 @@
+#include "host.h"
+#include "factory_service.h"
+
+#include "convar_service.h"
+#include "game_adapter_loader.h"
+#include "keelhook_service.h"
+#include "lifecycle_service.h"
+#include "plugin_service.h"
+#include "published_service_registry.h"
+#include "schema_entity_service.h"
+#include "source2_callbacks_service.h"
+#include "source2_runtime_service.h"
+#include "player_service.h"
+
+#include <keels2/platform/console.h>
+#include <keels2/platform/diagnostic_trace.h>
+
+#include <algorithm>
+#include <cctype>
+#include <cstring>
+#include <stdexcept>
+#include <utility>
+
+#if defined(_WIN32)
+#define KEELS2_HOST_EXPORT __declspec(dllexport)
+#else
+#define KEELS2_HOST_EXPORT __attribute__((visibility("default")))
+#endif
+
+namespace keels2::host
+{
+
+namespace
+{
+
+std::atomic<std::uint32_t> g_dispatch_entries{};
+
+void ReleaseDispatchEntry() noexcept
+{
+    if (g_dispatch_entries.fetch_sub(1, std::memory_order_acq_rel) == 1)
+    {
+        g_dispatch_entries.notify_all();
+    }
+}
+
+void WaitForDispatchEntries() noexcept
+{
+    std::uint32_t entries = g_dispatch_entries.load(std::memory_order_acquire);
+    while (entries != 0)
+    {
+        g_dispatch_entries.wait(entries, std::memory_order_acquire);
+        entries = g_dispatch_entries.load(std::memory_order_acquire);
+    }
+}
+
+}
+
+Host& Host::Instance()
+{
+    static Host* instance = new Host();
+    return *instance;
+}
+
+Host::~Host() = default;
+
+std::uint32_t Host::Start(const KeelHostStartInfo& info)
+{
+    std::unique_lock lifecycle_lock(lifecycle_mutex_);
+    std::unique_lock state_lock(state_mutex_);
+    if (state_ == HostState::running)
+    {
+        return KEELS2_HOST_START_RUNNING;
+    }
+    if (state_ != HostState::stopped)
+    {
+        Write(KEEL_LOG_ERROR, "host start requested during another lifecycle transition");
+        return state_ == HostState::stopping
+            ? KEELS2_HOST_START_RETAINED
+            : KEELS2_HOST_START_FAILED;
+    }
+    if (info.size != sizeof(KeelHostStartInfo) ||
+        info.abi_version != KEELS2_HOST_ABI_VERSION)
+    {
+        Write(KEEL_LOG_ERROR, "host ABI version is incompatible");
+        return KEELS2_HOST_START_FAILED;
+    }
+    if (!info.engine_factory || !info.server_factory || !info.bootstrap_directory ||
+        !info.game || !info.platform || !info.compatibility)
+    {
+        Write(KEEL_LOG_ERROR, "host start information is incomplete");
+        return KEELS2_HOST_START_FAILED;
+    }
+    if (std::strcmp(info.platform, kPlatformName) != 0)
+    {
+        Write(KEEL_LOG_ERROR, "host platform does not match this binary");
+        return KEELS2_HOST_START_FAILED;
+    }
+    if (info.compatibility->size != sizeof(KeelHostCompatibilityInfo) ||
+        !info.compatibility->profile || !info.compatibility->profile[0] ||
+        !info.compatibility->game_version || !info.compatibility->game_version[0])
+    {
+        Write(KEEL_LOG_ERROR, "host compatibility information is incomplete");
+        return KEELS2_HOST_START_FAILED;
+    }
+    if (info.compatibility->reserved != 0 || info.compatibility->target_count > 256 ||
+        ((info.compatibility->target_count == 0) != (info.compatibility->targets == nullptr)))
+    {
+        Write(KEEL_LOG_ERROR, "host compatibility targets are invalid");
+        return KEELS2_HOST_START_FAILED;
+    }
+    std::vector<CompatibilityTargetRecord> compatibility_targets;
+    compatibility_targets.reserve(info.compatibility->target_count);
+    for (std::uint32_t index{}; index < info.compatibility->target_count; ++index)
+    {
+        const auto& target = info.compatibility->targets[index];
+        if (target.size != sizeof(KeelHostCompatibilityTargetInfo) ||
+            !ValidMetadataText(target.name, 127, false) ||
+            !ValidMetadataText(target.module, 4096, false) ||
+            !ValidMetadataText(target.pattern, 16384, false) ||
+            std::any_of(
+                compatibility_targets.begin(),
+                compatibility_targets.end(),
+                [&](const auto& candidate) { return candidate.name == target.name; }))
+        {
+            Write(KEEL_LOG_ERROR, "host compatibility target is malformed or duplicated");
+            return KEELS2_HOST_START_FAILED;
+        }
+        compatibility_targets.push_back({
+            target.name,
+            target.module,
+            target.pattern,
+            target.offset,
+            target.occurrence
+        });
+    }
+
+    state_ = HostState::starting;
+    try
+    {
+        game_ = info.game;
+        platform_ = info.platform;
+        game_version_ = info.compatibility->game_version;
+        compatibility_profile_ = info.compatibility->profile;
+        compatibility_targets_ = std::move(compatibility_targets);
+        bootstrap_directory_ = std::filesystem::path(info.bootstrap_directory);
+        const GameAdapterHostApi adapter_host{
+            sizeof(GameAdapterHostApi),
+            kGameAdapterAbiVersion,
+            &BeginGameCommandDispatch,
+            &EndGameCommandDispatch
+        };
+        adapter_module_ = std::make_unique<GameAdapterModule>();
+        std::string error;
+        if (!adapter_module_->Load(
+                bootstrap_directory_,
+                game_.c_str(),
+                platform_.c_str(),
+                adapter_host,
+                error))
+        {
+            Write(KEEL_LOG_ERROR, "game adapter module failed: " + error);
+            state_ = HostState::stopping;
+            if (ReleaseResources(state_lock))
+            {
+                state_ = HostState::stopped;
+                return KEELS2_HOST_START_FAILED;
+            }
+            return KEELS2_HOST_START_RETAINED;
+        }
+        adapter_ = adapter_module_->Get();
+
+        if (!adapter_->Start(
+                info.engine_factory,
+                info.server_factory,
+                *info.compatibility,
+                error))
+        {
+            Write(KEEL_LOG_ERROR, "game adapter failed: " + error);
+            state_ = HostState::stopping;
+            if (ReleaseResources(state_lock))
+            {
+                state_ = HostState::stopped;
+                return KEELS2_HOST_START_FAILED;
+            }
+            return KEELS2_HOST_START_RETAINED;
+        }
+
+        source2_api_v1_ = {
+            sizeof(KeelSource2ApiV1),
+            KEELS2_SOURCE2_API_VERSION_1,
+            &ApiQuerySource2Interface
+        };
+        source2_api_ = {
+            sizeof(KeelSource2Api),
+            KEELS2_SOURCE2_API_VERSION,
+            &ApiQuerySource2Interface,
+            &ApiQuerySource2NamedInterface
+        };
+        source2_authoring_api_ = {
+            sizeof(KeelSource2AuthoringApi),
+            KEELS2_SOURCE2_AUTHORING_API_VERSION,
+            &ApiRegisterSource2Command,
+            &ApiUnregisterSource2Command,
+            &ApiCreateSource2ConVar,
+            &ApiFindSource2ConVar,
+            &ApiReleaseSource2ConVar
+        };
+
+        api_.size = sizeof(api_);
+        api_.abi_version = KEELS2_PLUGIN_ABI_VERSION;
+        api_.log = &ApiLog;
+        api_.register_command = &ApiRegisterCommand;
+        api_.unregister_command = &ApiUnregisterCommand;
+        api_.query_service = &ApiQueryService;
+
+        keelhook_ = std::make_unique<KeelHookService>(*this);
+#if defined(_WIN32)
+        const char* host_name = "keels2_host.dll";
+#else
+        const char* host_name = "libkeels2_host.so";
+#endif
+        keelhook_->Authorize(0, bootstrap_directory_ / host_name, true);
+        factories_ = std::make_shared<FactoryService>(
+            *this, *keelhook_, info.engine_factory, info.server_factory);
+        if (!factories_->Initialize())
+        {
+            throw std::runtime_error("managed factory interception could not be initialized");
+        }
+        source2_callbacks_ = std::make_unique<Source2CallbacksService>(
+            *this,
+            *adapter_,
+            *keelhook_);
+
+        if (!RegisterCoreCommand())
+        {
+            Write(KEEL_LOG_ERROR, "core command registration failed");
+            state_ = HostState::stopping;
+            if (ReleaseResources(state_lock))
+            {
+                state_ = HostState::stopped;
+                return KEELS2_HOST_START_FAILED;
+            }
+            return KEELS2_HOST_START_RETAINED;
+        }
+
+        accepting_resources_ = true;
+        plugin_directory_ =
+            bootstrap_directory_.parent_path().parent_path() / "plugins" / platform_;
+        LoadPlugins(plugin_directory_, state_lock);
+        state_ = HostState::running;
+        dispatch_open_.store(true, std::memory_order_release);
+        const auto loaded = std::count_if(plugins_.begin(), plugins_.end(), [](const auto& plugin) {
+            return plugin->state == PluginState::loaded;
+        });
+        Write(KEEL_LOG_INFO, "Version " + std::string(kHostVersion) + ". Loaded " +
+            std::to_string(loaded) + (loaded == 1 ? " plugin." : " plugins."));
+        return KEELS2_HOST_START_RUNNING;
+    }
+    catch (...)
+    {
+        accepting_resources_ = false;
+        dispatch_open_.store(false, std::memory_order_release);
+        state_ = HostState::stopping;
+        state_lock.unlock();
+        lifecycle_lock.unlock();
+        WaitForDispatchEntries();
+        lifecycle_lock.lock();
+        state_lock.lock();
+        if (ReleaseResources(state_lock))
+        {
+            state_ = HostState::stopped;
+        }
+        const std::uint32_t result = state_ == HostState::stopped
+            ? KEELS2_HOST_START_FAILED
+            : KEELS2_HOST_START_RETAINED;
+        state_lock.unlock();
+        Write(KEEL_LOG_ERROR, "host startup failed with an internal exception");
+        return result;
+    }
+}
+
+bool Host::CompleteStartup()
+{
+    std::unique_lock lifecycle_lock(lifecycle_mutex_);
+    std::unique_lock state_lock(state_mutex_);
+    if (state_ != HostState::running || !adapter_)
+    {
+        return false;
+    }
+    std::string error;
+    if (!adapter_->CompleteStartup(error))
+    {
+        Write(
+            KEEL_LOG_ERROR,
+            "game adapter completion failed: " +
+                (error.empty() ? std::string("unknown failure") : error));
+        return false;
+    }
+    return true;
+}
+
+bool Host::Stop()
+{
+    std::unique_lock lifecycle_lock(lifecycle_mutex_);
+    std::unique_lock state_lock(state_mutex_);
+    if (state_ == HostState::stopped)
+    {
+        return true;
+    }
+    if (state_ == HostState::running)
+    {
+        state_ = HostState::stopping;
+        accepting_resources_ = false;
+        dispatch_open_.store(false, std::memory_order_release);
+        state_lock.unlock();
+        lifecycle_lock.unlock();
+        WaitForDispatchEntries();
+        lifecycle_lock.lock();
+        state_lock.lock();
+    }
+    else if (state_ != HostState::stopping)
+    {
+        return false;
+    }
+    WriteShutdownTrace("host stop begin");
+    if (!ReleaseResources(state_lock))
+    {
+        WriteShutdownTrace("host stop retained");
+        return false;
+    }
+    state_ = HostState::stopped;
+    state_lock.unlock();
+    lifecycle_lock.unlock();
+    WriteShutdownTrace("host stopped");
+    Write(KEEL_LOG_INFO, "host stopped");
+    return true;
+}
+
+bool Host::CommandDispatchOpen() const noexcept
+{
+    return dispatch_open_.load(std::memory_order_acquire);
+}
+
+bool Host::ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock)
+{
+    WriteShutdownTrace("host resource release begin");
+    accepting_resources_ = false;
+    const bool plugin_transition_active =
+        std::any_of(plugins_.begin(), plugins_.end(), [](const auto& plugin) {
+            return plugin->transitioning || plugin->active_native_operations || plugin->cleanup_callback_active;
+        });
+    if (plugin_transition_active)
+    {
+        WriteShutdownTrace("plugin transition is still active");
+        if (!plugin_transition_failure_reported_)
+        {
+            Write(KEEL_LOG_ERROR, "host cleanup is waiting for an active plugin transition");
+            plugin_transition_failure_reported_ = true;
+        }
+        return false;
+    }
+    plugin_transition_failure_reported_ = false;
+    for (auto& plugin : plugins_)
+    {
+        plugin->accepting_resources = false;
+    }
+    for (auto& [handle, command] : commands_)
+    {
+        static_cast<void>(handle);
+        command->enabled.store(false, std::memory_order_release);
+    }
+    bool plugins_prepared = true;
+    for (auto iterator = load_order_.rbegin(); iterator != load_order_.rend(); ++iterator)
+    {
+        auto* plugin = PluginByHandle(*iterator);
+        if (!plugin || !plugin->library.IsOpen() || !plugin->unload || !plugin->prepare_unload)
+        {
+            continue;
+        }
+        const auto handle = plugin->handle;
+        state_lock.unlock();
+        const bool quiet =
+            (!factories_ || factories_->Deactivate(handle) == KEEL_RESULT_OK) &&
+            (!source2_callbacks_ || source2_callbacks_->Deactivate(handle) == KEEL_RESULT_OK) &&
+            (!lifecycle_ || lifecycle_->Deactivate(handle) == KEEL_RESULT_OK) &&
+            (!convars_ || convars_->Deactivate(handle) == KEEL_RESULT_OK) &&
+            (!plugin_service_ || plugin_service_->Deactivate(handle) == KEEL_RESULT_OK) &&
+            (!keelhook_ || keelhook_->Deactivate(handle) == KEEL_RESULT_OK);
+        state_lock.lock();
+        if (!quiet || !PreparePluginUnload(*plugin, state_lock))
+        {
+            plugins_prepared = false;
+        }
+    }
+    if (!plugins_prepared)
+    {
+        return false;
+    }
+    state_lock.unlock();
+    const bool factories_stopped = !factories_ || factories_->Shutdown();
+    if (!factories_stopped)
+    {
+        state_lock.lock();
+        if (!cleanup_failure_reported_)
+        {
+            Write(KEEL_LOG_ERROR, "factory replacements or callbacks retain the host until process exit");
+            cleanup_failure_reported_ = true;
+        }
+        return false;
+    }
+    WriteShutdownTrace("plugin service shutdown begin");
+    const bool plugin_events_stopped = !plugin_service_ || plugin_service_->Shutdown();
+    if (!plugin_events_stopped)
+    {
+        state_lock.lock();
+        WriteShutdownTrace("plugin event dispatch quiescence failed");
+        if (!plugin_service_failure_reported_)
+        {
+            Write(KEEL_LOG_ERROR, "plugin event callbacks are still active during shutdown");
+            plugin_service_failure_reported_ = true;
+        }
+        return false;
+    }
+    WriteShutdownTrace("plugin service shutdown complete");
+    plugin_service_failure_reported_ = false;
+    WriteShutdownTrace("ConVar service shutdown begin");
+    const bool convars_stopped = !convars_ || convars_->Shutdown();
+    if (!convars_stopped)
+    {
+        state_lock.lock();
+        WriteShutdownTrace("ConVar dispatch quiescence failed");
+        if (!convar_failure_reported_)
+        {
+            Write(KEEL_LOG_ERROR, "ConVar callbacks are still active during shutdown");
+            convar_failure_reported_ = true;
+        }
+        return false;
+    }
+    WriteShutdownTrace("ConVar service shutdown complete");
+    convar_failure_reported_ = false;
+    WriteShutdownTrace("schema and entity service shutdown begin");
+    const bool schema_entities_stopped =
+        !schema_entities_ || schema_entities_->Shutdown();
+    if (!schema_entities_stopped)
+    {
+        state_lock.lock();
+        WriteShutdownTrace("schema and entity service shutdown failed");
+        return false;
+    }
+    WriteShutdownTrace("schema and entity service shutdown complete");
+    WriteShutdownTrace("lifecycle service shutdown begin");
+    const bool lifecycle_stopped = !lifecycle_ || lifecycle_->Shutdown();
+    if (!lifecycle_stopped)
+    {
+        state_lock.lock();
+        WriteShutdownTrace("lifecycle dispatch quiescence failed");
+        if (!lifecycle_failure_reported_)
+        {
+            Write(KEEL_LOG_ERROR, "lifecycle callbacks are still active during shutdown");
+            lifecycle_failure_reported_ = true;
+        }
+        return false;
+    }
+    WriteShutdownTrace("lifecycle service shutdown complete");
+    lifecycle_failure_reported_ = false;
+    WriteShutdownTrace("Source 2 callback service shutdown begin");
+    const bool source2_callbacks_stopped =
+        !source2_callbacks_ || source2_callbacks_->Shutdown();
+    if (!source2_callbacks_stopped)
+    {
+        state_lock.lock();
+        WriteShutdownTrace("Source 2 callback dispatch quiescence failed");
+        if (!source2_callbacks_failure_reported_)
+        {
+            Write(KEEL_LOG_ERROR, "Source 2 callbacks are still active during shutdown");
+            source2_callbacks_failure_reported_ = true;
+        }
+        return false;
+    }
+    WriteShutdownTrace("Source 2 callback service shutdown complete");
+    source2_callbacks_failure_reported_ = false;
+    WriteShutdownTrace("keelhook shutdown begin");
+    const bool hooks_restored = !keelhook_ || keelhook_->Shutdown();
+    state_lock.lock();
+    if (!hooks_restored)
+    {
+        WriteShutdownTrace("keelhook restoration failed");
+        if (!cleanup_failure_reported_)
+        {
+            Write(KEEL_LOG_ERROR, "KeelHook could not restore every physical target during shutdown");
+            cleanup_failure_reported_ = true;
+        }
+        return false;
+    }
+    WriteShutdownTrace("keelhook restoration completed");
+    cleanup_failure_reported_ = false;
+    WriteShutdownTrace("adapter command release begin");
+    if (adapter_)
+    {
+        for (auto& [handle, command] : commands_)
+        {
+            static_cast<void>(handle);
+            adapter_->UnregisterCommand(command->game_handle);
+        }
+    }
+    WriteShutdownTrace("adapter command release complete");
+    WaitForDispatchEntries();
+    WriteShutdownTrace("host dispatch drain complete");
+    commands_.clear();
+    retired_commands_.clear();
+    WriteShutdownTrace("host command records cleared");
+
+    if (published_services_)
+    {
+        published_services_->Shutdown();
+    }
+
+    WriteShutdownTrace("plugin unload loop begin");
+    for (auto iterator = load_order_.rbegin(); iterator != load_order_.rend(); ++iterator)
+    {
+        PluginRecord* plugin = PluginByHandle(*iterator);
+        if (!plugin || !plugin->library.IsOpen() || !plugin->unload)
+        {
+            continue;
+        }
+        plugin->accepting_resources = false;
+        const std::string display_id = PluginDisplayId(plugin);
+        const std::string name = plugin->name;
+        bool callback_completed = true;
+        plugin->cleanup_callback_active = true;
+        state_lock.unlock();
+        try
+        {
+            plugin->unload(plugin->handle);
+        }
+        catch (...)
+        {
+            callback_completed = false;
+            Write(KEEL_LOG_ERROR, "plugin threw during unload: " + plugin->name);
+        }
+        state_lock.lock();
+        plugin->cleanup_callback_active = false;
+        WriteShutdownTrace(
+            callback_completed
+                ? "plugin unload callback completed"
+                : "plugin unload callback threw",
+            name
+        );
+        plugin->load = nullptr;
+        plugin->unload = nullptr;
+        ClosePluginImage(*plugin);
+        WriteShutdownTrace("plugin module released", name);
+        Write(KEEL_LOG_INFO, "plugin unloaded: [" + display_id + "] " + name);
+    }
+    WriteShutdownTrace("plugin unload loop complete");
+
+    load_order_.clear();
+    deferred_plugin_commands_.clear();
+    dispatching_deferred_plugin_commands_ = false;
+    WriteShutdownTrace("plugin load order cleared");
+    plugins_.clear();
+    disabled_plugins_.clear();
+    bulk_plugin_operation_ = false;
+    WriteShutdownTrace("plugin records cleared");
+    published_services_.reset();
+    WriteShutdownTrace("published service registry released");
+    plugin_service_.reset();
+    WriteShutdownTrace("plugin service released");
+    source2_callbacks_.reset();
+    WriteShutdownTrace("Source 2 callback service released");
+    source2_runtime_.reset();
+    players_.reset();
+    convars_.reset();
+    WriteShutdownTrace("ConVar service released");
+    schema_entities_.reset();
+    WriteShutdownTrace("schema and entity service released");
+    lifecycle_.reset();
+    WriteShutdownTrace("lifecycle service released");
+    factories_.reset();
+    keelhook_.reset();
+    WriteShutdownTrace("keelhook service released");
+    if (adapter_)
+    {
+        WriteShutdownTrace("game adapter stop begin");
+        adapter_->Stop();
+        WriteShutdownTrace("game adapter stop complete");
+    }
+    adapter_ = nullptr;
+    adapter_module_.reset();
+    WriteShutdownTrace("game adapter released");
+    source2_api_v1_ = {};
+    source2_api_ = {};
+    source2_authoring_api_ = {};
+    api_ = {};
+    WriteShutdownTrace("host APIs cleared");
+    next_plugin_ = 1;
+    next_command_ = 1;
+    game_.clear();
+    platform_.clear();
+    game_version_.clear();
+    compatibility_profile_.clear();
+    compatibility_targets_.clear();
+    bootstrap_directory_.clear();
+    plugin_directory_.clear();
+    WriteShutdownTrace("host state cleared");
+    WriteShutdownTrace("host resource release complete");
+    return true;
+}
+
+bool Host::RegisterCoreCommand()
+{
+    if (next_command_ == 0)
+    {
+        return false;
+    }
+    auto resource = std::make_unique<CommandRecord>();
+    resource->handle = next_command_++;
+    resource->name = "keel";
+    resource->description = "KeelS2 command menu";
+    resource->callback = &CoreCommand;
+    const auto flags = adapter_module_ && adapter_module_->SupportsClientCommands()
+        ? kClientCommandFlags : 0;
+    return RegisterCommandRecord(std::move(resource), flags);
+}
+
+void Host::ApiLog(KeelPluginHandle plugin, KeelLogLevel level, const char* message)
+{
+    Instance().PluginLog(plugin, level, message);
+}
+
+KeelResult Host::ApiRegisterCommand(
+    KeelPluginHandle plugin,
+    const KeelCommandSpec* spec,
+    KeelCommandHandle* command)
+{
+    try
+    {
+        return Instance().RegisterCommand(plugin, spec, command);
+    }
+    catch (...)
+    {
+        Instance().Write(KEEL_LOG_ERROR, "exception while registering a command");
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+}
+
+KeelResult Host::ApiUnregisterCommand(
+    KeelPluginHandle plugin,
+    KeelCommandHandle command)
+{
+    try
+    {
+        return Instance().UnregisterCommand(plugin, command);
+    }
+    catch (...)
+    {
+        Instance().Write(KEEL_LOG_ERROR, "exception while unregistering a command");
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+}
+
+KeelResult Host::ApiRegisterSource2Command(
+    KeelPluginHandle plugin,
+    const KeelSource2CommandSpec* spec,
+    KeelCommandHandle* command)
+{
+    try
+    {
+        return Instance().RegisterSource2Command(plugin, spec, command);
+    }
+    catch (...)
+    {
+        Instance().Write(KEEL_LOG_ERROR, "exception while registering a Source 2 command");
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+}
+
+KeelResult Host::ApiUnregisterSource2Command(
+    KeelPluginHandle plugin,
+    KeelCommandHandle command)
+{
+    return ApiUnregisterCommand(plugin, command);
+}
+
+KeelResult Host::ApiCreateSource2ConVar(
+    KeelPluginHandle plugin,
+    const KeelConVarSpec* spec,
+    KeelSource2ConVarChangeCallback callback,
+    void* user_data,
+    KeelConVarHandle* convar,
+    void** native_convar)
+{
+    try
+    {
+        Host& host = Instance();
+        return host.convars_
+            ? host.convars_->CreateNative(
+                plugin,
+                spec,
+                callback,
+                user_data,
+                convar,
+                native_convar)
+            : KEEL_RESULT_NOT_READY;
+    }
+    catch (...)
+    {
+        Instance().Write(KEEL_LOG_ERROR, "exception while creating a Source 2 ConVar");
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+}
+
+KeelResult Host::ApiFindSource2ConVar(
+    KeelPluginHandle plugin,
+    const char* name,
+    KeelConVarType expected_type,
+    KeelConVarHandle* convar,
+    void** native_convar)
+{
+    try
+    {
+        Host& host = Instance();
+        return host.convars_
+            ? host.convars_->FindNative(
+                plugin,
+                name,
+                expected_type,
+                convar,
+                native_convar)
+            : KEEL_RESULT_NOT_READY;
+    }
+    catch (...)
+    {
+        Instance().Write(KEEL_LOG_ERROR, "exception while finding a Source 2 ConVar");
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+}
+
+KeelResult Host::ApiReleaseSource2ConVar(
+    KeelPluginHandle plugin,
+    KeelConVarHandle convar)
+{
+    try
+    {
+        Host& host = Instance();
+        return host.convars_
+            ? host.convars_->ReleaseNative(plugin, convar)
+            : KEEL_RESULT_NOT_READY;
+    }
+    catch (...)
+    {
+        Instance().Write(KEEL_LOG_ERROR, "exception while releasing a Source 2 ConVar");
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+}
+
+KeelResult Host::ApiQueryService(
+    KeelPluginHandle plugin,
+    const char* name,
+    std::uint32_t version,
+    const void** service)
+{
+    try
+    {
+        return Instance().QueryService(plugin, name, version, service);
+    }
+    catch (...)
+    {
+        Instance().Write(KEEL_LOG_ERROR, "exception while querying a host service");
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+}
+
+KeelResult Host::ApiQuerySource2Interface(
+    KeelPluginHandle plugin,
+    KeelSource2Capability capability,
+    KeelSource2InterfaceInfo* info)
+{
+    try
+    {
+        return Instance().QuerySource2Interface(plugin, capability, info);
+    }
+    catch (...)
+    {
+        Instance().Write(KEEL_LOG_ERROR, "exception while querying a Source 2 interface");
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+}
+
+KeelResult Host::ApiQuerySource2NamedInterface(
+    KeelPluginHandle plugin,
+    KeelSource2Factory factory,
+    const char* interface_name,
+    KeelSource2InterfaceInfo* info)
+{
+    try
+    {
+        return Instance().QuerySource2NamedInterface(
+            plugin,
+            factory,
+            interface_name,
+            info);
+    }
+    catch (...)
+    {
+        Instance().Write(KEEL_LOG_ERROR, "exception while querying a named Source 2 interface");
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+}
+
+KeelResult Host::ApiSetPreparePause(
+    KeelPluginHandle plugin, KeelPreparePauseCallback callback, void* user_data)
+{
+    auto& host = Instance();
+    std::scoped_lock lock(host.state_mutex_);
+    auto* owner = host.PluginByHandle(plugin);
+    if (!owner || (!callback && user_data))
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    if (owner->prepare_pause_active)
+    {
+        return KEEL_RESULT_BUSY;
+    }
+    if (callback && (!host.accepting_resources_ || !owner->accepting_resources ||
+            owner->transitioning || owner->cleanup_pending))
+    {
+        return KEEL_RESULT_NOT_READY;
+    }
+    owner->prepare_pause = callback;
+    owner->prepare_pause_data = user_data;
+    return KEEL_RESULT_OK;
+}
+
+bool Host::PreparePluginPause(
+    PluginRecord& plugin, std::unique_lock<std::recursive_mutex>& state_lock)
+{
+    if (!plugin.prepare_pause)
+    {
+        return true;
+    }
+    if (!adapter_ || !adapter_->IsGameThread())
+    {
+        Write(KEEL_LOG_ERROR, "plugin pause preparation requires the game thread: " + plugin.name);
+        return false;
+    }
+    const auto callback = plugin.prepare_pause;
+    void* const data = plugin.prepare_pause_data;
+    plugin.prepare_pause_active = true;
+    plugin.cleanup_callback_active = true;
+    state_lock.unlock();
+    bool ready{};
+    try
+    {
+        ready = callback(data) == KEEL_TRUE;
+    }
+    catch (...)
+    {
+    }
+    state_lock.lock();
+    plugin.cleanup_callback_active = false;
+    plugin.prepare_pause_active = false;
+    if (!ready)
+    {
+        const auto outcome = plugin.state == PluginState::loading
+            ? "plugin pause preparation is incomplete; replacement was not activated: "
+            : "plugin pause preparation is incomplete; plugin remains running: ";
+        Write(KEEL_LOG_WARNING, std::string(outcome) + plugin.name);
+    }
+    return ready;
+}
+
+KeelResult Host::ApiSetPrepareUnload(
+    KeelPluginHandle plugin, KeelPrepareUnloadCallback callback, void* user_data)
+{
+    auto& host = Instance();
+    std::scoped_lock lock(host.state_mutex_);
+    auto* owner = host.PluginByHandle(plugin);
+    if (!owner || (!callback && user_data))
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    if (owner->prepare_unload_active)
+    {
+        return KEEL_RESULT_BUSY;
+    }
+    if (callback && (!host.accepting_resources_ || !owner->accepting_resources ||
+            owner->transitioning || owner->cleanup_pending))
+    {
+        return KEEL_RESULT_NOT_READY;
+    }
+    owner->prepare_unload = callback;
+    owner->prepare_unload_data = user_data;
+    return KEEL_RESULT_OK;
+}
+
+bool Host::PreparePluginUnload(
+    PluginRecord& plugin, std::unique_lock<std::recursive_mutex>& state_lock)
+{
+    if (!plugin.prepare_unload)
+    {
+        return true;
+    }
+    if (!adapter_ || !adapter_->IsGameThread())
+    {
+        Write(KEEL_LOG_ERROR, "plugin unload preparation requires the game thread: " + plugin.name);
+        return false;
+    }
+    const auto callback = plugin.prepare_unload;
+    void* const data = plugin.prepare_unload_data;
+    plugin.prepare_unload_active = true;
+    plugin.cleanup_callback_active = true;
+    state_lock.unlock();
+    bool ready{};
+    try
+    {
+        ready = callback(data) == KEEL_TRUE;
+    }
+    catch (...)
+    {
+    }
+    state_lock.lock();
+    plugin.cleanup_callback_active = false;
+    plugin.prepare_unload_active = false;
+    if (!ready)
+    {
+        Write(KEEL_LOG_WARNING, "plugin unload preparation is incomplete; plugin retained: " + plugin.name);
+    }
+    return ready;
+}
+
+KeelResult Host::QueryService(
+    KeelPluginHandle plugin,
+    const char* name,
+    std::uint32_t version,
+    const void** service)
+{
+    std::scoped_lock lock(state_mutex_);
+    if (!service || !name)
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    *service = nullptr;
+    PluginRecord* owner = PluginByHandle(plugin);
+    if (!accepting_resources_ || !owner || !owner->accepting_resources)
+    {
+        return KEEL_RESULT_NOT_READY;
+    }
+    if (std::strcmp(name, KEELS2_PAUSE_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_PAUSE_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        static const KeelPauseApi api{
+            sizeof(KeelPauseApi), KEELS2_PAUSE_API_VERSION, &ApiSetPreparePause};
+        *service = &api;
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_UNLOAD_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_UNLOAD_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        static const KeelUnloadApi api{
+            sizeof(KeelUnloadApi), KEELS2_UNLOAD_API_VERSION, &ApiSetPrepareUnload};
+        *service = &api;
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_FACTORIES_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_FACTORIES_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!factories_)
+        {
+            return KEEL_RESULT_NOT_READY;
+        }
+        *service = &factories_->Api();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_SOURCE2_SERVICE_NAME) == 0)
+    {
+        if (version == KEELS2_SOURCE2_API_VERSION_1)
+        {
+            if (!source2_api_v1_.query_interface)
+            {
+                return KEEL_RESULT_NOT_READY;
+            }
+            *service = &source2_api_v1_;
+            return KEEL_RESULT_OK;
+        }
+        if (version == KEELS2_SOURCE2_API_VERSION)
+        {
+            if (!source2_api_.query_interface || !source2_api_.query_named_interface)
+            {
+                return KEEL_RESULT_NOT_READY;
+            }
+            *service = &source2_api_;
+            return KEEL_RESULT_OK;
+        }
+        return KEEL_RESULT_INCOMPATIBLE;
+    }
+    if (std::strcmp(name, KEELS2_SOURCE2_AUTHORING_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_SOURCE2_AUTHORING_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!convars_)
+        {
+            convars_ = std::make_unique<ConVarService>(*this, *adapter_);
+        }
+        *service = &source2_authoring_api_;
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_NATIVE_RUNTIME_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_NATIVE_RUNTIME_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!source2_runtime_)
+        {
+            source2_runtime_ = std::make_unique<Source2RuntimeService>(*this, *adapter_);
+        }
+        *service = &source2_runtime_->NativeApi();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_SOURCE2_RUNTIME_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_SOURCE2_RUNTIME_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!source2_runtime_)
+        {
+            source2_runtime_ = std::make_unique<Source2RuntimeService>(*this, *adapter_);
+        }
+        *service = &source2_runtime_->Api();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_SOURCE2_CALLBACKS_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_SOURCE2_CALLBACKS_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!source2_callbacks_)
+        {
+            if (!keelhook_)
+            {
+                keelhook_ = std::make_unique<KeelHookService>(*this);
+            }
+#if defined(_WIN32)
+            const char* host_name = "keels2_host.dll";
+#else
+            const char* host_name = "libkeels2_host.so";
+#endif
+            keelhook_->Authorize(0, bootstrap_directory_ / host_name, true);
+            source2_callbacks_ = std::make_unique<Source2CallbacksService>(
+                *this,
+                *adapter_,
+                *keelhook_);
+        }
+        *service = &source2_callbacks_->Api();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_LIFECYCLE_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_LIFECYCLE_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!lifecycle_)
+        {
+            if (!keelhook_)
+            {
+                keelhook_ = std::make_unique<KeelHookService>(*this);
+            }
+#if defined(_WIN32)
+            const char* host_name = "keels2_host.dll";
+#else
+            const char* host_name = "libkeels2_host.so";
+#endif
+            keelhook_->Authorize(0, bootstrap_directory_ / host_name, true);
+            lifecycle_ = std::make_unique<LifecycleService>(*this, *adapter_, *keelhook_);
+        }
+        *service = &lifecycle_->Api();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_PLAYERS_SERVICE_NAME) == 0 || std::strcmp(name, KEELS2_PLAYER_INPUT_SERVICE_NAME) == 0)
+    {
+        const bool input = std::strcmp(name, KEELS2_PLAYER_INPUT_SERVICE_NAME) == 0;
+        if (version != (input ? KEELS2_PLAYER_INPUT_API_VERSION : KEELS2_PLAYERS_API_VERSION))
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!adapter_module_ || !adapter_module_->PlayerCapacity())
+        {
+            return KEEL_RESULT_UNSUPPORTED;
+        }
+        if (!lifecycle_)
+        {
+            const void* lifecycle{};
+            const KeelResult result = QueryService(plugin,
+                KEELS2_LIFECYCLE_SERVICE_NAME, KEELS2_LIFECYCLE_API_VERSION, &lifecycle);
+            if (result != KEEL_RESULT_OK)
+            {
+                return result;
+            }
+        }
+        if (!players_)
+        {
+            players_ = std::make_unique<PlayerService>(*this, *adapter_module_);
+        }
+        *service = input ? static_cast<const void*>(&players_->InputApi()) : static_cast<const void*>(&players_->Api());
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_CONVAR_OBSERVE_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_CONVAR_OBSERVE_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!convars_)
+        {
+            convars_ = std::make_unique<ConVarService>(*this, *adapter_);
+        }
+        *service = &convars_->ObserveApi();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_CONVAR_ACCESS_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_CONVAR_ACCESS_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!convars_)
+        {
+            convars_ = std::make_unique<ConVarService>(*this, *adapter_);
+        }
+        *service = &convars_->AccessApi();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_CONVAR_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_CONVAR_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!convars_)
+        {
+            convars_ = std::make_unique<ConVarService>(*this, *adapter_);
+        }
+        *service = &convars_->Api();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_PLUGINS_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_PLUGINS_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!plugin_service_)
+        {
+            plugin_service_ = std::make_unique<PluginService>(*this);
+        }
+        *service = &plugin_service_->Api();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_SERVICES_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_SERVICES_API_VERSION)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!published_services_)
+        {
+            published_services_ = std::make_unique<PublishedServiceRegistry>(*this);
+        }
+        *service = &published_services_->Api();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_PLAYER_ACTIONS_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_PLAYER_ACTIONS_API_VERSION)
+            return KEEL_RESULT_INCOMPATIBLE;
+        if (!schema_entities_)
+            schema_entities_ = std::make_unique<SchemaEntityService>(*this, *adapter_);
+        *service = &schema_entities_->PlayerActionsApi();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_SCHEMA_SERVICE_NAME) == 0 ||
+        std::strcmp(name, KEELS2_ENTITIES_SERVICE_NAME) == 0)
+    {
+        const bool schema = std::strcmp(name, KEELS2_SCHEMA_SERVICE_NAME) == 0;
+        if ((schema && version != KEELS2_SCHEMA_API_VERSION) ||
+            (!schema && version != KEELS2_ENTITIES_API_VERSION))
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!schema_entities_)
+        {
+            schema_entities_ = std::make_unique<SchemaEntityService>(*this, *adapter_);
+        }
+        *service = schema
+            ? static_cast<const void*>(&schema_entities_->SchemaApi())
+            : static_cast<const void*>(&schema_entities_->EntitiesApi());
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELHOOK_SERVICE_NAME) != 0)
+    {
+        return published_services_
+            ? published_services_->Query(plugin, name, version, service)
+            : KEEL_RESULT_NOT_FOUND;
+    }
+    if (version != KEELHOOK_API_VERSION && version != KEELHOOK_API_VERSION_4 &&
+        version != KEELHOOK_API_VERSION_3)
+    {
+        return KEEL_RESULT_INCOMPATIBLE;
+    }
+    if (!keelhook_)
+    {
+        keelhook_ = std::make_unique<KeelHookService>(*this);
+    }
+    keelhook_->Authorize(
+        plugin,
+        owner->transient_path.empty() ? owner->path : owner->transient_path,
+        owner->state == PluginState::loaded && !owner->loading);
+    if (version == KEELHOOK_API_VERSION)
+    {
+        *service = static_cast<const void*>(&keelhook_->Api());
+    }
+    else if (version == KEELHOOK_API_VERSION_4)
+    {
+        *service = static_cast<const void*>(&keelhook_->ApiV4());
+    }
+    else
+    {
+        *service = static_cast<const void*>(&keelhook_->ApiV3());
+    }
+    return KEEL_RESULT_OK;
+}
+
+KeelResult Host::QuerySource2Interface(
+    KeelPluginHandle plugin,
+    KeelSource2Capability capability,
+    KeelSource2InterfaceInfo* info)
+{
+    std::scoped_lock lock(state_mutex_);
+    if (!info)
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    const std::uint32_t size = info->size;
+    *info = {};
+    info->size = size;
+    if (size != sizeof(KeelSource2InterfaceInfo))
+    {
+        return KEEL_RESULT_INCOMPATIBLE;
+    }
+    PluginRecord* owner = PluginByHandle(plugin);
+    if (!accepting_resources_ || !owner || !owner->accepting_resources || !adapter_)
+    {
+        return KEEL_RESULT_NOT_READY;
+    }
+    return adapter_->QueryInterface(capability, *info);
+}
+
+KeelResult Host::QuerySource2NamedInterface(
+    KeelPluginHandle plugin,
+    KeelSource2Factory factory,
+    const char* interface_name,
+    KeelSource2InterfaceInfo* info)
+{
+    std::shared_ptr<FactoryService> factories;
+    {
+        std::scoped_lock lock(state_mutex_);
+        factories = factories_;
+    }
+    return factories ? factories->QueryNamed(plugin, factory, interface_name, info)
+        : KEEL_RESULT_NOT_READY;
+}
+
+void Host::DispatchCommand(const GameCommandInvocation& game_invocation, void* user_data)
+{
+    Host& host = Instance();
+    auto* command = static_cast<CommandRecord*>(user_data);
+    std::unique_lock lifecycle_lock(host.lifecycle_mutex_, std::defer_lock);
+    if (command && command->owner == 0)
+    {
+        lifecycle_lock.lock();
+    }
+    std::unique_lock state_lock(host.state_mutex_);
+    if (!host.dispatch_open_.load(std::memory_order_acquire))
+    {
+        return;
+    }
+
+    if (!command || !command->enabled.load(std::memory_order_acquire))
+    {
+        return;
+    }
+
+    command->active.fetch_add(1, std::memory_order_acq_rel);
+    struct CommandScope
+    {
+        CommandRecord& command;
+        ~CommandScope() { command.active.fetch_sub(1, std::memory_order_acq_rel); }
+    } command_scope{*command};
+    if (command->owner != 0)
+    {
+        state_lock.unlock();
+    }
+
+    try
+    {
+        if (command->native_callback)
+        {
+            if (game_invocation.context && game_invocation.command)
+            {
+                command->native_callback(
+                    game_invocation.context,
+                    game_invocation.command,
+                    command->user_data);
+            }
+        }
+        else
+        {
+            const std::uint32_t argument_count =
+                game_invocation.argument_count > 0 ? game_invocation.argument_count - 1 : 0;
+            const char* const* arguments =
+                argument_count != 0 && game_invocation.arguments
+                    ? game_invocation.arguments + 1
+                    : nullptr;
+            const KeelCommandInvocation invocation{
+                sizeof(KeelCommandInvocation),
+                argument_count,
+                command->name.c_str(),
+                arguments
+            };
+            if (command->owner == 0)
+            {
+                std::int32_t slot{-1};
+                if (!host.adapter_module_ ||
+                    host.adapter_module_->CommandCaller(game_invocation.context, slot) != KEEL_RESULT_OK)
+                {
+                    return;
+                }
+                if (slot >= 0)
+                {
+                    host.DispatchClientCommand(invocation, slot);
+                }
+                else
+                {
+                    host.DispatchCoreCommand(invocation, state_lock);
+                }
+            }
+            else
+            {
+                command->callback(&invocation, command->user_data);
+            }
+        }
+    }
+    catch (...)
+    {
+        if (command->owner == 0)
+        {
+            host.Write(KEEL_LOG_ERROR, "core command failed with an internal exception");
+        }
+        else
+        {
+            host.Write(KEEL_LOG_ERROR, "plugin threw from command: " + command->name);
+        }
+    }
+}
+
+void Host::CoreCommand(const KeelCommandInvocation* invocation, void*)
+{
+    if (!invocation || invocation->size != sizeof(KeelCommandInvocation))
+    {
+        Instance().Write(KEEL_LOG_ERROR, "core command received an invalid invocation");
+        return;
+    }
+    Host& host = Instance();
+    std::unique_lock lifecycle_lock(host.lifecycle_mutex_);
+    std::unique_lock state_lock(host.state_mutex_);
+    host.DispatchCoreCommand(*invocation, state_lock);
+}
+
+void Host::PluginLog(KeelPluginHandle plugin, KeelLogLevel level, const char* message)
+{
+    if (!message)
+    {
+        Write(KEEL_LOG_ERROR, "plugin log rejected: message is null");
+        return;
+    }
+
+    if (level != KEEL_LOG_INFO && level != KEEL_LOG_WARNING && level != KEEL_LOG_ERROR)
+    {
+        Write(KEEL_LOG_ERROR, "plugin log rejected: invalid log level");
+        return;
+    }
+
+    std::string name;
+    {
+        std::scoped_lock lock(state_mutex_);
+        const PluginRecord* owner = PluginByHandle(plugin);
+        if (!owner)
+        {
+            Write(KEEL_LOG_ERROR, "plugin log rejected: invalid plugin handle");
+            return;
+        }
+        name = owner->name.empty() ? owner->path.filename().string() : owner->name;
+    }
+
+    std::string line = "[" + name + "] ";
+    if (level == KEEL_LOG_WARNING)
+    {
+        line += "WARNING: ";
+    }
+    else if (level == KEEL_LOG_ERROR)
+    {
+        line += "ERROR: ";
+    }
+    line += message;
+    WriteLine(line);
+}
+
+KeelResult Host::RegisterCommand(
+    KeelPluginHandle plugin,
+    const KeelCommandSpec* spec,
+    KeelCommandHandle* output)
+{
+    std::scoped_lock lock(state_mutex_);
+    if (!accepting_resources_ || !adapter_)
+    {
+        return KEEL_RESULT_NOT_READY;
+    }
+
+    PluginRecord* owner = PluginByHandle(plugin);
+    if (!spec || spec->size != sizeof(KeelCommandSpec) || !output ||
+        !spec->name || !spec->callback || !owner)
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    if (!owner->accepting_resources)
+    {
+        return KEEL_RESULT_NOT_READY;
+    }
+    if (next_command_ == 0)
+    {
+        Write(KEEL_LOG_ERROR, "command handle space is exhausted");
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+    if (EqualInsensitive(spec->name, "keel"))
+    {
+        Write(
+            KEEL_LOG_ERROR,
+            "plugin \"" + owner->name + "\" cannot register reserved command \"keel\""
+        );
+        return KEEL_RESULT_RESERVED_NAME;
+    }
+    if (!ValidCommandName(spec->name) ||
+        !ValidMetadataText(spec->description, 255, true))
+    {
+        Write(KEEL_LOG_ERROR, "plugin \"" + owner->name + "\" supplied an invalid command definition");
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    if (std::any_of(commands_.begin(), commands_.end(), [spec](const auto& entry) {
+            return EqualInsensitive(entry.second->name, spec->name);
+        }))
+    {
+        Write(
+            KEEL_LOG_ERROR,
+            "plugin \"" + owner->name + "\" cannot register duplicate command \"" +
+                std::string(spec->name) + "\""
+        );
+        return KEEL_RESULT_ALREADY_EXISTS;
+    }
+
+    auto resource = std::make_unique<CommandRecord>();
+    resource->handle = next_command_++;
+    resource->owner = plugin;
+    resource->name = spec->name;
+    resource->description = spec->description ? spec->description : "";
+    resource->callback = spec->callback;
+    resource->user_data = spec->user_data;
+    resource->enabled.store(!owner->loading && owner->state == PluginState::loaded);
+    const KeelCommandHandle handle = resource->handle;
+    if (!RegisterCommandRecord(std::move(resource), spec->flags))
+    {
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+
+    *output = handle;
+    return KEEL_RESULT_OK;
+}
+
+KeelResult Host::RegisterSource2Command(
+    KeelPluginHandle plugin,
+    const KeelSource2CommandSpec* spec,
+    KeelCommandHandle* output)
+{
+    std::scoped_lock lock(state_mutex_);
+    if (!accepting_resources_ || !adapter_)
+    {
+        return KEEL_RESULT_NOT_READY;
+    }
+    PluginRecord* owner = PluginByHandle(plugin);
+    if (!spec || spec->size != sizeof(KeelSource2CommandSpec) || spec->reserved != 0 ||
+        !output || !spec->name || !spec->callback || !owner)
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    if (!owner->accepting_resources)
+    {
+        return KEEL_RESULT_NOT_READY;
+    }
+    if (next_command_ == 0)
+    {
+        Write(KEEL_LOG_ERROR, "command handle space is exhausted");
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+    if (EqualInsensitive(spec->name, "keel"))
+    {
+        return KEEL_RESULT_RESERVED_NAME;
+    }
+    if (!ValidCommandName(spec->name) ||
+        !ValidMetadataText(spec->description, 255, true))
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    if (std::any_of(commands_.begin(), commands_.end(), [spec](const auto& entry) {
+            return EqualInsensitive(entry.second->name, spec->name);
+        }))
+    {
+        return KEEL_RESULT_ALREADY_EXISTS;
+    }
+    auto resource = std::make_unique<CommandRecord>();
+    resource->handle = next_command_++;
+    resource->owner = plugin;
+    resource->name = spec->name;
+    resource->description = spec->description ? spec->description : "";
+    resource->native_callback = spec->callback;
+    resource->user_data = spec->user_data;
+    resource->enabled.store(!owner->loading && owner->state == PluginState::loaded);
+    const KeelCommandHandle handle = resource->handle;
+    if (!RegisterCommandRecord(std::move(resource), spec->flags))
+    {
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+    *output = handle;
+    return KEEL_RESULT_OK;
+}
+
+KeelResult Host::UnregisterCommand(
+    KeelPluginHandle plugin,
+    KeelCommandHandle command)
+{
+    std::scoped_lock lock(state_mutex_);
+    if (command == 0 || !PluginByHandle(plugin))
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    const auto iterator = commands_.find(command);
+    if (iterator == commands_.end() || iterator->second->owner != plugin)
+    {
+        return KEEL_RESULT_NOT_FOUND;
+    }
+
+    std::unique_ptr<CommandRecord> resource = std::move(iterator->second);
+    resource->enabled.store(false, std::memory_order_release);
+    if (adapter_)
+    {
+        adapter_->UnregisterCommand(resource->game_handle);
+    }
+    resource->callback = nullptr;
+    resource->native_callback = nullptr;
+    resource->user_data = nullptr;
+    commands_.erase(iterator);
+    retired_commands_.push_back(std::move(resource));
+    return KEEL_RESULT_OK;
+}
+
+bool Host::RegisterCommandRecord(std::unique_ptr<CommandRecord> resource, std::uint64_t flags)
+{
+    const GameCommandSpec game_spec{
+        resource->name.c_str(),
+        resource->description.c_str(),
+        flags,
+        &DispatchCommand,
+        resource.get()
+    };
+    std::string error;
+    if (!adapter_->RegisterCommand(game_spec, resource->game_handle, error))
+    {
+        Write(KEEL_LOG_ERROR, "command registration failed for " + resource->name + ": " + error);
+        return false;
+    }
+
+    const KeelCommandHandle handle = resource->handle;
+    commands_.emplace(handle, std::move(resource));
+    return true;
+}
+
+bool Host::ValidCommandName(const char* name)
+{
+    if (!name)
+    {
+        return false;
+    }
+    std::size_t length{};
+    for (const unsigned char* character = reinterpret_cast<const unsigned char*>(name);
+         *character;
+         ++character)
+    {
+        if (!(std::islower(*character) || std::isdigit(*character) || *character == '_'))
+        {
+            return false;
+        }
+        if (++length > 63)
+        {
+            return false;
+        }
+    }
+    return length != 0;
+}
+
+void Host::WriteShutdownTrace(std::string_view event, std::string_view detail) noexcept
+{
+    platform::AppendShutdownTrace(event, detail);
+}
+
+void Host::Write(KeelLogLevel level, const std::string& message)
+{
+    std::string line = "[KeelS2] ";
+    if (level == KEEL_LOG_WARNING)
+    {
+        line += "WARNING: ";
+    }
+    else if (level == KEEL_LOG_ERROR)
+    {
+        line += "ERROR: ";
+    }
+    line += message;
+    WriteLine(line);
+}
+
+void Host::WriteUsage(const std::string& usage)
+{
+    WriteLine("[KeelS2] Usage: " + usage);
+}
+
+void Host::WriteLine(const std::string& message)
+{
+    std::scoped_lock lock(log_mutex_);
+    const std::string line = message + "\n";
+    platform::WriteEngineConsole(line.c_str());
+}
+
+std::uint32_t BeginGameCommandDispatch() noexcept
+{
+    g_dispatch_entries.fetch_add(1, std::memory_order_acq_rel);
+    try
+    {
+        if (Host::Instance().CommandDispatchOpen())
+        {
+            return 1;
+        }
+    }
+    catch (...)
+    {
+    }
+    ReleaseDispatchEntry();
+    return 0;
+}
+
+void EndGameCommandDispatch() noexcept
+{
+    ReleaseDispatchEntry();
+}
+
+}
+
+extern "C" KEELS2_HOST_EXPORT std::uint32_t KeelHost_Start(const KeelHostStartInfo* info)
+{
+    if (!info || info->size != sizeof(KeelHostStartInfo))
+    {
+        return 0;
+    }
+    try
+    {
+        return keels2::host::Host::Instance().Start(*info);
+    }
+    catch (...)
+    {
+        return 0;
+    }
+}
+
+extern "C" KEELS2_HOST_EXPORT std::uint32_t KeelHost_CompleteStartup()
+{
+    try
+    {
+        return keels2::host::Host::Instance().CompleteStartup() ? 1u : 0u;
+    }
+    catch (...)
+    {
+        return 0;
+    }
+}
+
+extern "C" KEELS2_HOST_EXPORT std::uint32_t KeelHost_Stop()
+{
+    try
+    {
+        return keels2::host::Host::Instance().Stop() ? 1u : 0u;
+    }
+    catch (...)
+    {
+        return 0;
+    }
+}
