@@ -17,11 +17,13 @@ enum class Capability : KeelSource2Capability
     named = KEELS2_SOURCE2_CAPABILITY_NAMED,
     server = KEELS2_SOURCE2_CAPABILITY_SERVER,
     game_clients = KEELS2_SOURCE2_CAPABILITY_GAME_CLIENTS,
-    cvar = KEELS2_SOURCE2_CAPABILITY_CVAR
+    cvar = KEELS2_SOURCE2_CAPABILITY_CVAR,
+    game_event_manager = KEELS2_SOURCE2_CAPABILITY_GAME_EVENT_MANAGER
 };
 
 enum class Factory : KeelSource2Factory
 {
+    none = KEELS2_SOURCE2_FACTORY_NONE,
     engine = KEELS2_SOURCE2_FACTORY_ENGINE,
     server = KEELS2_SOURCE2_FACTORY_SERVER,
     filesystem = KEELS2_SOURCE2_FACTORY_FILESYSTEM,
@@ -178,8 +180,10 @@ public:
         }
         if (!ValidInfo(info) ||
             info.capability != static_cast<KeelSource2Capability>(capability) ||
-            (info.factory != KEELS2_SOURCE2_FACTORY_ENGINE &&
-                info.factory != KEELS2_SOURCE2_FACTORY_SERVER))
+            (capability == Capability::game_event_manager
+                ? info.factory != KEELS2_SOURCE2_FACTORY_NONE
+                : (info.factory != KEELS2_SOURCE2_FACTORY_ENGINE &&
+                    info.factory != KEELS2_SOURCE2_FACTORY_SERVER)))
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }

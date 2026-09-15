@@ -499,6 +499,14 @@ public:
         game_resource_ = std::move(game_resource);
         game_event_module_pin_ = std::move(game_event_module_pin);
         game_event_manager_vtable_ = game_event_manager_vtable;
+        game_event_interface_ = {
+            KEELS2_SOURCE2_CAPABILITY_GAME_EVENT_MANAGER,
+            KEELS2_SOURCE2_FACTORY_NONE,
+            nullptr,
+            "IGameEventManager2",
+            server_.module,
+            server_.module_path
+        };
         cvar_ = static_cast<cs2::CvarInterface*>(cvar_interface_.instance);
         string_duplicate_ = AddressFunction<MemAllocStringDuplicate>(string_duplicate_address);
         memory_free_ = AddressFunction<MemAllocFree>(memory_free_address);
@@ -635,6 +643,7 @@ public:
         cvar_interface_ = {};
         game_clients_ = {};
         server_ = {};
+        game_event_interface_ = {};
         compatibility_profile_.clear();
         player_action_bindings_ = {};
         if (trace)
@@ -687,6 +696,15 @@ public:
         KeelSource2Capability capability,
         KeelSource2InterfaceInfo& info) const noexcept override
     {
+        if (capability == KEELS2_SOURCE2_CAPABILITY_GAME_EVENT_MANAGER)
+        {
+            std::scoped_lock lock(source2_mutex_);
+            if (!game_event_error_.empty() || !game_event_listener_)
+            {
+                return KEEL_RESULT_NOT_READY;
+            }
+            return DescribeInterface(game_event_interface_, info);
+        }
         const InterfaceEntry* entry{};
         if (capability == KEELS2_SOURCE2_CAPABILITY_SERVER)
         {
@@ -806,6 +824,13 @@ public:
         append(engine_service_);
         append(schema_system_);
         append(game_resource_);
+        {
+            std::scoped_lock lock(source2_mutex_);
+            if (game_event_error_.empty() && game_event_listener_)
+            {
+                append(game_event_interface_);
+            }
+        }
         for (const auto& [key, entry] : named_interfaces_)
         {
             static_cast<void>(key);
@@ -1117,6 +1142,7 @@ public:
                 game_event_listener_ = nullptr;
             }
             game_event_manager_ = nullptr;
+            game_event_interface_.instance = nullptr;
             requested_game_events_.clear();
             requested_game_event_names_.clear();
             bound_game_events_.clear();
@@ -2782,6 +2808,7 @@ private:
             return;
         }
         game_event_manager_ = manager;
+        game_event_interface_.instance = manager;
         game_event_listener_ = KeelCs2_CreateGameEventListener(
             manager,
             &GameEventDispatch,
@@ -3502,6 +3529,7 @@ private:
     InterfaceEntry engine_service_;
     InterfaceEntry schema_system_;
     InterfaceEntry game_resource_;
+    InterfaceEntry game_event_interface_;
     KeelCreateInterfaceFn engine_factory_{};
     KeelCreateInterfaceFn server_factory_{};
     std::map<std::pair<KeelSource2Factory, std::string>, InterfaceEntry> named_interfaces_;
@@ -3551,7 +3579,7 @@ private:
     std::unordered_set<std::string> requested_game_event_names_;
     std::unordered_set<std::string> bound_game_events_;
     std::string game_event_error_;
-    std::mutex source2_mutex_;
+    mutable std::mutex source2_mutex_;
     std::vector<Source2Hook> source2_hooks_;
     std::unordered_set<void*> active_factories_;
     std::unordered_set<void*> active_loops_;

@@ -41,6 +41,7 @@ public:
             runtime_.Connect(context) != KEEL_RESULT_OK ||
             runtime_.ServerCommand("echo loading") != KEEL_RESULT_NOT_READY ||
             !ValidateInterfaces() ||
+            !ValidateGameEvents(false) ||
             !ValidateNamedInterfaces())
         {
             context.Log(KEEL_LOG_ERROR, "Source 2 interface gateway load validation failed");
@@ -80,7 +81,7 @@ public:
             context.Log(KEEL_LOG_ERROR, "player service teardown failed");
         }
 #endif
-        const bool invalidated = !service_ && !server_ && !game_clients_ && !cvar_ &&
+        const bool invalidated = !service_ && !server_ && !game_clients_ && !cvar_ && !game_events_ &&
             !named_engine_ && !named_server_ && !named_filesystem_ && !named_physics_ &&
             !named_network_ && !named_server_service_ && !runtime_ && !command_ && !factories_;
         context.Log(
@@ -421,6 +422,24 @@ private:
             server_.Raw() != cvar_.Raw() && game_clients_.Raw() != cvar_.Raw();
     }
 
+    bool ValidateGameEvents(bool required)
+    {
+        const auto result = service_.Query(
+            keels2::source2::Capability::game_event_manager, game_events_);
+        if (result == KEEL_RESULT_NOT_READY)
+        {
+            return !required && !game_events_;
+        }
+        return result == KEEL_RESULT_OK && game_events_ &&
+            game_events_.Type() == keels2::source2::Capability::game_event_manager &&
+            game_events_.Origin() == keels2::source2::Factory::none &&
+            game_events_.Owner() == keels2::source2::Ownership::borrowed &&
+            game_events_.ValidUntil() == keels2::source2::Lifetime::host &&
+            std::strcmp(game_events_.Name(), "IGameEventManager2") == 0 &&
+            std::strcmp(game_events_.ModulePath(), server_.ModulePath()) == 0 &&
+            std::strcmp(game_events_.CompatibilityProfile(), server_.CompatibilityProfile()) == 0;
+    }
+
     bool ValidateNamedInterfaces()
     {
         if (service_.Query(
@@ -640,6 +659,11 @@ private:
             context_->Log(KEEL_LOG_ERROR, "usage: s2_check <connected-client-slot>");
             return;
         }
+        if (!ValidateGameEvents(true))
+        {
+            context_->Log(KEEL_LOG_ERROR, "Source 2 game-event manager query failed after startup");
+            return;
+        }
 #if defined(KEELS2_SOURCE2_LIVE)
         std::uint32_t message_id{};
         const KeelResult server_command = runtime_.ServerCommand(
@@ -699,6 +723,7 @@ private:
     keels2::source2::Interface server_;
     keels2::source2::Interface game_clients_;
     keels2::source2::Interface cvar_;
+    keels2::source2::Interface game_events_;
     keels2::source2::Interface named_engine_;
     keels2::source2::Interface named_server_;
     keels2::source2::Interface named_filesystem_;
