@@ -14,6 +14,9 @@
 #include <string>
 #include <cstdio>
 
+extern "C" void KeelTest_FillPlayerInfo(google::protobuf::Message*, const char*);
+extern "C" std::uint64_t KeelTest_PlayerInfoAllocations();
+
 namespace
 {
 
@@ -30,6 +33,8 @@ int mode{};
 int allocations{}, releases{}, sends{};
 std::array<uint64, (ABSOLUTE_PLAYER_LIMIT + 63) / 64> recipients{};
 std::string delivered;
+std::string player_name = "Allocator player";
+int player_mode{};
 
 template <auto Method, typename Function, std::size_t Size>
 void Install(std::array<void*, Size>& table, Function function)
@@ -49,8 +54,9 @@ bool GetPlayer(void*, CPlayerSlot slot, google::protobuf::Message& info)
     {
         return false;
     }
-    info.Clear();
-    return true;
+    KeelTest_FillPlayerInfo(&info, player_name.c_str());
+    if (player_mode == 2) throw std::runtime_error("player information failure");
+    return player_mode != 1;
 }
 
 class UserIdFixture final
@@ -166,6 +172,35 @@ int main()
         using PostMethod = void (IGameEventSystem::*)(CSplitScreenSlot, bool, int, const uint64*,
             INetworkMessageInternal*, const CNetMessage*, unsigned long, NetChannelBufType_t);
         Install<static_cast<PostMethod>(&IGameEventSystem::PostEventAbstract)>(events_table, &Post);
+        const auto read_player = [&] {
+            KeelPlayerInfo player{};
+            const auto result = KeelCs2_ReadPlayer(&engine, nullptr, nullptr, nullptr, 3, &player);
+            const auto expected = player_mode == 1 ? KEEL_RESULT_NOT_FOUND :
+                player_mode == 2 ? KEEL_RESULT_ENGINE_FAILURE : KEEL_RESULT_OK;
+            Check(result == expected, "player information result changed");
+            if (!player_mode) {
+                const auto expected_name = player_name.substr(0, sizeof(player.name) - 1);
+                Check(player.slot == 3 && player.user_id == 503 &&
+                    (player.flags & KEELS2_PLAYER_BOT) && player.name == expected_name,
+                    "player information was not copied before cleanup");
+            } else Check(player.slot == -1 && !player.name[0], "failed player lookup retained output");
+        };
+        read_player();
+        const auto player_allocations = KeelTest_PlayerInfoAllocations();
+        for (const auto& name : {std::string{}, std::string("Bot"), std::string(512, 'N')}) {
+            player_name = name;
+            for (player_mode = 0; player_mode != 3; ++player_mode) {
+                for (int iteration = 0; iteration != 20; ++iteration) read_player();
+                if (KeelTest_PlayerInfoAllocations() != player_allocations) {
+                    std::fprintf(stderr, "name length %zu, mode %d, allocations %llu -> %llu\n",
+                        name.size(), player_mode, static_cast<unsigned long long>(player_allocations),
+                        static_cast<unsigned long long>(KeelTest_PlayerInfoAllocations()));
+                }
+                Check(KeelTest_PlayerInfoAllocations() == player_allocations,
+                    "player information allocation leaked across the engine boundary");
+            }
+        }
+        player_mode = 0;
         const char* text = "100% %s %n {literal}\n; quit";
         auto send = [&](int slot, KeelBool broadcast, const char* value) {
             return KeelCs2_PrintChat(&engine, &messages, &events, slot, broadcast, value);
@@ -192,6 +227,8 @@ int main()
             Check(send(3, KEEL_FALSE, text) == expected, "native failure was not contained");
             Check(allocations == releases, "message allocation leaked after failure");
         }
+        Check(KeelTest_PlayerInfoAllocations() == player_allocations,
+            "chat recipient information leaked across the engine boundary");
         std::puts("native chat recipients, literal text, reliability, limits, ownership and failure containment passed");
         return 0;
     }

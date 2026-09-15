@@ -1,0 +1,6 @@
+{
+    global:
+        KeelTest_FillPlayerInfo;
+        KeelTest_PlayerInfoAllocations;
+    local: *;
+};

@@ -1441,8 +1441,24 @@ if(BUILD_TESTING)
     keels2_enable_warnings(keels2_player_action_profile)
     add_test(NAME player_action_profile COMMAND keels2_player_action_profile)
 
+    add_library(keels2_player_info_allocator SHARED tests/player_info_allocator.cpp)
+    target_link_libraries(keels2_player_info_allocator PRIVATE
+        keels2_cs2_proto KeelS2::SourceSDK)
+    set_target_properties(keels2_player_info_allocator PROPERTIES
+        CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
+    if(UNIX)
+        # Keep the fixture's allocator and protobuf separate from the caller.
+        target_link_options(keels2_player_info_allocator PRIVATE
+            "LINKER:-Bsymbolic"
+            "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/tests/player_info_allocator.map")
+        set_property(TARGET keels2_player_info_allocator APPEND PROPERTY LINK_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/player_info_allocator.map")
+    endif()
+    keels2_enable_warnings(keels2_player_info_allocator)
+
     add_executable(keels2_native_message_contract tests/native_message_contract.cpp)
-    target_link_libraries(keels2_native_message_contract PRIVATE keels2_cs2_native_bridge keels2_fake_tier0 KeelS2::SourceSDK)
+    target_link_libraries(keels2_native_message_contract PRIVATE keels2_cs2_native_bridge
+        keels2_player_info_allocator keels2_fake_tier0 KeelS2::SourceSDK)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(keels2_native_message_contract PRIVATE -fno-sanitize=vptr)
     endif()

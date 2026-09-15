@@ -1,8 +1,8 @@
 #include <keels2/cs2/native_bridge.h>
+#include "native_player_info.h"
 
 #include <eiface.h>
 #include <entity2/entityclass.h>
-#include <networkbasetypes.pb.h>
 #include <steam/steamclientpublic.h>
 
 #include <algorithm>
@@ -56,7 +56,8 @@ extern "C" KeelResult KeelCs2_ReadPlayer(void* engine_server, void* entity_syste
     {
         auto* engine = static_cast<IVEngineServer2*>(engine_server);
         const CPlayerSlot native_slot(slot);
-        CMsgPlayerInfo info;
+        keels2::cs2::PlayerInfoMessage message;
+        auto& info = message.Get();
         if (!engine->GetPlayerInfo(native_slot, info))
         {
             return KEEL_RESULT_NOT_FOUND;

@@ -1,9 +1,9 @@
 #include <keels2/cs2/native_bridge.h>
+#include "native_player_info.h"
 
 #include <eiface.h>
 #include <engine/igameeventsystem.h>
 #include <networksystem/inetworkmessages.h>
-#include <networkbasetypes.pb.h>
 
 #include <array>
 #include <memory>
@@ -43,7 +43,8 @@ extern "C" KeelResult KeelCs2_PrintChat(void* engine_server, void* network_messa
             {
                 continue;
             }
-            CMsgPlayerInfo info;
+            keels2::cs2::PlayerInfoMessage player_message;
+            auto& info = player_message.Get();
             if (!engine->GetPlayerInfo(CPlayerSlot(candidate), info) || info.ishltv() ||
                 engine->GetPlayerUserId(CPlayerSlot(candidate)).Get() < 0)
             {
