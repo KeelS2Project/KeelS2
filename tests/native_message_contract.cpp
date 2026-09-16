@@ -4,8 +4,6 @@
 #include <eiface.h>
 #include <engine/igameeventsystem.h>
 #include <networksystem/inetworkmessages.h>
-#include <google/protobuf/descriptor.pb.h>
-#include <google/protobuf/dynamic_message.h>
 
 #include <array>
 #include <cstring>
@@ -16,6 +14,9 @@
 
 extern "C" void KeelTest_FillPlayerInfo(google::protobuf::Message*, const char*);
 extern "C" std::uint64_t KeelTest_PlayerInfoAllocations();
+extern "C" void* KeelTest_CreateTextMessage(bool);
+extern "C" google::protobuf::Message* KeelTest_TextMessage(void*);
+extern "C" void KeelTest_DestroyTextMessage(void*);
 
 namespace
 {
@@ -29,6 +30,7 @@ std::array<void*, 256> engine_table{}, messages_table{}, definition_table{}, eve
 Interface engine{engine_table.data()}, messages{messages_table.data()}, definition{definition_table.data()};
 Interface events{events_table.data()}, message{message_table.data()};
 google::protobuf::Message* payload{};
+void* message_owner{};
 int mode{};
 int allocations{}, releases{}, sends{};
 std::array<uint64, (ABSOLUTE_PLAYER_LIMIT + 63) / 64> recipients{};
@@ -80,6 +82,8 @@ CNetMessage* Allocate(void*)
         return nullptr;
     }
     ++allocations;
+    message_owner = KeelTest_CreateTextMessage(mode == 6);
+    payload = KeelTest_TextMessage(message_owner);
     return reinterpret_cast<CNetMessage*>(&message);
 }
 
@@ -90,6 +94,9 @@ void Release(void*, INetworkMessageInternal* type, CNetMessage* value)
         throw std::runtime_error("wrong allocation owner");
     }
     ++releases;
+    KeelTest_DestroyTextMessage(message_owner);
+    message_owner = nullptr;
+    payload = nullptr;
     if (mode == 5)
     {
         throw std::runtime_error("release fixture failure");
@@ -140,26 +147,10 @@ int main()
 {
     try
     {
-        google::protobuf::DescriptorPool pool;
-        google::protobuf::FileDescriptorProto file;
-        file.set_name("keels2_text_message_fixture.proto");
-        auto* type = file.add_message_type();
-        type->set_name("CUserMessageTextMsg");
-        auto* destination = type->add_field();
-        destination->set_name("dest");
-        destination->set_number(1);
-        destination->set_type(google::protobuf::FieldDescriptorProto::TYPE_UINT32);
-        destination->set_label(google::protobuf::FieldDescriptorProto::LABEL_OPTIONAL);
-        auto* parameters = type->add_field();
-        parameters->set_name("param");
-        parameters->set_number(2);
-        parameters->set_type(google::protobuf::FieldDescriptorProto::TYPE_STRING);
-        parameters->set_label(google::protobuf::FieldDescriptorProto::LABEL_REPEATED);
-        const auto* schema = pool.BuildFile(file);
-        Check(schema != nullptr, "fixture schema failed");
-        google::protobuf::DynamicMessageFactory factory(&pool);
-        std::unique_ptr<google::protobuf::Message> proto(factory.GetPrototype(schema->message_type(0))->New());
-        payload = proto.get();
+        // The engine owns both the message and its protobuf implementation.
+        // Its allocator rejects memory created by the adapter's implementation.
+        auto* initial_message = KeelTest_CreateTextMessage(false);
+        KeelTest_DestroyTextMessage(initial_message);
         Install<&IVEngineServer2::GetPlayerInfo>(engine_table, &GetPlayer);
         UserIdFixture user_id;
         void** user_id_table{};
@@ -218,9 +209,17 @@ int main()
         const std::string limit(512, 'x');
         Check(send(3, KEEL_FALSE, limit.c_str()) == KEEL_RESULT_OK &&
             send(3, KEEL_FALSE, (limit + "x").c_str()) == KEEL_RESULT_INVALID_ARGUMENT, "message limit changed");
+        for (const std::size_t size : {1u, 15u, 16u, 127u, 128u, 512u})
+        {
+            const std::string value(size, '%');
+            Check(send(3, KEEL_FALSE, value.c_str()) == KEEL_RESULT_OK && delivered == value,
+                "chat string size or allocation ownership changed");
+            Check(KeelTest_PlayerInfoAllocations() == player_allocations,
+                "engine-owned chat message leaked an allocation");
+        }
         Check(KeelCs2_PrintChat(&engine, nullptr, &events, 3, KEEL_FALSE, text) == KEEL_RESULT_NOT_READY,
             "missing message system accepted");
-        for (mode = 1; mode <= 5; ++mode)
+        for (mode = 1; mode <= 6; ++mode)
         {
             const auto expected = mode == 1 ? KEEL_RESULT_NOT_READY :
                 mode == 3 ? KEEL_RESULT_INCOMPATIBLE : KEEL_RESULT_ENGINE_FAILURE;

@@ -4,6 +4,8 @@
 #include <eiface.h>
 #include <engine/igameeventsystem.h>
 #include <networksystem/inetworkmessages.h>
+#include <google/protobuf/io/coded_stream.h>
+#include <google/protobuf/wire_format_lite.h>
 
 #include <array>
 #include <memory>
@@ -91,9 +93,24 @@ extern "C" KeelResult KeelCs2_PrintChat(void* engine_server, void* network_messa
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
-        proto->Clear();
-        reflection->SetUInt32(proto, destination, 3);
-        reflection->AddString(proto, parameters, text);
+        // Reflection setters would allocate adapter-owned strings inside an
+        // engine-owned message. Let the engine's virtual parser populate it so
+        // its destructor also owns every allocation (notably on Windows).
+        using Wire = google::protobuf::internal::WireFormatLite;
+        using Coded = google::protobuf::io::CodedOutputStream;
+        constexpr std::size_t max_varint32_bytes = 5;
+        std::array<uint8_t, 512 + 3 * max_varint32_bytes + 1> encoded{};
+        auto* end = Wire::WriteUInt32ToArray(destination->number(), 3, encoded.data());
+        end = Coded::WriteTagToArray(Wire::MakeTag(parameters->number(), Wire::WIRETYPE_LENGTH_DELIMITED), end);
+        end = Coded::WriteVarint32ToArray(static_cast<uint32_t>(length), end);
+        std::memcpy(end, text, length);
+        // Check required fields without protobuf's error-string return value,
+        // which would transfer another engine allocation across this boundary.
+        if (!proto->ParsePartialFromArray(encoded.data(), static_cast<int>(end + length - encoded.data())) ||
+            !proto->IsInitialized())
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
         events->PostEventAbstract(CSplitScreenSlot(-1), false, ABSOLUTE_PLAYER_LIMIT,
             recipients.data(), definition, message.get(), 0, BUF_RELIABLE);
         message.reset();

@@ -2,5 +2,8 @@
     global:
         KeelTest_FillPlayerInfo;
         KeelTest_PlayerInfoAllocations;
+        KeelTest_CreateTextMessage;
+        KeelTest_TextMessage;
+        KeelTest_DestroyTextMessage;
     local: *;
 };
