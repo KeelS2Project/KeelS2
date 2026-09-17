@@ -140,6 +140,23 @@ bool GameAdapterModule::Load(
         library_.Symbol(kGameAdapterCommandCallerSymbol));
     player_action_ = SymbolFunction<GameAdapterPlayerActionFn>(
         library_.Symbol(kGameAdapterPlayerActionSymbol));
+    const auto query_management = SymbolFunction<GameAdapterQueryPlayerManagementFn>(
+        library_.Symbol(kGameAdapterPlayerManagementSymbol));
+    if (query_management)
+    {
+        GameAdapterPlayerManagementApi management{};
+        management.size = sizeof(management);
+        management.api_version = kGameAdapterPlayerManagementVersion;
+        if (query_management(kGameAdapterPlayerManagementVersion, &management) != KEEL_RESULT_OK ||
+            management.size != sizeof(management) || management.api_version != kGameAdapterPlayerManagementVersion ||
+            !management.capabilities || !management.apply)
+        {
+            error = "game adapter player management API is incompatible";
+            Reset();
+            return false;
+        }
+        player_management_ = management;
+    }
     const auto query_observers = SymbolFunction<GameAdapterQueryConVarObserversFn>(
         library_.Symbol(kGameAdapterConVarObserversSymbol));
     if (query_observers)
@@ -224,6 +241,7 @@ void GameAdapterModule::Reset() noexcept
     command_caller_ = nullptr;
     player_action_ = nullptr;
     players_ = {};
+    player_management_ = {};
     player_input_ = {};
     messaging_ = {};
     convar_observers_ = {};
@@ -286,6 +304,19 @@ KeelResult GameAdapterModule::ReadPlayer(std::int32_t slot, KeelPlayerInfo& play
     player.controller_handle = UINT32_MAX;
     player.pawn_handle = UINT32_MAX;
     return players_.read ? players_.read(adapter_, slot, &player) : KEEL_RESULT_UNSUPPORTED;
+}
+
+KeelResult GameAdapterModule::PlayerManagementCapabilities(std::uint32_t& capabilities) const noexcept
+{
+    capabilities = 0;
+    return adapter_ && player_management_.capabilities
+        ? player_management_.capabilities(adapter_, &capabilities) : KEEL_RESULT_UNSUPPORTED;
+}
+
+KeelResult GameAdapterModule::ManagePlayer(const GameEntityIdentity& entity, const KeelPlayerManagementAction& action) const noexcept
+{
+    return adapter_ && player_management_.apply
+        ? player_management_.apply(adapter_, &entity, &action) : KEEL_RESULT_UNSUPPORTED;
 }
 
 KeelResult GameAdapterModule::PlayerAction(const GameEntityIdentity& entity, const KeelPlayerAction& action) const noexcept

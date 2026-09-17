@@ -1,3 +1,4 @@
+#include <keels2/player_management.h>
 #include <keels2/keels2.hpp>
 
 #include <string.h>
@@ -134,6 +135,21 @@ private:
 
     void OffThread()
     {
+        const void* raw{};
+        if (g_api->query_service(g_owner, KEELS2_PLAYER_MANAGEMENT_SERVICE_NAME, 1, &raw) != KEEL_RESULT_OK || !raw)
+        {
+            LogError("player management wrong-thread service lookup failed");
+            return;
+        }
+        const auto* management = static_cast<const KeelPlayerManagementApi*>(raw);
+        std::uint32_t capabilities = UINT32_MAX;
+        const KeelPlayerManagementAction request{sizeof(request), KEELS2_PLAYER_MANAGEMENT_RESPAWN, 0, 0};
+        if (management->capabilities(g_owner, &capabilities) != KEEL_RESULT_WRONG_THREAD || capabilities ||
+            management->apply(g_owner, 1, &request) != KEEL_RESULT_WRONG_THREAD)
+        {
+            LogError("player management wrong-thread rejection failed");
+            return;
+        }
         keels2::SchemaField<int32> field;
         keels2::Entity entity;
         int32 health;
@@ -197,6 +213,26 @@ private:
         bool valid = actions->apply(g_owner, entity, &action) == KEEL_RESULT_UNSUPPORTED &&
             actions->apply(g_owner + 10000, entity, &action) == KEEL_RESULT_NOT_READY &&
             actions->apply(g_owner, entity + 10000, &action) == KEEL_RESULT_NOT_FOUND;
+        const void* management_raw{};
+        valid = valid && g_api->query_service(g_owner, KEELS2_PLAYER_MANAGEMENT_SERVICE_NAME, 2, &management_raw) == KEEL_RESULT_INCOMPATIBLE &&
+            g_api->query_service(g_owner, KEELS2_PLAYER_MANAGEMENT_SERVICE_NAME, 1, &management_raw) == KEEL_RESULT_OK;
+        const auto* management = static_cast<const KeelPlayerManagementApi*>(management_raw);
+        if (!valid || !management || management->size != sizeof(*management) || management->api_version != 1 ||
+            !management->capabilities || !management->apply) return false;
+        std::uint32_t capabilities = UINT32_MAX;
+        KeelPlayerManagementAction request{sizeof(request), KEELS2_PLAYER_MANAGEMENT_RESPAWN, 0, 0};
+        valid = valid && management->capabilities(g_owner, &capabilities) == KEEL_RESULT_UNSUPPORTED && !capabilities &&
+            management->apply(g_owner, entity, &request) == KEEL_RESULT_UNSUPPORTED &&
+            management->apply(g_owner + 10000, entity, &request) == KEEL_RESULT_NOT_READY &&
+            management->apply(g_owner, entity + 10000, &request) == KEEL_RESULT_NOT_FOUND;
+        request.team = 1;
+        valid = valid && management->apply(g_owner, entity, &request) == KEEL_RESULT_INVALID_ARGUMENT;
+        request.team = 0; request.reserved = 1;
+        valid = valid && management->apply(g_owner, entity, &request) == KEEL_RESULT_INVALID_ARGUMENT;
+        request.reserved = 0; request.kind = 7;
+        valid = valid && management->apply(g_owner, entity, &request) == KEEL_RESULT_INVALID_ARGUMENT;
+        request.kind = KEELS2_PLAYER_MANAGEMENT_CHANGE_TEAM; request.team = 256;
+        valid = valid && management->apply(g_owner, entity, &request) == KEEL_RESULT_INVALID_ARGUMENT;
         action.damage = 1;
         valid = valid && actions->apply(g_owner, entity, &action) == KEEL_RESULT_INVALID_ARGUMENT;
         action.kind = KEELS2_PLAYER_ACTION_IMPULSE;

@@ -5,6 +5,7 @@
 #include <keels2/convar.h>
 #include <keels2/entities.h>
 #include <keels2/player_actions.h>
+#include <keels2/player_management.h>
 #include <keels2/player_input.h>
 #include <keels2/players.h>
 #include <keels2/keelhook.h>
@@ -216,6 +217,17 @@ using GameAdapterCreateFn = GameAdapter* (*)(const GameAdapterHostApi* host);
 inline constexpr const char* kGameAdapterPlayerActionSymbol = "KeelGameAdapter_PlayerAction";
 using GameAdapterPlayerActionFn = KeelResult (*)(GameAdapter*, const GameEntityIdentity*, const KeelPlayerAction*) noexcept;
 using GameAdapterDestroyFn = void (*)(GameAdapter* adapter);
+
+inline constexpr const char* kGameAdapterPlayerManagementSymbol = "KeelGameAdapter_QueryPlayerManagement";
+inline constexpr std::uint32_t kGameAdapterPlayerManagementVersion = 1;
+struct GameAdapterPlayerManagementApi
+{
+    std::uint32_t size;
+    std::uint32_t api_version;
+    KeelResult (*capabilities)(GameAdapter*, std::uint32_t*) noexcept;
+    KeelResult (*apply)(GameAdapter*, const GameEntityIdentity*, const KeelPlayerManagementAction*) noexcept;
+};
+using GameAdapterQueryPlayerManagementFn = KeelResult (*)(std::uint32_t, GameAdapterPlayerManagementApi*) noexcept;
 
 inline constexpr const char* kGameAdapterPlayersSymbol = "KeelGameAdapter_QueryPlayers";
 inline constexpr std::uint32_t kGameAdapterPlayersVersion = 1;

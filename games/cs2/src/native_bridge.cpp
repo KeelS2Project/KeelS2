@@ -796,6 +796,131 @@ extern "C" KeelResult KeelCs2_PlayerAction(void* entity_system, void* schema_sys
     catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
 }
 
+namespace
+{
+KeelResult ManagementController(void* system, const KeelCs2EntityIdentity* entity,
+    const KeelCs2PlayerManagementBindings* bindings, void*& instance)
+{
+    instance = nullptr;
+    if (!system || !entity || !bindings || !bindings->controller_vtable ||
+        !bindings->change_team || !bindings->switch_team || !bindings->respawn || !bindings->set_pawn)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    auto* identity = IdentityByHandle(static_cast<CEntitySystem*>(system), entity->source2_handle);
+    if (!identity || identity->GetEntityIndex().Get() != entity->index)
+        return KEEL_RESULT_NOT_FOUND;
+    const auto* type = identity->m_pClass->GetSchemaBinding();
+    if (!ValidClass(type) || !type->m_pszName || std::strcmp(type->m_pszName, "CCSPlayerController"))
+        return KEEL_RESULT_INCOMPATIBLE;
+    void** table{};
+    std::memcpy(&table, identity->m_pInstance, sizeof(table));
+    if (table != bindings->controller_vtable || table[102] != bindings->change_team || table[272] != bindings->respawn)
+        return KEEL_RESULT_INCOMPATIBLE;
+    instance = identity->m_pInstance;
+    return KEEL_RESULT_OK;
+}
+
+KeelResult ManagementField(void* system, void* schema, const char* module,
+    const KeelCs2EntityIdentity* controller, const char* class_name, const char* field_name,
+    KeelSchemaValueType type, void* output, std::uint32_t size)
+{
+    KeelCs2SchemaField field{};
+    const auto result = KeelCs2_ResolveSchemaField(schema, module, class_name, field_name, type, &field);
+    return result == KEEL_RESULT_OK ? KeelCs2_ReadEntityField(system, controller, &field, output, size) : result;
+}
+
+KeelResult RespawnPawn(void* system, void* schema, const char* module,
+    const KeelCs2EntityIdentity* controller, KeelCs2EntityIdentity& pawn, void*& instance)
+{
+    instance = nullptr;
+    std::uint8_t team{};
+    auto result = ManagementField(system, schema, module, controller, "CBaseEntity", "m_iTeamNum",
+        KEELS2_SCHEMA_UINT8, &team, sizeof(team));
+    if (result != KEEL_RESULT_OK) return result;
+    if (team != 2 && team != 3) return KEEL_RESULT_NOT_READY;
+    std::uint32_t handle{};
+    result = ManagementField(system, schema, module, controller, "CCSPlayerController", "m_hPlayerPawn",
+        KEELS2_SCHEMA_ENTITY_HANDLE, &handle, sizeof(handle));
+    if (result != KEEL_RESULT_OK) return result;
+    result = KeelCs2_FindEntityBySource2Handle(system, handle, &pawn);
+    if (result != KEEL_RESULT_OK) return result;
+    auto* identity = IdentityByHandle(static_cast<CEntitySystem*>(system), handle);
+    if (!identity) return KEEL_RESULT_NOT_FOUND;
+    const auto* type = identity->m_pClass->GetSchemaBinding();
+    if (!ValidClass(type) || !type->m_pszName || std::strcmp(type->m_pszName, "CCSPlayerPawn"))
+        return KEEL_RESULT_INCOMPATIBLE;
+    instance = identity->m_pInstance;
+    return KEEL_RESULT_OK;
+}
+}
+
+extern "C" KeelResult KeelCs2_PrepareRespawn(void* system, void* schema, const char* module,
+    const KeelCs2EntityIdentity* controller, const KeelCs2PlayerManagementBindings* bindings,
+    KeelCs2EntityIdentity* prepared_pawn)
+{
+    if (prepared_pawn) *prepared_pawn = {};
+    if (!schema || !module || !*module || !prepared_pawn) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        void* instance{};
+        auto result = ManagementController(system, controller, bindings, instance);
+        if (result != KEEL_RESULT_OK) return result;
+        KeelCs2EntityIdentity pawn{};
+        void* pawn_instance{};
+        result = RespawnPawn(system, schema, module, controller, pawn, pawn_instance);
+        if (result != KEEL_RESULT_OK) return result;
+        using SetPawn = void (*)(void*, void*, bool, bool, bool, bool);
+        NativeActionFunction<SetPawn>(bindings->set_pawn)(instance, pawn_instance, true, false, false, false);
+        // Never dereference captured engine pointers after this call. The adapter
+        // rechecks its map epoch, controller and pawn before the second phase.
+        *prepared_pawn = pawn;
+        return KEEL_RESULT_OK;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+extern "C" KeelResult KeelCs2_ManagePlayer(void* system, void* schema, const char* module,
+    const KeelCs2EntityIdentity* controller, const KeelCs2EntityIdentity* prepared_pawn,
+    const KeelPlayerManagementAction* action, const KeelCs2PlayerManagementBindings* bindings)
+{
+    if (!schema || !module || !*module || !action || action->size != sizeof(*action) || action->reserved ||
+        (action->kind != KEELS2_PLAYER_MANAGEMENT_RESPAWN &&
+         action->kind != KEELS2_PLAYER_MANAGEMENT_CHANGE_TEAM &&
+         action->kind != KEELS2_PLAYER_MANAGEMENT_SWITCH_TEAM) ||
+        (action->kind == KEELS2_PLAYER_MANAGEMENT_RESPAWN ? action->team != 0 : action->team < (action->kind == KEELS2_PLAYER_MANAGEMENT_SWITCH_TEAM ? 2 : 1) || action->team > 3))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        void* instance{};
+        auto result = ManagementController(system, controller, bindings, instance);
+        if (result != KEEL_RESULT_OK) return result;
+        if (action->kind == KEELS2_PLAYER_MANAGEMENT_RESPAWN)
+        {
+            if (!prepared_pawn) return KEEL_RESULT_INVALID_ARGUMENT;
+            KeelCs2EntityIdentity pawn{};
+            void* pawn_instance{};
+            result = RespawnPawn(system, schema, module, controller, pawn, pawn_instance);
+            if (result != KEEL_RESULT_OK) return result;
+            if (pawn.index != prepared_pawn->index || pawn.source2_handle != prepared_pawn->source2_handle)
+                return KEEL_RESULT_NOT_FOUND;
+            std::uint32_t active{};
+            result = ManagementField(system, schema, module, controller, "CBasePlayerController", "m_hPawn",
+                KEELS2_SCHEMA_ENTITY_HANDLE, &active, sizeof(active));
+            if (result != KEEL_RESULT_OK) return result;
+            if (active != pawn.source2_handle) return KEEL_RESULT_NOT_READY;
+            using Respawn = void (*)(void*);
+            NativeActionFunction<Respawn>(bindings->respawn)(instance);
+        }
+        else
+        {
+            using Team = void (*)(void*, std::int32_t);
+            NativeActionFunction<Team>(action->kind == KEELS2_PLAYER_MANAGEMENT_CHANGE_TEAM
+                ? bindings->change_team : bindings->switch_team)(instance, action->team);
+        }
+        return KEEL_RESULT_OK;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
 extern "C" KeelResult KeelCs2_ReadPlayerButtons(void* entity_system, void* schema_system, const char* module,
     const KeelCs2EntityIdentity* pawn, uint64_t* buttons, void** component)
 {

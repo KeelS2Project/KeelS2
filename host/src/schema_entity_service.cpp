@@ -31,6 +31,8 @@ SchemaEntityService::SchemaEntityService(Host& host, GameAdapter& adapter)
         &DescribeFieldEntry
     };
     player_actions_api_ = {sizeof(KeelPlayerActionsApi), KEELS2_PLAYER_ACTIONS_API_VERSION, &PlayerActionEntry};
+    player_management_api_ = {sizeof(KeelPlayerManagementApi), KEELS2_PLAYER_MANAGEMENT_API_VERSION,
+        &ManagementCapabilitiesEntry, &ManagePlayerEntry};
     entities_api_ = {
         sizeof(KeelEntitiesApi),
         KEELS2_ENTITIES_API_VERSION,
@@ -113,6 +115,84 @@ KeelResult SchemaEntityService::PlayerAction(KeelPluginHandle plugin, KeelEntity
         ~ActionHold() { --count; }
     } hold{owner->active_native_operations};
     return host_.adapter_module_ ? host_.adapter_module_->PlayerAction(identity, *action) : KEEL_RESULT_UNSUPPORTED;
+}
+
+const KeelPlayerManagementApi& SchemaEntityService::PlayerManagementApi() const noexcept
+{
+    return player_management_api_;
+}
+
+KeelResult SchemaEntityService::ManagementCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* capabilities)
+{
+    if (capabilities) *capabilities = 0;
+    try
+    {
+        auto* service = active_.load(std::memory_order_acquire);
+        return service ? service->ManagementCapabilities(plugin, capabilities) : KEEL_RESULT_NOT_READY;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+KeelResult SchemaEntityService::ManagementCapabilities(KeelPluginHandle plugin, std::uint32_t* capabilities)
+{
+    if (!capabilities) return KEEL_RESULT_INVALID_ARGUMENT;
+    std::scoped_lock state_lock(host_.state_mutex_);
+    if (!PluginReady(plugin)) return KEEL_RESULT_NOT_READY;
+    if (!adapter_.IsGameThread()) return KEEL_RESULT_WRONG_THREAD;
+    std::uint32_t supported{};
+    const auto result = host_.adapter_module_
+        ? host_.adapter_module_->PlayerManagementCapabilities(supported) : KEEL_RESULT_UNSUPPORTED;
+    if (result == KEEL_RESULT_OK) *capabilities = supported;
+    return result;
+}
+
+KeelResult SchemaEntityService::ManagePlayerEntry(KeelPluginHandle plugin, KeelEntityHandle entity,
+    const KeelPlayerManagementAction* action)
+{
+    try
+    {
+        auto* service = active_.load(std::memory_order_acquire);
+        return service ? service->ManagePlayer(plugin, entity, action) : KEEL_RESULT_NOT_READY;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+KeelResult SchemaEntityService::ManagePlayer(KeelPluginHandle plugin, KeelEntityHandle entity,
+    const KeelPlayerManagementAction* action)
+{
+    if (!entity || !action || action->size != sizeof(*action)) return KEEL_RESULT_INVALID_ARGUMENT;
+    const auto request = *action;
+    if (request.reserved || (request.kind != KEELS2_PLAYER_MANAGEMENT_RESPAWN &&
+        request.kind != KEELS2_PLAYER_MANAGEMENT_CHANGE_TEAM && request.kind != KEELS2_PLAYER_MANAGEMENT_SWITCH_TEAM) ||
+        (request.kind == KEELS2_PLAYER_MANAGEMENT_RESPAWN ? request.team != 0 : request.team < 0 || request.team > 255))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    std::scoped_lock state_lock(host_.state_mutex_);
+    if (!PluginReady(plugin))
+        return KEEL_RESULT_NOT_READY;
+    if (!adapter_.IsGameThread())
+        return KEEL_RESULT_WRONG_THREAD;
+    GameEntityIdentity identity;
+    {
+        std::scoped_lock lock(registry_mutex_);
+        const auto record = entities_.find(entity);
+        if (record == entities_.end() || record->second.owner != plugin)
+            return KEEL_RESULT_NOT_FOUND;
+        identity = record->second.entity;
+    }
+    std::string error;
+    const auto valid = adapter_.ValidateEntity(identity, error);
+    if (valid != KEEL_RESULT_OK)
+        return valid;
+    auto* owner = host_.PluginByHandle(plugin);
+    if (!owner || owner->active_native_operations == UINT32_MAX)
+        return KEEL_RESULT_BUSY;
+    ++owner->active_native_operations;
+    struct ActionHold
+    {
+        std::uint32_t& count;
+        ~ActionHold() { --count; }
+    } hold{owner->active_native_operations};
+    return host_.adapter_module_ ? host_.adapter_module_->ManagePlayer(identity, request) : KEEL_RESULT_UNSUPPORTED;
 }
 
 KeelResult SchemaEntityService::ReleasePlugin(KeelPluginHandle plugin)

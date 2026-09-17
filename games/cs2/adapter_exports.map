@@ -4,6 +4,7 @@
         KeelGameAdapter_CommandCaller;
         KeelGameAdapter_PlayerAction;
         KeelGameAdapter_QueryPlayers;
+        KeelGameAdapter_QueryPlayerManagement;
         KeelGameAdapter_QueryPlayerInput;
         KeelGameAdapter_QueryMessaging;
         KeelGameAdapter_QueryConVarObservers;

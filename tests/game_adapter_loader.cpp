@@ -58,6 +58,10 @@ int main(int argument_count, char** arguments)
     const KeelPlayerAction action{sizeof(KeelPlayerAction), KEELS2_PLAYER_ACTION_KILL, {}, 0};
     if (module.PlayerAction(entity, action) != KEEL_RESULT_UNSUPPORTED)
         return 10;
+    std::uint32_t capabilities = UINT32_MAX;
+    const KeelPlayerManagementAction management{sizeof(KeelPlayerManagementAction), KEELS2_PLAYER_MANAGEMENT_RESPAWN, 0, 0};
+    if (module.PlayerManagementCapabilities(capabilities) != KEEL_RESULT_UNSUPPORTED || capabilities ||
+        module.ManagePlayer(entity, management) != KEEL_RESULT_UNSUPPORTED) return 12;
     std::uint64_t buttons = UINT64_MAX, context = UINT64_MAX;
     if (module.ReadPlayerInput(0, 1, buttons, context) != KEEL_RESULT_UNSUPPORTED || buttons || context)
         return 11;

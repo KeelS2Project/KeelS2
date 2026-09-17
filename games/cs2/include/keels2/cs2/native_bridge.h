@@ -4,6 +4,7 @@
 #include <keels2/plugin.h>
 #include <keels2/schema.h>
 #include <keels2/player_actions.h>
+#include <keels2/player_management.h>
 #include <keels2/players.h>
 #include <keels2/player_input.h>
 
@@ -39,6 +40,25 @@ typedef struct KeelCs2PlayerActionBindings
     void* damage_destroy;
     uint32_t damage_info_size;
 } KeelCs2PlayerActionBindings;
+
+typedef struct KeelCs2PlayerManagementBindings
+{
+    void** controller_vtable;
+    void* change_team;
+    void* switch_team;
+    void* respawn;
+    void* set_pawn;
+} KeelCs2PlayerManagementBindings;
+
+/* Respawn preparation may call into the engine. The adapter must revalidate
+ * its map epoch and entity system before calling ManagePlayer afterwards. */
+KeelResult KeelCs2_PrepareRespawn(void* entity_system, void* schema_system, const char* module,
+    const KeelCs2EntityIdentity* controller, const KeelCs2PlayerManagementBindings* bindings,
+    KeelCs2EntityIdentity* prepared_pawn);
+KeelResult KeelCs2_ManagePlayer(void* entity_system, void* schema_system, const char* module,
+    const KeelCs2EntityIdentity* controller, const KeelCs2EntityIdentity* prepared_pawn,
+    const KeelPlayerManagementAction* action,
+    const KeelCs2PlayerManagementBindings* bindings);
 
 KeelResult KeelCs2_PlayerAction(void* entity_system, void* schema_system, const char* module,
     const KeelCs2EntityIdentity* entity, const KeelPlayerAction* action,

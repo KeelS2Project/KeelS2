@@ -3,6 +3,7 @@
 #include <keels2/cs2/cvar_abi.h>
 #include <keels2/cs2/native_bridge.h>
 #include <keels2/cs2/player_actions.h>
+#include <keels2/cs2/player_management.h>
 #include <keels2/keelhook.hpp>
 #include <keels2/platform/console.h>
 #include <keels2/platform/diagnostic_trace.h>
@@ -646,6 +647,7 @@ public:
         game_event_interface_ = {};
         compatibility_profile_.clear();
         player_action_bindings_ = {};
+        player_management_bindings_ = {};
         if (trace)
         {
             platform::AppendShutdownTrace("cs2 interface invalidation complete");
@@ -1760,6 +1762,65 @@ public:
         buttons = held;
         context = previous.token;
         return KEEL_RESULT_OK;
+    }
+
+    KeelResult PlayerManagementCapabilities(std::uint32_t& capabilities)
+    {
+        capabilities = 0;
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (!player_management_bindings_.controller_vtable)
+        {
+            if (compatibility_profile_.empty()) return KEEL_RESULT_UNSUPPORTED;
+            platform::LoadedModule module;
+            std::string error;
+            if (platform::FindLoadedModule(server_.module_path, module, error) != platform::ModuleLookup::found)
+                return KEEL_RESULT_NOT_READY;
+            const auto result = cs2::ResolvePlayerManagement(module, compatibility_profile_, player_management_bindings_, error);
+            if (result != KEEL_RESULT_OK) return result;
+        }
+        capabilities = KEELS2_PLAYER_MANAGEMENT_RESPAWN | KEELS2_PLAYER_MANAGEMENT_CHANGE_TEAM |
+            KEELS2_PLAYER_MANAGEMENT_SWITCH_TEAM;
+        return KEEL_RESULT_OK;
+    }
+
+    KeelResult ManagePlayer(const GameEntityIdentity& entity, const KeelPlayerManagementAction& action)
+    {
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (action.size != sizeof(action) || action.reserved ||
+            (action.kind != KEELS2_PLAYER_MANAGEMENT_RESPAWN && action.kind != KEELS2_PLAYER_MANAGEMENT_CHANGE_TEAM &&
+             action.kind != KEELS2_PLAYER_MANAGEMENT_SWITCH_TEAM) ||
+            (action.kind == KEELS2_PLAYER_MANAGEMENT_RESPAWN ? action.team != 0 : action.team < (action.kind == KEELS2_PLAYER_MANAGEMENT_SWITCH_TEAM ? 2 : 1) || action.team > 3))
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        std::uint32_t capabilities{};
+        auto result = PlayerManagementCapabilities(capabilities);
+        if (result != KEEL_RESULT_OK) return result;
+        if (!(capabilities & action.kind)) return KEEL_RESULT_UNSUPPORTED;
+        void* system{};
+        std::string error;
+        const auto current_system = [&]() {
+            std::scoped_lock lock(schema_entity_mutex_);
+            const auto ready = CurrentEntitySystemLocked(system, error);
+            if (ready != KEEL_RESULT_OK) return ready;
+            if (!entity.epoch || entity.epoch != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+            return KEEL_RESULT_OK;
+        };
+        result = current_system();
+        if (result != KEEL_RESULT_OK) return result;
+        const KeelCs2EntityIdentity native{entity.index, entity.source2_handle};
+        KeelCs2EntityIdentity pawn{};
+        if (action.kind == KEELS2_PLAYER_MANAGEMENT_RESPAWN)
+        {
+            result = KeelCs2_PrepareRespawn(system, schema_system_.instance, schema_server_module_.c_str(),
+                &native, &player_management_bindings_, &pawn);
+            if (result != KEEL_RESULT_OK) return result;
+            // SetPawn may synchronously dispatch map/entity callbacks. Acquire the
+            // current system again before resolving any captured entity identity.
+            result = current_system();
+            if (result != KEEL_RESULT_OK) return result;
+        }
+        return KeelCs2_ManagePlayer(system, schema_system_.instance, schema_server_module_.c_str(),
+            &native, action.kind == KEELS2_PLAYER_MANAGEMENT_RESPAWN ? &pawn : nullptr,
+            &action, &player_management_bindings_);
     }
 
     KeelResult PlayerAction(const GameEntityIdentity& entity, const KeelPlayerAction& action)
@@ -3537,6 +3598,7 @@ private:
     void** game_event_manager_vtable_{};
     std::string compatibility_profile_;
     KeelCs2PlayerActionBindings player_action_bindings_{};
+    KeelCs2PlayerManagementBindings player_management_bindings_{};
     std::string schema_server_module_;
     std::string entity_system_module_;
     std::filesystem::path entity_system_module_path_;
@@ -3666,6 +3728,29 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_PlayerAction(
         return KEEL_RESULT_INVALID_ARGUMENT;
     try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->PlayerAction(*entity, *action); }
     catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayerManagement(
+    std::uint32_t version, keels2::host::GameAdapterPlayerManagementApi* api) noexcept
+{
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {};
+    if (version != keels2::host::kGameAdapterPlayerManagementVersion) return KEEL_RESULT_INCOMPATIBLE;
+    api->size = sizeof(*api);
+    api->api_version = version;
+    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* capabilities) noexcept {
+        if (capabilities) *capabilities = 0;
+        if (!adapter || !capabilities) return KEEL_RESULT_INVALID_ARGUMENT;
+        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->PlayerManagementCapabilities(*capabilities); }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    };
+    api->apply = [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* entity,
+        const KeelPlayerManagementAction* action) noexcept {
+        if (!adapter || !entity || !action) return KEEL_RESULT_INVALID_ARGUMENT;
+        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->ManagePlayer(*entity, *action); }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    };
+    return KEEL_RESULT_OK;
 }
 
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayers(

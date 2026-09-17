@@ -29,10 +29,15 @@ public:
     const KeelSchemaApi& SchemaApi() const noexcept;
     const KeelEntitiesApi& EntitiesApi() const noexcept;
     const KeelPlayerActionsApi& PlayerActionsApi() const noexcept;
+    const KeelPlayerManagementApi& PlayerManagementApi() const noexcept;
     KeelResult ReleasePlugin(KeelPluginHandle plugin);
     bool Shutdown();
 
 private:
+    static KeelResult ManagementCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* capabilities);
+    static KeelResult ManagePlayerEntry(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelPlayerManagementAction* action);
+    KeelResult ManagementCapabilities(KeelPluginHandle plugin, std::uint32_t* capabilities);
+    KeelResult ManagePlayer(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelPlayerManagementAction* action);
     static KeelResult PlayerActionEntry(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelPlayerAction* action);
     KeelResult PlayerAction(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelPlayerAction* action);
     struct FieldRecord
@@ -135,6 +140,7 @@ private:
     KeelSchemaApi schema_api_{};
     KeelEntitiesApi entities_api_{};
     KeelPlayerActionsApi player_actions_api_{};
+    KeelPlayerManagementApi player_management_api_{};
     mutable std::mutex registry_mutex_;
     std::unordered_map<std::string, std::shared_ptr<GameSchemaField>> field_cache_;
     std::unordered_map<KeelSchemaFieldHandle, FieldRecord> fields_;

@@ -470,6 +470,93 @@ void TestDamageDestroy(void* info)
     g_action_arguments = g_action_arguments && info;
     g_actions.push_back(5);
 }
+int g_management_calls{};
+int g_management_team{};
+bool g_management_arguments{};
+void ManagementChangeTeam(void* controller, std::int32_t team)
+{
+    g_management_arguments = controller == g_controller_storage.data();
+    g_management_team = team; g_management_calls += 1;
+}
+void ManagementSwitchTeam(void* controller, std::int32_t team)
+{
+    g_management_arguments = controller == g_controller_storage.data();
+    g_management_team = team; g_management_calls += 10;
+}
+void ManagementRespawn(void* controller)
+{
+    g_management_arguments = controller == g_controller_storage.data();
+    g_management_calls += 100;
+}
+void ManagementSetPawn(void* controller, void* pawn, bool one, bool two, bool three, bool four)
+{
+    g_management_arguments = controller == g_controller_storage.data() && pawn == EntityInstance() && one && !two && !three && !four;
+    const auto handle = Identity()->GetRefEHandle();
+    std::memcpy(g_controller_storage.data() + kHealthOffset + 16, &handle, sizeof(handle));
+    g_management_calls += 1000;
+}
+int RunPlayerManagementChecks()
+{
+    InputFixture(0);
+#if defined(_WIN32)
+    constexpr const char* module = "server.dll";
+#else
+    constexpr const char* module = "libserver.so";
+#endif
+    SchemaStorage<CSchemaType_Builtin> uint8_storage;
+    auto* byte = uint8_storage.Get();
+    byte->m_eTypeCategory = SCHEMA_TYPE_BUILTIN; byte->m_eAtomicCategory = SCHEMA_ATOMIC_INVALID;
+    byte->m_eBuiltinType = SCHEMA_BUILTIN_TYPE_UINT8; byte->m_nSize = 1;
+    g_base_fields[0] = {"m_iTeamNum", byte, static_cast<int>(kHealthOffset + 24), 0, nullptr};
+    SchemaBaseClassInfoData_t base{0, &g_base_class};
+    g_controller_base.m_nBaseClassCount = 1; g_controller_base.m_pBaseClasses = &base;
+    g_controller_storage[kHealthOffset + 24] = std::byte{2};
+    std::array<void*, 273> table{};
+    table[102] = FunctionAddress(&ManagementChangeTeam); table[272] = FunctionAddress(&ManagementRespawn);
+    StorePointer(g_controller_storage.data(), table.data());
+    KeelCs2PlayerManagementBindings bindings{table.data(), table[102], FunctionAddress(&ManagementSwitchTeam),
+        table[272], FunctionAddress(&ManagementSetPawn)};
+    KeelCs2EntityIdentity controller{}, pawn{};
+    if (KeelCs2_FindEntityByIndex(EntitySystem(), 4, &controller) != KEEL_RESULT_OK) return 400;
+    KeelPlayerManagementAction action{sizeof(action), KEELS2_PLAYER_MANAGEMENT_CHANGE_TEAM, 3, 0};
+    const auto apply = [&] { return KeelCs2_ManagePlayer(EntitySystem(), &g_schema_system, module, &controller, &pawn, &action, &bindings); };
+    const auto prepare = [&] { return KeelCs2_PrepareRespawn(EntitySystem(), &g_schema_system, module, &controller, &bindings, &pawn); };
+    g_management_calls = 0;
+    if (apply() != KEEL_RESULT_OK || g_management_calls != 1 || g_management_team != 3 || !g_management_arguments) return 401;
+    action.kind = KEELS2_PLAYER_MANAGEMENT_SWITCH_TEAM; action.team = 2;
+    if (apply() != KEEL_RESULT_OK || g_management_calls != 11 || g_management_team != 2 || !g_management_arguments) return 402;
+    for (const auto team : {-1,0,1,4,256})
+    {
+        action.team = team;
+        if (apply() != KEEL_RESULT_INVALID_ARGUMENT || g_management_calls != 11) return 403;
+    }
+    action = {sizeof(action), KEELS2_PLAYER_MANAGEMENT_RESPAWN, 0, 0};
+    if (prepare() != KEEL_RESULT_OK || g_management_calls != 1011 || !g_management_arguments || pawn.index != kEntityIndex) return 404;
+    if (apply() != KEEL_RESULT_OK || g_management_calls != 1111 || !g_management_arguments) return 405;
+    auto saved = pawn; ++pawn.source2_handle;
+    if (apply() != KEEL_RESULT_NOT_FOUND || g_management_calls != 1111) return 406;
+    pawn = saved;
+    const std::uint32_t invalid = UINT32_MAX;
+    std::memcpy(g_controller_storage.data() + kHealthOffset + 16, &invalid, sizeof(invalid));
+    if (apply() != KEEL_RESULT_NOT_READY || g_management_calls != 1111) return 407;
+    g_controller_storage[kHealthOffset + 24] = std::byte{1};
+    if (prepare() != KEEL_RESULT_NOT_READY || g_management_calls != 1111) return 408;
+    g_controller_storage[kHealthOffset + 24] = std::byte{2};
+    auto source = controller.source2_handle; ++controller.source2_handle;
+    if (prepare() != KEEL_RESULT_NOT_FOUND || g_management_calls != 1111) return 409;
+    controller.source2_handle = source;
+    g_controller_class.m_pszName = "NotAPlayerController";
+    if (prepare() != KEEL_RESULT_INCOMPATIBLE || g_management_calls != 1111) return 410;
+    g_controller_class.m_pszName = "CCSPlayerController";
+    table[102] = nullptr;
+    if (prepare() != KEEL_RESULT_INCOMPATIBLE || g_management_calls != 1111) return 411;
+    table[102] = bindings.change_team;
+    std::memcpy(g_controller_storage.data() + kHealthOffset + 8, &invalid, sizeof(invalid));
+    if (prepare() != KEEL_RESULT_NOT_FOUND || g_management_calls != 1111) return 412;
+    Reset();
+    return 0;
+}
+
 int RunPlayerActionChecks()
 {
     Reset();
@@ -1112,6 +1199,8 @@ int main()
     if (handles) return handles;
     const int input = RunPlayerInputChecks();
     if (input) return input;
+    const int management = RunPlayerManagementChecks();
+    if (management) return management;
     const int actions = RunPlayerActionChecks();
     return actions ? actions : RunNativeBridgeChecks();
 }

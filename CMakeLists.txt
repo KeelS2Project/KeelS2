@@ -472,6 +472,7 @@ endif()
 add_library(keels2_game_cs2 SHARED
     games/cs2/src/cs2_adapter.cpp
     games/cs2/src/player_actions.cpp
+    games/cs2/src/player_management.cpp
 )
 target_include_directories(keels2_game_cs2 PRIVATE
     games/cs2/include
@@ -1440,6 +1441,13 @@ if(BUILD_TESTING)
     )
     keels2_enable_warnings(keels2_player_action_profile)
     add_test(NAME player_action_profile COMMAND keels2_player_action_profile)
+
+    add_executable(keels2_player_management_profile
+        tests/player_management_profile.cpp games/cs2/src/player_management.cpp)
+    target_include_directories(keels2_player_management_profile PRIVATE
+        games/cs2/include platform/include sdk/include)
+    keels2_enable_warnings(keels2_player_management_profile)
+    add_test(NAME player_management_profile COMMAND keels2_player_management_profile)
 
     add_library(keels2_player_info_allocator SHARED tests/player_info_allocator.cpp)
     target_link_libraries(keels2_player_info_allocator PRIVATE
