@@ -5,6 +5,7 @@
 #include <keels2/schema.h>
 #include <keels2/player_actions.h>
 #include <keels2/player_management.h>
+#include <keels2/entity_writes.h>
 #include <keels2/players.h>
 #include <keels2/player_input.h>
 
@@ -96,6 +97,9 @@ KeelResult KeelCs2_ReadEntityField(
     const KeelCs2SchemaField* field,
     void* value,
     uint32_t value_size);
+KeelResult KeelCs2_WriteEntityField(void* entity_system, void* schema_system,
+    const char* module, const KeelCs2EntityIdentity* entity, const KeelCs2SchemaField* field,
+    const void* value, uint32_t value_size, void* notify);
 KeelResult KeelCs2_CommandCaller(const void* context, int32_t* slot);
 KeelResult KeelCs2_ServerCommand(void* engine_server, const char* command);
 KeelResult KeelCs2_ClientConsolePrint(

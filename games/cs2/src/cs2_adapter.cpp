@@ -4,6 +4,7 @@
 #include <keels2/cs2/native_bridge.h>
 #include <keels2/cs2/player_actions.h>
 #include <keels2/cs2/player_management.h>
+#include <keels2/cs2/entity_writes.h>
 #include <keels2/keelhook.hpp>
 #include <keels2/platform/console.h>
 #include <keels2/platform/diagnostic_trace.h>
@@ -648,6 +649,7 @@ public:
         compatibility_profile_.clear();
         player_action_bindings_ = {};
         player_management_bindings_ = {};
+        entity_write_notify_ = nullptr;
         if (trace)
         {
             platform::AppendShutdownTrace("cs2 interface invalidation complete");
@@ -1762,6 +1764,61 @@ public:
         buttons = held;
         context = previous.token;
         return KEEL_RESULT_OK;
+    }
+
+    KeelResult EntityWriteCapabilities(std::uint32_t& capabilities)
+    {
+        capabilities = 0;
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (!entity_write_notify_)
+        {
+            if (compatibility_profile_.empty()) return KEEL_RESULT_UNSUPPORTED;
+            platform::LoadedModule module;
+            std::string error;
+            if (platform::FindLoadedModule(server_.module_path, module, error) != platform::ModuleLookup::found)
+                return KEEL_RESULT_NOT_READY;
+            const auto result = cs2::ResolveEntityWrites(module, compatibility_profile_, entity_write_notify_, error);
+            if (result != KEEL_RESULT_OK) return result;
+        }
+        capabilities = KEELS2_ENTITY_WRITE_NUMERIC_FIELDS;
+        return KEEL_RESULT_OK;
+    }
+
+    KeelResult WriteEntityField(const GameEntityIdentity& entity, const GameSchemaField& field,
+        const void* value, std::uint32_t size)
+    {
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (!value || size != field.value_size || !size || size > 12) return KEEL_RESULT_INVALID_ARGUMENT;
+        std::uint32_t capabilities{};
+        auto result = EntityWriteCapabilities(capabilities);
+        if (result != KEEL_RESULT_OK) return result;
+        if (!(capabilities & KEELS2_ENTITY_WRITE_NUMERIC_FIELDS)) return KEEL_RESULT_UNSUPPORTED;
+        if (field.module != KEELS2_SCHEMA_MODULE_SERVER || field.compatibility_profile != compatibility_profile_ ||
+            field.module_name != schema_server_module_) return KEEL_RESULT_INCOMPATIBLE;
+        // Re-resolve metadata before mutation. A retained field cannot authorize
+        // writes through changed type/offset/class metadata, even within a map.
+        const KeelSchemaFieldSpec spec{sizeof(spec), field.module, field.value_type, 0,
+            field.class_name.c_str(), field.field_name.c_str()};
+        GameSchemaField current;
+        std::string error;
+        result = ResolveSchemaField(spec, current, error);
+        if (result != KEEL_RESULT_OK) return result;
+        if (current.declaring_class != field.declaring_class || current.offset != field.offset ||
+            current.value_size != field.value_size || current.value_alignment != field.value_alignment)
+            return KEEL_RESULT_INCOMPATIBLE;
+        void* system{};
+        {
+            std::scoped_lock lock(schema_entity_mutex_);
+            result = CurrentEntitySystemLocked(system, error);
+            if (result != KEEL_RESULT_OK) return result;
+            if (!entity.epoch || entity.epoch != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+        }
+        const KeelCs2EntityIdentity native_entity{entity.index, entity.source2_handle};
+        const KeelCs2SchemaField native_field{current.declaring_class, current.offset,
+            current.value_size, current.value_alignment, current.value_type};
+        // Do not hold the schema registry mutex while notifying the engine.
+        return KeelCs2_WriteEntityField(system, schema_system_.instance, schema_server_module_.c_str(),
+            &native_entity, &native_field, value, size, entity_write_notify_);
     }
 
     KeelResult PlayerManagementCapabilities(std::uint32_t& capabilities)
@@ -3599,6 +3656,7 @@ private:
     std::string compatibility_profile_;
     KeelCs2PlayerActionBindings player_action_bindings_{};
     KeelCs2PlayerManagementBindings player_management_bindings_{};
+    void* entity_write_notify_{};
     std::string schema_server_module_;
     std::string entity_system_module_;
     std::filesystem::path entity_system_module_path_;
@@ -3728,6 +3786,28 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_PlayerAction(
         return KEEL_RESULT_INVALID_ARGUMENT;
     try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->PlayerAction(*entity, *action); }
     catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityWrites(
+    std::uint32_t version, keels2::host::GameAdapterEntityWritesApi* api) noexcept
+{
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {};
+    if (version != keels2::host::kGameAdapterEntityWritesVersion) return KEEL_RESULT_INCOMPATIBLE;
+    api->size = sizeof(*api); api->api_version = version;
+    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* capabilities) noexcept {
+        if (capabilities) *capabilities = 0;
+        if (!adapter || !capabilities) return KEEL_RESULT_INVALID_ARGUMENT;
+        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->EntityWriteCapabilities(*capabilities); }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    };
+    api->write = [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* entity,
+        const keels2::host::GameSchemaField* field, const void* value, std::uint32_t size) noexcept {
+        if (!adapter || !entity || !field || !value) return KEEL_RESULT_INVALID_ARGUMENT;
+        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->WriteEntityField(*entity, *field, value, size); }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    };
+    return KEEL_RESULT_OK;
 }
 
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayerManagement(

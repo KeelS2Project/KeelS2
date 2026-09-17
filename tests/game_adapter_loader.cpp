@@ -62,6 +62,11 @@ int main(int argument_count, char** arguments)
     const KeelPlayerManagementAction management{sizeof(KeelPlayerManagementAction), KEELS2_PLAYER_MANAGEMENT_RESPAWN, 0, 0};
     if (module.PlayerManagementCapabilities(capabilities) != KEEL_RESULT_UNSUPPORTED || capabilities ||
         module.ManagePlayer(entity, management) != KEEL_RESULT_UNSUPPORTED) return 12;
+    capabilities = UINT32_MAX;
+    const keels2::host::GameSchemaField field{};
+    const std::int32_t value = 1;
+    if (module.EntityWriteCapabilities(capabilities) != KEEL_RESULT_UNSUPPORTED || capabilities ||
+        module.WriteEntityField(entity,field,&value,sizeof(value)) != KEEL_RESULT_UNSUPPORTED) return 13;
     std::uint64_t buttons = UINT64_MAX, context = UINT64_MAX;
     if (module.ReadPlayerInput(0, 1, buttons, context) != KEEL_RESULT_UNSUPPORTED || buttons || context)
         return 11;

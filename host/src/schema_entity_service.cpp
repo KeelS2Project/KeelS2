@@ -4,6 +4,7 @@
 #include "game_adapter_loader.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstring>
 #include <cmath>
@@ -33,6 +34,7 @@ SchemaEntityService::SchemaEntityService(Host& host, GameAdapter& adapter)
     player_actions_api_ = {sizeof(KeelPlayerActionsApi), KEELS2_PLAYER_ACTIONS_API_VERSION, &PlayerActionEntry};
     player_management_api_ = {sizeof(KeelPlayerManagementApi), KEELS2_PLAYER_MANAGEMENT_API_VERSION,
         &ManagementCapabilitiesEntry, &ManagePlayerEntry};
+    entity_writes_api_ = {sizeof(KeelEntityWritesApi), KEELS2_ENTITY_WRITES_API_VERSION, &WriteCapabilitiesEntry, &WriteFieldEntry};
     entities_api_ = {
         sizeof(KeelEntitiesApi),
         KEELS2_ENTITIES_API_VERSION,
@@ -193,6 +195,85 @@ KeelResult SchemaEntityService::ManagePlayer(KeelPluginHandle plugin, KeelEntity
         ~ActionHold() { --count; }
     } hold{owner->active_native_operations};
     return host_.adapter_module_ ? host_.adapter_module_->ManagePlayer(identity, request) : KEEL_RESULT_UNSUPPORTED;
+}
+
+const KeelEntityWritesApi& SchemaEntityService::EntityWritesApi() const noexcept { return entity_writes_api_; }
+
+KeelResult SchemaEntityService::WriteCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* capabilities)
+{
+    if (capabilities) *capabilities = 0;
+    try
+    {
+        auto* service = active_.load(std::memory_order_acquire);
+        return service ? service->WriteCapabilities(plugin, capabilities) : KEEL_RESULT_NOT_READY;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+KeelResult SchemaEntityService::WriteCapabilities(KeelPluginHandle plugin, std::uint32_t* capabilities)
+{
+    if (!capabilities) return KEEL_RESULT_INVALID_ARGUMENT;
+    std::scoped_lock state_lock(host_.state_mutex_);
+    if (!PluginReady(plugin)) return KEEL_RESULT_NOT_READY;
+    if (!adapter_.IsGameThread()) return KEEL_RESULT_WRONG_THREAD;
+    std::uint32_t supported{};
+    const auto result = host_.adapter_module_ ? host_.adapter_module_->EntityWriteCapabilities(supported) : KEEL_RESULT_UNSUPPORTED;
+    if (result == KEEL_RESULT_OK) *capabilities = supported;
+    return result;
+}
+
+KeelResult SchemaEntityService::WriteFieldEntry(KeelPluginHandle plugin, KeelEntityHandle entity,
+    KeelSchemaFieldHandle field, const void* value, std::uint32_t size)
+{
+    try
+    {
+        auto* service = active_.load(std::memory_order_acquire);
+        return service ? service->WriteField(plugin, entity, field, value, size) : KEEL_RESULT_NOT_READY;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+KeelResult SchemaEntityService::WriteField(KeelPluginHandle plugin, KeelEntityHandle entity,
+    KeelSchemaFieldHandle field, const void* value, std::uint32_t size)
+{
+    if (!entity || !field || !value || !size || size > 12) return KEEL_RESULT_INVALID_ARGUMENT;
+    std::scoped_lock state_lock(host_.state_mutex_);
+    if (!PluginReady(plugin)) return KEEL_RESULT_NOT_READY;
+    if (!adapter_.IsGameThread()) return KEEL_RESULT_WRONG_THREAD;
+    GameEntityIdentity identity;
+    std::shared_ptr<GameSchemaField> resolved;
+    {
+        std::scoped_lock lock(registry_mutex_);
+        const auto object = entities_.find(entity);
+        const auto property = fields_.find(field);
+        if (object == entities_.end() || property == fields_.end() || object->second.owner != plugin || property->second.owner != plugin)
+            return KEEL_RESULT_NOT_FOUND;
+        identity = object->second.entity; resolved = property->second.field;
+    }
+    if (resolved->value_type == KEELS2_SCHEMA_ENTITY_HANDLE) return KEEL_RESULT_UNSUPPORTED;
+    if (size != resolved->value_size) return KEEL_RESULT_INVALID_ARGUMENT;
+    std::array<unsigned char, 12> copy{};
+    std::memcpy(copy.data(), value, size);
+    if (resolved->value_type == KEELS2_SCHEMA_BOOL && copy[0] > 1) return KEEL_RESULT_INVALID_ARGUMENT;
+    if (resolved->value_type == KEELS2_SCHEMA_FLOAT32 || resolved->value_type == KEELS2_SCHEMA_VECTOR3)
+        for (unsigned at = 0; at < size; at += sizeof(float))
+        {
+            float number{}; std::memcpy(&number, copy.data() + at, sizeof(number));
+            if (!std::isfinite(number)) return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+    if (resolved->value_type == KEELS2_SCHEMA_FLOAT64)
+    {
+        double number{}; std::memcpy(&number, copy.data(), sizeof(number));
+        if (!std::isfinite(number)) return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    std::string error;
+    const auto valid = adapter_.ValidateEntity(identity, error);
+    if (valid != KEEL_RESULT_OK) return valid;
+    auto* owner = host_.PluginByHandle(plugin);
+    if (!owner || owner->active_native_operations == UINT32_MAX) return KEEL_RESULT_BUSY;
+    ++owner->active_native_operations;
+    struct Hold { std::uint32_t& count; ~Hold() { --count; } } hold{owner->active_native_operations};
+    return host_.adapter_module_ ? host_.adapter_module_->WriteEntityField(identity, *resolved, copy.data(), size) : KEEL_RESULT_UNSUPPORTED;
 }
 
 KeelResult SchemaEntityService::ReleasePlugin(KeelPluginHandle plugin)

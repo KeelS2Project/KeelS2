@@ -1,6 +1,8 @@
 #include <keels2/entities.h>
 #include <keels2/schema.h>
 #include <keels2/player_actions.h>
+#include <keels2/entity_writes.h>
+#include <keels2/player_management.h>
 
 #include <stddef.h>
 
@@ -12,6 +14,11 @@ _Static_assert(sizeof(KeelEntitiesApi) == 56, "KeelEntitiesApi ABI");
 _Static_assert(sizeof(KeelPlayerAction) == 24, "KeelPlayerAction ABI");
 _Static_assert(sizeof(KeelPlayerActionsApi) == 16, "KeelPlayerActionsApi ABI");
 _Static_assert(offsetof(KeelPlayerAction, damage) == 20, "KeelPlayerAction damage ABI");
+
+_Static_assert(sizeof(KeelEntityWritesApi) == 24, "KeelEntityWritesApi ABI");
+_Static_assert(offsetof(KeelEntityWritesApi, write_field) == 16, "KeelEntityWritesApi write ABI");
+_Static_assert(sizeof(KeelPlayerManagementApi) == 24, "KeelPlayerManagementApi ABI");
+_Static_assert(sizeof(KeelPlayerManagementAction) == 16, "KeelPlayerManagementAction ABI");
 
 int main(void)
 {

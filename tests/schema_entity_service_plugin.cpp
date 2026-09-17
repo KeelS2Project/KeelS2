@@ -1,4 +1,5 @@
 #include <keels2/player_management.h>
+#include <keels2/entity_writes.h>
 #include <keels2/keels2.hpp>
 
 #include <string.h>
@@ -150,6 +151,14 @@ private:
             LogError("player management wrong-thread rejection failed");
             return;
         }
+        if (g_api->query_service(g_owner, KEELS2_ENTITY_WRITES_SERVICE_NAME, 1, &raw) != KEEL_RESULT_OK || !raw)
+        { LogError("entity write wrong-thread service lookup failed"); return; }
+        const auto* writes = static_cast<const KeelEntityWritesApi*>(raw);
+        const std::int32_t value = 1;
+        capabilities = UINT32_MAX;
+        if (writes->capabilities(g_owner, &capabilities) != KEEL_RESULT_WRONG_THREAD || capabilities ||
+            writes->write_field(g_owner, 1, 1, &value, sizeof(value)) != KEEL_RESULT_WRONG_THREAD)
+        { LogError("entity write wrong-thread rejection failed"); return; }
         keels2::SchemaField<int32> field;
         keels2::Entity entity;
         int32 health;
@@ -233,6 +242,26 @@ private:
         valid = valid && management->apply(g_owner, entity, &request) == KEEL_RESULT_INVALID_ARGUMENT;
         request.kind = KEELS2_PLAYER_MANAGEMENT_CHANGE_TEAM; request.team = 256;
         valid = valid && management->apply(g_owner, entity, &request) == KEEL_RESULT_INVALID_ARGUMENT;
+        const void* writes_raw{};
+        valid = valid && g_api->query_service(g_owner, KEELS2_ENTITY_WRITES_SERVICE_NAME, 2, &writes_raw) == KEEL_RESULT_INCOMPATIBLE &&
+            g_api->query_service(g_owner, KEELS2_ENTITY_WRITES_SERVICE_NAME, 1, &writes_raw) == KEEL_RESULT_OK;
+        const auto* writes = static_cast<const KeelEntityWritesApi*>(writes_raw);
+        if (!valid || !writes || writes->size != sizeof(*writes) || !writes->capabilities || !writes->write_field) return false;
+        if (g_api->query_service(g_owner, KEELS2_SCHEMA_SERVICE_NAME, 1, &raw) != KEEL_RESULT_OK || !raw) return false;
+        const auto* schema = static_cast<const KeelSchemaApi*>(raw);
+        const KeelSchemaFieldSpec spec{sizeof(spec), KEELS2_SCHEMA_MODULE_SERVER, KEELS2_SCHEMA_INT32, 0, "CBaseEntity", "m_iHealth"};
+        KeelSchemaFieldHandle field{};
+        if (schema->resolve_field(g_owner, &spec, &field) != KEEL_RESULT_OK) return false;
+        const std::int32_t value = 77;
+        capabilities = UINT32_MAX;
+        valid = valid && writes->capabilities(g_owner, &capabilities) == KEEL_RESULT_UNSUPPORTED && !capabilities &&
+            writes->write_field(g_owner, entity, field, &value, sizeof(value)) == KEEL_RESULT_UNSUPPORTED &&
+            writes->write_field(g_owner, entity, field, &value, 1) == KEEL_RESULT_INVALID_ARGUMENT &&
+            writes->write_field(g_owner + 10000, entity, field, &value, sizeof(value)) == KEEL_RESULT_NOT_READY &&
+            writes->write_field(g_owner, entity + 10000, field, &value, sizeof(value)) == KEEL_RESULT_NOT_FOUND;
+        const auto released = schema->release_field(g_owner, field);
+        valid = valid && released == KEEL_RESULT_OK &&
+            writes->write_field(g_owner, entity, field, &value, sizeof(value)) == KEEL_RESULT_NOT_FOUND;
         action.damage = 1;
         valid = valid && actions->apply(g_owner, entity, &action) == KEEL_RESULT_INVALID_ARGUMENT;
         action.kind = KEELS2_PLAYER_ACTION_IMPULSE;

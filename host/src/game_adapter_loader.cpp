@@ -140,6 +140,20 @@ bool GameAdapterModule::Load(
         library_.Symbol(kGameAdapterCommandCallerSymbol));
     player_action_ = SymbolFunction<GameAdapterPlayerActionFn>(
         library_.Symbol(kGameAdapterPlayerActionSymbol));
+    const auto query_writes = SymbolFunction<GameAdapterQueryEntityWritesFn>(library_.Symbol(kGameAdapterEntityWritesSymbol));
+    if (query_writes)
+    {
+        GameAdapterEntityWritesApi writes{};
+        writes.size = sizeof(writes); writes.api_version = kGameAdapterEntityWritesVersion;
+        if (query_writes(kGameAdapterEntityWritesVersion, &writes) != KEEL_RESULT_OK ||
+            writes.size != sizeof(writes) || writes.api_version != kGameAdapterEntityWritesVersion || !writes.capabilities || !writes.write)
+        {
+            error = "game adapter entity writes API is incompatible";
+            Reset();
+            return false;
+        }
+        entity_writes_ = writes;
+    }
     const auto query_management = SymbolFunction<GameAdapterQueryPlayerManagementFn>(
         library_.Symbol(kGameAdapterPlayerManagementSymbol));
     if (query_management)
@@ -242,6 +256,7 @@ void GameAdapterModule::Reset() noexcept
     player_action_ = nullptr;
     players_ = {};
     player_management_ = {};
+    entity_writes_ = {};
     player_input_ = {};
     messaging_ = {};
     convar_observers_ = {};
@@ -304,6 +319,19 @@ KeelResult GameAdapterModule::ReadPlayer(std::int32_t slot, KeelPlayerInfo& play
     player.controller_handle = UINT32_MAX;
     player.pawn_handle = UINT32_MAX;
     return players_.read ? players_.read(adapter_, slot, &player) : KEEL_RESULT_UNSUPPORTED;
+}
+
+KeelResult GameAdapterModule::EntityWriteCapabilities(std::uint32_t& capabilities) const noexcept
+{
+    capabilities = 0;
+    return adapter_ && entity_writes_.capabilities
+        ? entity_writes_.capabilities(adapter_, &capabilities) : KEEL_RESULT_UNSUPPORTED;
+}
+
+KeelResult GameAdapterModule::WriteEntityField(const GameEntityIdentity& entity, const GameSchemaField& field,
+    const void* value, std::uint32_t size) const noexcept
+{
+    return adapter_ && entity_writes_.write ? entity_writes_.write(adapter_, &entity, &field, value, size) : KEEL_RESULT_UNSUPPORTED;
 }
 
 KeelResult GameAdapterModule::PlayerManagementCapabilities(std::uint32_t& capabilities) const noexcept

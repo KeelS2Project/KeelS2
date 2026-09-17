@@ -473,6 +473,7 @@ add_library(keels2_game_cs2 SHARED
     games/cs2/src/cs2_adapter.cpp
     games/cs2/src/player_actions.cpp
     games/cs2/src/player_management.cpp
+    games/cs2/src/entity_writes.cpp
 )
 target_include_directories(keels2_game_cs2 PRIVATE
     games/cs2/include
@@ -1441,6 +1442,11 @@ if(BUILD_TESTING)
     )
     keels2_enable_warnings(keels2_player_action_profile)
     add_test(NAME player_action_profile COMMAND keels2_player_action_profile)
+
+    add_executable(keels2_entity_write_profile tests/entity_write_profile.cpp games/cs2/src/entity_writes.cpp)
+    target_include_directories(keels2_entity_write_profile PRIVATE games/cs2/include platform/include sdk/include)
+    keels2_enable_warnings(keels2_entity_write_profile)
+    add_test(NAME entity_write_profile COMMAND keels2_entity_write_profile)
 
     add_executable(keels2_player_management_profile
         tests/player_management_profile.cpp games/cs2/src/player_management.cpp)

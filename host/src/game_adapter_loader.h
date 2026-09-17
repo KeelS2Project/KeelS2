@@ -29,6 +29,8 @@ public:
     GameAdapter* Get() const noexcept;
     bool SupportsClientCommands() const noexcept;
     KeelResult CommandCaller(const void* context, std::int32_t& slot) const noexcept;
+    KeelResult EntityWriteCapabilities(std::uint32_t& capabilities) const noexcept;
+    KeelResult WriteEntityField(const GameEntityIdentity& entity, const GameSchemaField& field, const void* value, std::uint32_t size) const noexcept;
     KeelResult PlayerManagementCapabilities(std::uint32_t& capabilities) const noexcept;
     KeelResult ManagePlayer(const GameEntityIdentity& entity, const KeelPlayerManagementAction& action) const noexcept;
     KeelResult PlayerAction(const GameEntityIdentity& entity, const KeelPlayerAction& action) const noexcept;
@@ -46,6 +48,7 @@ private:
     GameAdapterPlayerActionFn player_action_{};
     GameAdapterPlayersApi players_{};
     GameAdapterPlayerManagementApi player_management_{};
+    GameAdapterEntityWritesApi entity_writes_{};
     GameAdapterPlayerInputApi player_input_{};
     GameAdapterMessagingApi messaging_{};
     GameAdapterConVarObserversApi convar_observers_{};

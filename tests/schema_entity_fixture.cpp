@@ -470,6 +470,65 @@ void TestDamageDestroy(void* info)
     g_action_arguments = g_action_arguments && info;
     g_actions.push_back(5);
 }
+unsigned g_write_notifications{};
+bool g_write_notification_valid{}, g_write_destroy{};
+void TestEntityWriteNotify(void* instance, const NetworkStateChangedData& data)
+{
+    ++g_write_notifications;
+    g_write_notification_valid = instance == EntityInstance() && data.m_unk001 == 0 &&
+        data.m_LocalOffsets.Count() == 0 && data.m_nArrayIndex == -1;
+    if (g_write_destroy) Identity()->m_pInstance = nullptr;
+}
+int RunEntityWriteChecks()
+{
+    Reset();
+#if defined(_WIN32)
+    constexpr const char* module = "server.dll";
+#else
+    constexpr const char* module = "libserver.so";
+#endif
+    std::array<void*,30> table{}; auto* notify = FunctionAddress(&TestEntityWriteNotify);
+    table[29] = notify; StorePointer(g_entity_storage.data(), table.data());
+    g_write_notifications = 0; g_write_destroy = false;
+    KeelCs2EntityIdentity entity{};
+    if (KeelCs2_FindEntityByIndex(EntitySystem(), kEntityIndex, &entity) != KEEL_RESULT_OK) return 450;
+    KeelCs2SchemaField field{};
+    if (KeelCs2_ResolveSchemaField(&g_schema_system,module,"CBaseEntity","m_iHealth",KEELS2_SCHEMA_INT32,&field) != KEEL_RESULT_OK) return 451;
+    std::int32_t value = 84;
+    const auto write = [&](const void* input, unsigned size) { return KeelCs2_WriteEntityField(EntitySystem(),&g_schema_system,module,&entity,&field,input,size,notify); };
+    const auto health = [&] { std::int32_t result{}; std::memcpy(&result,g_entity_storage.data()+kHealthOffset,sizeof(result)); return result; };
+    if (write(&value,sizeof(value)) != KEEL_RESULT_OK || health() != value || g_write_notifications != 1 || !g_write_notification_valid) return 452;
+    if (write(&value,sizeof(value)) != KEEL_RESULT_OK || g_write_notifications != 1) return 453;
+    auto original = entity; ++entity.source2_handle;
+    if (write(&value,sizeof(value)) != KEEL_RESULT_NOT_FOUND || g_write_notifications != 1) return 454;
+    entity = original; table[29] = nullptr; value = 12;
+    if (write(&value,sizeof(value)) != KEEL_RESULT_INCOMPATIBLE || health() != 84) return 455;
+    table[29] = notify; const auto original_field = field;
+    field.offset = static_cast<int>(kEntitySize);
+    if (write(&value,sizeof(value)) != KEEL_RESULT_INCOMPATIBLE || g_write_notifications != 1) return 456;
+    field = original_field; ++field.offset;
+    if (write(&value,sizeof(value)) != KEEL_RESULT_INCOMPATIBLE || g_write_notifications != 1) return 457;
+    field = original_field; field.value_type = KEELS2_SCHEMA_ENTITY_HANDLE;
+    if (write(&value,sizeof(value)) != KEEL_RESULT_INVALID_ARGUMENT) return 458;
+    field = {&g_base_class,static_cast<int>(kHealthOffset),1,1,KEELS2_SCHEMA_BOOL};
+    const std::uint8_t invalid_bool = 2;
+    if (write(&invalid_bool,1) != KEEL_RESULT_INVALID_ARGUMENT || g_write_notifications != 1) return 459;
+    field = {&g_base_class,static_cast<int>(kHealthOffset),4,4,KEELS2_SCHEMA_FLOAT32};
+    const float nonfinite = std::numeric_limits<float>::infinity();
+    if (write(&nonfinite,4) != KEEL_RESULT_INVALID_ARGUMENT || g_write_notifications != 1) return 460;
+    const float finite = 2.5f;
+    if (write(&finite,4) != KEEL_RESULT_OK || g_write_notifications != 2) return 461;
+    field = {&g_base_class,static_cast<int>(kHealthOffset),12,4,KEELS2_SCHEMA_VECTOR3};
+    const float vector[]{1,2,3};
+    if (write(vector,sizeof(vector)) != KEEL_RESULT_OK || g_write_notifications != 3) return 462;
+    field = original_field; g_write_destroy = true;
+    if (write(&value,sizeof(value)) != KEEL_RESULT_OK || g_write_notifications != 4 ||
+        KeelCs2_ValidateEntity(EntitySystem(),&entity) != KEEL_RESULT_NOT_FOUND) return 463;
+    g_write_destroy = false;
+    Reset();
+    return 0;
+}
+
 int g_management_calls{};
 int g_management_team{};
 bool g_management_arguments{};
@@ -1199,6 +1258,8 @@ int main()
     if (handles) return handles;
     const int input = RunPlayerInputChecks();
     if (input) return input;
+    const int writes = RunEntityWriteChecks();
+    if (writes) return writes;
     const int management = RunPlayerManagementChecks();
     if (management) return management;
     const int actions = RunPlayerActionChecks();

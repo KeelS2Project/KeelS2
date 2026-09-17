@@ -696,6 +696,113 @@ extern "C" KeelResult KeelCs2_ReadEntityField(
     }
 }
 
+extern "C" KeelResult KeelCs2_WriteEntityField(void* entity_system, void* schema_system,
+    const char* module, const KeelCs2EntityIdentity* entity, const KeelCs2SchemaField* field,
+    const void* value, std::uint32_t value_size, void* notify)
+{
+    BuiltinType expected{};
+    if (!entity_system || !schema_system || !module || !*module || !entity || !field || !field->declaring_class ||
+        !value || !notify || !PublicBuiltin(field->value_type, expected) ||
+        field->value_type == KEELS2_SCHEMA_ENTITY_HANDLE || field->value_size != expected.size ||
+        field->value_alignment != expected.alignment || value_size != expected.size || field->offset < 0 || value_size > 12)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    std::array<std::byte, 12> snapshot{};
+    std::memcpy(snapshot.data(), value, value_size);
+    if (field->value_type == KEELS2_SCHEMA_BOOL && std::to_integer<unsigned>(snapshot[0]) > 1)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    if (field->value_type == KEELS2_SCHEMA_FLOAT32 || field->value_type == KEELS2_SCHEMA_VECTOR3)
+        for (unsigned at = 0; at < value_size; at += sizeof(float))
+        {
+            float component{}; std::memcpy(&component, snapshot.data() + at, sizeof(component));
+            if (!std::isfinite(component)) return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+    if (field->value_type == KEELS2_SCHEMA_FLOAT64)
+    {
+        double number{}; std::memcpy(&number, snapshot.data(), sizeof(number));
+        if (!std::isfinite(number)) return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    try
+    {
+        CEntityIdentity* identity = IdentityByHandle(
+            static_cast<CEntitySystem*>(entity_system),
+            entity->source2_handle);
+        if (!identity || identity->GetEntityIndex().Get() != entity->index)
+        {
+            return KEEL_RESULT_NOT_FOUND;
+        }
+        CSchemaClassInfo* dynamic_class = identity->m_pClass->GetSchemaBinding();
+        auto* declaring_class = static_cast<CSchemaClassInfo*>(field->declaring_class);
+        if (!ValidClass(dynamic_class) || !ValidClass(declaring_class))
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        std::array<const CSchemaClassInfo*, 64> path{};
+        std::size_t visited{};
+        bool found{};
+        std::uint64_t base_offset{};
+        const HierarchyResult hierarchy = FindBaseOffset(
+            dynamic_class,
+            declaring_class,
+            0,
+            path,
+            0,
+            visited,
+            found,
+            base_offset);
+        if (hierarchy == HierarchyResult::incompatible)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (!found)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        const std::uint64_t field_offset = base_offset +
+            static_cast<std::uint32_t>(field->offset);
+        if (field_offset > static_cast<std::uint64_t>(dynamic_class->m_nSize) ||
+            field->value_size >
+                static_cast<std::uint64_t>(dynamic_class->m_nSize) - field_offset)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        const std::uintptr_t instance =
+            reinterpret_cast<std::uintptr_t>(identity->m_pInstance);
+        if (field_offset > UINTPTR_MAX - instance)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        const std::uintptr_t address = instance + static_cast<std::uintptr_t>(field_offset);
+        if (address % field->value_alignment != 0)
+        {
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+        if (field->value_size - 1 > UINTPTR_MAX - address) return KEEL_RESULT_INCOMPATIBLE;
+        auto* scope = reinterpret_cast<ISchemaSystemTypeScope*>(
+            static_cast<ISchemaSystem*>(schema_system)->FindTypeScopeForModule(module));
+        auto* base = scope ? scope->FindDeclaredClass("CBaseEntity").Get() : nullptr;
+        if (!ValidClass(base)) return KEEL_RESULT_INCOMPATIBLE;
+        path = {}; visited = 0; found = false; base_offset = 0;
+        if (FindBaseOffset(dynamic_class, base, 0, path, 0, visited, found, base_offset) != HierarchyResult::found ||
+            !found || base_offset != 0) return KEEL_RESULT_INCOMPATIBLE;
+        void** table{};
+        std::memcpy(&table, reinterpret_cast<const void*>(instance), sizeof(table));
+        if (!table || table[29] != notify) return KEEL_RESULT_INCOMPATIBLE;
+        if (std::memcmp(reinterpret_cast<const void*>(address), snapshot.data(), field->value_size) == 0)
+            return KEEL_RESULT_OK;
+        // A full dirty notification also covers scalar fields without requiring
+        // serializer-specific field paths. It does not execute game setters.
+        const NetworkStateChangedData changed(true);
+        std::memcpy(reinterpret_cast<void*>(address), snapshot.data(), field->value_size);
+        using Notify = void (*)(void*, const NetworkStateChangedData&);
+        NativeActionFunction<Notify>(notify)(reinterpret_cast<void*>(instance), changed);
+        return KEEL_RESULT_OK;
+    }
+    catch (...)
+    {
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+}
+
 extern "C" KeelResult KeelCs2_PlayerAction(void* entity_system, void* schema_system, const char* module,
     const KeelCs2EntityIdentity* entity, const KeelPlayerAction* action,
     const KeelCs2PlayerActionBindings* bindings)
