@@ -31,10 +31,15 @@ public:
     const KeelPlayerActionsApi& PlayerActionsApi() const noexcept;
     const KeelPlayerManagementApi& PlayerManagementApi() const noexcept;
     const KeelEntityWritesApi& EntityWritesApi() const noexcept;
+    const KeelRoundControlApi& RoundControlApi() const noexcept;
     KeelResult ReleasePlugin(KeelPluginHandle plugin);
     bool Shutdown();
 
 private:
+    static KeelResult RoundCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* capabilities);
+    static KeelResult TerminateRoundEntry(KeelPluginHandle plugin, const KeelRoundTermination* request);
+    KeelResult RoundCapabilities(KeelPluginHandle plugin, std::uint32_t* capabilities);
+    KeelResult TerminateRound(KeelPluginHandle plugin, const KeelRoundTermination* request);
     static KeelResult WriteCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* capabilities);
     static KeelResult WriteFieldEntry(KeelPluginHandle plugin, KeelEntityHandle entity, KeelSchemaFieldHandle field, const void* value, std::uint32_t size);
     KeelResult WriteCapabilities(KeelPluginHandle plugin, std::uint32_t* capabilities);
@@ -147,6 +152,7 @@ private:
     KeelPlayerActionsApi player_actions_api_{};
     KeelPlayerManagementApi player_management_api_{};
     KeelEntityWritesApi entity_writes_api_{};
+    KeelRoundControlApi round_control_api_{};
     mutable std::mutex registry_mutex_;
     std::unordered_map<std::string, std::shared_ptr<GameSchemaField>> field_cache_;
     std::unordered_map<KeelSchemaFieldHandle, FieldRecord> fields_;

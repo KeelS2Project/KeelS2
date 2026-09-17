@@ -3,6 +3,7 @@
 #include <keels2/player_actions.h>
 #include <keels2/entity_writes.h>
 #include <keels2/player_management.h>
+#include <keels2/round_control.h>
 
 #include <stddef.h>
 
@@ -19,6 +20,11 @@ _Static_assert(sizeof(KeelEntityWritesApi) == 24, "KeelEntityWritesApi ABI");
 _Static_assert(offsetof(KeelEntityWritesApi, write_field) == 16, "KeelEntityWritesApi write ABI");
 _Static_assert(sizeof(KeelPlayerManagementApi) == 24, "KeelPlayerManagementApi ABI");
 _Static_assert(sizeof(KeelPlayerManagementAction) == 16, "KeelPlayerManagementAction ABI");
+
+_Static_assert(sizeof(KeelRoundTermination) == 20, "KeelRoundTermination ABI");
+_Static_assert(offsetof(KeelRoundTermination, delay) == 8, "round delay ABI");
+_Static_assert(sizeof(KeelRoundControlApi) == 24, "KeelRoundControlApi ABI");
+_Static_assert(offsetof(KeelRoundControlApi, terminate) == 16, "round terminate ABI");
 
 int main(void)
 {

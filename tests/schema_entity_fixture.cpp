@@ -64,6 +64,8 @@ bool g_buttons_registered = true;
 SchemaClassFieldData_t g_input_pointer{}, g_input_state{}, g_input_masks{};
 SchemaBaseClassInfoData_t g_input_pawn_base{};
 CSchemaClassInfo g_controller_base{}, g_controller_class{};
+CSchemaClassInfo g_round_proxy_class{}, g_round_rules_class{};
+SchemaClassFieldData_t g_round_field{};
 SchemaClassFieldData_t g_controller_fields[2]{}, g_controller_pawn{};
 SchemaBaseClassInfoData_t g_controller_inherit{};
 template <typename T> struct SchemaStorage {
@@ -97,7 +99,7 @@ CSchemaClassInfo* DeclaredClass(const char* name)
     if (name && std::strcmp(name, "CTakeDamageInfo") == 0)
         return &g_damage_class;
     if (!g_buttons_registered && name && std::strcmp(name, "CInButtonState") == 0) return nullptr;
-    for (auto* type : {&g_input_pawn_class, &g_movement_class, &g_buttons_class, &g_controller_base, &g_controller_class})
+    for (auto* type : {&g_input_pawn_class, &g_movement_class, &g_buttons_class, &g_controller_base, &g_controller_class, &g_round_proxy_class, &g_round_rules_class})
         if (name && type->m_pszName && std::strcmp(name, type->m_pszName) == 0) return type;
     return nullptr;
 }
@@ -233,6 +235,7 @@ void Reset()
     g_schema_lookup_count = 0;
     g_input_read_callback = nullptr;
     g_input_pawn_class = g_movement_class = g_buttons_class = g_controller_base = g_controller_class = {};
+    g_round_proxy_class = g_round_rules_class = {};
     g_int32_type_storage.fill(std::byte{});
     g_entity_system_storage.fill(std::byte{});
     g_identity_storage.fill(std::byte{});
@@ -479,6 +482,110 @@ void TestEntityWriteNotify(void* instance, const NetworkStateChangedData& data)
         data.m_LocalOffsets.Count() == 0 && data.m_nArrayIndex == -1;
     if (g_write_destroy) Identity()->m_pInstance = nullptr;
 }
+alignas(16) std::array<std::byte,128> g_round_rules_storage{};
+unsigned g_round_calls{};
+std::uint32_t g_round_reason{}, g_round_team{};
+float g_round_delay{};
+bool g_round_arguments{}, g_round_destroy{};
+#if defined(_WIN32)
+void TestTerminateRound(void* rules, float delay, std::uint32_t reason, const std::uint32_t* team)
+#else
+void TestTerminateRound(void* rules, std::uint32_t reason, const std::uint32_t* team, float delay)
+#endif
+{
+    ++g_round_calls; g_round_reason = reason; g_round_delay = delay; g_round_team = team ? *team : 0;
+    g_round_arguments = rules == g_round_rules_storage.data();
+    if (g_round_destroy) { Identity()->m_pInstance = nullptr; g_round_rules_storage.fill(std::byte{}); }
+}
+int RunRoundChecks()
+{
+    Reset();
+#if defined(_WIN32)
+    constexpr const char* module = "server.dll";
+#else
+    constexpr const char* module = "libserver.so";
+#endif
+    std::array<void*,3> proxy_table{}, rules_table{}, other_table{};
+    SchemaStorage<CSchemaType_Ptr> pointer;
+    SchemaStorage<CSchemaType_DeclaredClass> declared;
+    auto* object = declared.Get(); object->m_eTypeCategory = SCHEMA_TYPE_DECLARED_CLASS;
+    object->m_eAtomicCategory = SCHEMA_ATOMIC_INVALID; object->m_pClassInfo = &g_round_rules_class;
+    auto* ptr = pointer.Get(); ptr->m_eTypeCategory = SCHEMA_TYPE_POINTER;
+    ptr->m_eAtomicCategory = SCHEMA_ATOMIC_INVALID; ptr->m_pObjectType = object;
+    constexpr auto offset = static_cast<std::int32_t>(Align(kHealthOffset+8,alignof(void*)));
+    g_round_field = {"m_pGameRules",ptr,offset,0,nullptr};
+    g_round_proxy_class.m_pszName = "CCSGameRulesProxy";
+    g_round_proxy_class.m_nSize = static_cast<int>(kEntitySize); g_round_proxy_class.m_nAlignment = 16;
+    g_round_proxy_class.m_pFields = &g_round_field; g_round_proxy_class.m_nFieldCount = 1;
+    g_round_rules_class.m_pszName = "CCSGameRules";
+    g_round_rules_class.m_nSize = static_cast<int>(g_round_rules_storage.size()); g_round_rules_class.m_nAlignment = 16;
+    g_entity_class_info.m_pSchemaBinding = &g_round_proxy_class;
+    StorePointer(g_entity_storage.data(),proxy_table.data());
+    StorePointer(g_entity_storage.data()+offset,g_round_rules_storage.data());
+    StorePointer(g_round_rules_storage.data(),rules_table.data());
+    const KeelCs2RoundBindings bindings{rules_table.data(),proxy_table.data(),FunctionAddress(&TestTerminateRound)};
+    KeelCs2RoundContext context{};
+    const auto resolve = [&] { return KeelCs2_ResolveRoundSchema(&g_schema_system,module,&context); };
+    const auto find = [&] { return KeelCs2_FindRoundContext(EntitySystem(),&bindings,&context); };
+    KeelRoundTermination request{sizeof(request),8,2.5f,3,0};
+    const auto apply = [&] { return KeelCs2_TerminateRound(EntitySystem(),&context,&request,&bindings); };
+    g_round_calls = 0; g_round_destroy = false;
+    if (resolve() != KEEL_RESULT_OK || find() != KEEL_RESULT_OK || context.rules != g_round_rules_storage.data() ||
+        context.proxy.index != kEntityIndex || apply() != KEEL_RESULT_OK || g_round_calls != 1 || !g_round_arguments ||
+        g_round_reason != 8 || g_round_delay != 2.5f || g_round_team != 3) return 700;
+    request.team = 0; request.delay = 0;
+    for (unsigned reason : {1u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,14u,16u,17u,18u,19u,20u,21u,22u}) {
+        request.reason = reason;
+        if (apply() != KEEL_RESULT_OK || g_round_reason != reason || g_round_team || g_round_delay) return 701;
+    }
+    const auto valid_calls = g_round_calls;
+    for (unsigned reason : {0u,2u,3u,15u,23u,UINT32_MAX}) { request.reason = reason; if (apply() != KEEL_RESULT_INVALID_ARGUMENT) return 702; }
+    request.reason = 8;
+    for (float delay : {-1.0f,3601.0f,std::numeric_limits<float>::infinity(),std::numeric_limits<float>::quiet_NaN()}) {
+        request.delay = delay; if (apply() != KEEL_RESULT_INVALID_ARGUMENT) return 703;
+    }
+    request.delay = 1;
+    for (int team : {-1,1,4,999}) { request.team = team; if (apply() != KEEL_RESULT_INVALID_ARGUMENT) return 704; }
+    request.team = 2; request.reserved = 1; if (apply() != KEEL_RESULT_INVALID_ARGUMENT) return 705;
+    request.reserved = 0; --request.size; if (apply() != KEEL_RESULT_INVALID_ARGUMENT) return 706; ++request.size;
+    SetHandle(*Identity(),13); if (apply() != KEEL_RESULT_NOT_FOUND) return 707; SetHandle(*Identity(),12);
+    StorePointer(g_entity_storage.data(),other_table.data()); if (apply() != KEEL_RESULT_INCOMPATIBLE) return 708;
+    StorePointer(g_entity_storage.data(),proxy_table.data());
+    StorePointer(g_round_rules_storage.data(),other_table.data()); if (apply() != KEEL_RESULT_INCOMPATIBLE) return 709;
+    StorePointer(g_round_rules_storage.data(),rules_table.data());
+    alignas(16) std::array<std::byte,128> other_rules{}; StorePointer(other_rules.data(),rules_table.data());
+    StorePointer(g_entity_storage.data()+offset,other_rules.data()); if (apply() != KEEL_RESULT_NOT_FOUND) return 710;
+    StorePointer(g_entity_storage.data()+offset,nullptr); if (find() != KEEL_RESULT_NOT_READY) return 711;
+    StorePointer(g_entity_storage.data()+offset,g_round_rules_storage.data());
+    for (int invalid : {-1,offset+1,static_cast<int>(kEntitySize)}) {
+        g_round_field.m_nSingleInheritanceOffset = invalid;
+        if (resolve() != KEEL_RESULT_INCOMPATIBLE) return 712;
+    }
+    g_round_field.m_nSingleInheritanceOffset = offset;
+    object->m_pClassInfo = &g_base_class; if (resolve() != KEEL_RESULT_INCOMPATIBLE) return 713;
+    object->m_pClassInfo = &g_round_rules_class;
+    ptr->m_eTypeCategory = SCHEMA_TYPE_BUILTIN; if (resolve() != KEEL_RESULT_INCOMPATIBLE) return 714;
+    ptr->m_eTypeCategory = SCHEMA_TYPE_POINTER;
+    SchemaClassFieldData_t duplicate_fields[]{g_round_field,g_round_field};
+    g_round_proxy_class.m_pFields = duplicate_fields; g_round_proxy_class.m_nFieldCount = 2;
+    if (resolve() != KEEL_RESULT_INCOMPATIBLE) return 715;
+    g_round_proxy_class.m_pFields = &g_round_field; g_round_proxy_class.m_nFieldCount = 1;
+    if (resolve() != KEEL_RESULT_OK || find() != KEEL_RESULT_OK) return 716;
+    auto* second = Identity()+1; second->m_EHandle = CEntityHandle(kEntityIndex+1,1);
+    second->m_pClass = EntityClass(); second->m_pInstance = reinterpret_cast<CEntityInstance*>(g_controller_storage.data());
+    second->m_pInstance->m_pEntity = second; second->m_flags = static_cast<EntityFlags_t>(0);
+    if (find() != KEEL_RESULT_INCOMPATIBLE) return 717;
+    second->m_pInstance = nullptr;
+    Identity()->m_flags = EF_IS_PRE_SPAWN;
+    if (find() != KEEL_RESULT_NOT_FOUND) return 718;
+    Identity()->m_flags = static_cast<EntityFlags_t>(0);
+    if (find() != KEEL_RESULT_OK || g_round_calls != valid_calls) return 719;
+    g_round_destroy = true;
+    if (apply() != KEEL_RESULT_OK || g_round_calls != valid_calls+1 || Identity()->m_pInstance) return 720;
+    Reset();
+    return 0;
+}
+
 int RunEntityWriteChecks()
 {
     Reset();
@@ -1260,6 +1367,8 @@ int main()
     if (input) return input;
     const int writes = RunEntityWriteChecks();
     if (writes) return writes;
+    const int round = RunRoundChecks();
+    if (round) return round;
     const int management = RunPlayerManagementChecks();
     if (management) return management;
     const int actions = RunPlayerActionChecks();

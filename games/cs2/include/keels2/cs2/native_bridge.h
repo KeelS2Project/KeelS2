@@ -6,6 +6,7 @@
 #include <keels2/player_actions.h>
 #include <keels2/player_management.h>
 #include <keels2/entity_writes.h>
+#include <keels2/round_control.h>
 #include <keels2/players.h>
 #include <keels2/player_input.h>
 
@@ -50,6 +51,31 @@ typedef struct KeelCs2PlayerManagementBindings
     void* respawn;
     void* set_pawn;
 } KeelCs2PlayerManagementBindings;
+
+typedef struct KeelCs2RoundBindings
+{
+    void** rules_vtable;
+    void** proxy_vtable;
+    void* terminate;
+} KeelCs2RoundBindings;
+
+/* Private bridge context, never exposed to plugins/scripts. Preparation may
+ * call schema interfaces; revalidate the adapter map epoch before dispatch. */
+typedef struct KeelCs2RoundContext
+{
+    KeelCs2EntityIdentity proxy;
+    void* proxy_instance;
+    void* rules;
+    void* proxy_class;
+    void* rules_class;
+    int32_t pointer_offset;
+} KeelCs2RoundContext;
+
+KeelResult KeelCs2_ResolveRoundSchema(void* schema_system, const char* module, KeelCs2RoundContext* context);
+KeelResult KeelCs2_FindRoundContext(void* entity_system,
+    const KeelCs2RoundBindings* bindings, KeelCs2RoundContext* context);
+KeelResult KeelCs2_TerminateRound(void* entity_system, const KeelCs2RoundContext* context,
+    const KeelRoundTermination* request, const KeelCs2RoundBindings* bindings);
 
 /* Respawn preparation may call into the engine. The adapter must revalidate
  * its map epoch and entity system before calling ManagePlayer afterwards. */

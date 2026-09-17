@@ -1,5 +1,6 @@
 #include <keels2/player_management.h>
 #include <keels2/entity_writes.h>
+#include <keels2/round_control.h>
 #include <keels2/keels2.hpp>
 
 #include <string.h>
@@ -159,6 +160,14 @@ private:
         if (writes->capabilities(g_owner, &capabilities) != KEEL_RESULT_WRONG_THREAD || capabilities ||
             writes->write_field(g_owner, 1, 1, &value, sizeof(value)) != KEEL_RESULT_WRONG_THREAD)
         { LogError("entity write wrong-thread rejection failed"); return; }
+        if (g_api->query_service(g_owner, KEELS2_ROUND_CONTROL_SERVICE_NAME, 1, &raw) != KEEL_RESULT_OK || !raw)
+        { LogError("round control wrong-thread service lookup failed"); return; }
+        const auto* round = static_cast<const KeelRoundControlApi*>(raw);
+        const KeelRoundTermination termination{sizeof(termination),8,1,0,0};
+        capabilities = UINT32_MAX;
+        if (round->capabilities(g_owner,&capabilities) != KEEL_RESULT_WRONG_THREAD || capabilities ||
+            round->terminate(g_owner,&termination) != KEEL_RESULT_WRONG_THREAD)
+        { LogError("round control wrong-thread rejection failed"); return; }
         keels2::SchemaField<int32> field;
         keels2::Entity entity;
         int32 health;
@@ -242,6 +251,21 @@ private:
         valid = valid && management->apply(g_owner, entity, &request) == KEEL_RESULT_INVALID_ARGUMENT;
         request.kind = KEELS2_PLAYER_MANAGEMENT_CHANGE_TEAM; request.team = 256;
         valid = valid && management->apply(g_owner, entity, &request) == KEEL_RESULT_INVALID_ARGUMENT;
+        const void* round_raw{};
+        valid = valid && g_api->query_service(g_owner,KEELS2_ROUND_CONTROL_SERVICE_NAME,2,&round_raw) == KEEL_RESULT_INCOMPATIBLE &&
+            g_api->query_service(g_owner,KEELS2_ROUND_CONTROL_SERVICE_NAME,1,&round_raw) == KEEL_RESULT_OK;
+        const auto* round = static_cast<const KeelRoundControlApi*>(round_raw);
+        if (!valid || !round || round->size != sizeof(*round) || round->api_version != 1 || !round->capabilities || !round->terminate) return false;
+        KeelRoundTermination termination{sizeof(termination),8,1,0,0};
+        capabilities = UINT32_MAX;
+        valid = valid && round->capabilities(g_owner,&capabilities) == KEEL_RESULT_UNSUPPORTED && !capabilities &&
+            round->capabilities(g_owner,nullptr) == KEEL_RESULT_INVALID_ARGUMENT &&
+            round->terminate(g_owner,&termination) == KEEL_RESULT_UNSUPPORTED &&
+            round->terminate(g_owner+10000,&termination) == KEEL_RESULT_NOT_READY &&
+            round->terminate(g_owner,nullptr) == KEEL_RESULT_INVALID_ARGUMENT;
+        termination.reserved = 1; valid = valid && round->terminate(g_owner,&termination) == KEEL_RESULT_INVALID_ARGUMENT;
+        termination.reserved = 0; termination.delay = -1; valid = valid && round->terminate(g_owner,&termination) == KEEL_RESULT_INVALID_ARGUMENT;
+        termination.delay = 1; --termination.size; valid = valid && round->terminate(g_owner,&termination) == KEEL_RESULT_INVALID_ARGUMENT;
         const void* writes_raw{};
         valid = valid && g_api->query_service(g_owner, KEELS2_ENTITY_WRITES_SERVICE_NAME, 2, &writes_raw) == KEEL_RESULT_INCOMPATIBLE &&
             g_api->query_service(g_owner, KEELS2_ENTITY_WRITES_SERVICE_NAME, 1, &writes_raw) == KEEL_RESULT_OK;

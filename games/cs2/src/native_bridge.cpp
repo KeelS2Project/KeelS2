@@ -960,6 +960,152 @@ KeelResult RespawnPawn(void* system, void* schema, const char* module,
 }
 }
 
+namespace
+{
+KeelResult RoundPointerOffset(const CSchemaClassInfo* proxy, const CSchemaClassInfo* rules, std::int32_t& offset)
+{
+    if (!ValidClass(proxy) || !ValidClass(rules) || !proxy->m_pszName || !rules->m_pszName ||
+        std::strcmp(proxy->m_pszName,"CCSGameRulesProxy") || std::strcmp(rules->m_pszName,"CCSGameRules") ||
+        proxy->m_nAlignment < alignof(void*) || rules->m_nAlignment < alignof(void*) || rules->m_nSize < static_cast<int>(sizeof(void*)))
+        return KEEL_RESULT_INCOMPATIBLE;
+    const SchemaClassFieldData_t* selected{};
+    for (std::uint32_t i = 0; i < proxy->m_nFieldCount; ++i)
+    {
+        const auto& field = proxy->m_pFields[i];
+        if (!field.m_pszName || std::strcmp(field.m_pszName,"m_pGameRules")) continue;
+        if (selected) return KEEL_RESULT_INCOMPATIBLE;
+        selected = &field;
+    }
+    if (!selected) return KEEL_RESULT_NOT_FOUND;
+    const auto* type = selected->m_pType;
+    if (!type || type->m_eTypeCategory != SCHEMA_TYPE_POINTER || type->m_eAtomicCategory != SCHEMA_ATOMIC_INVALID)
+        return KEEL_RESULT_INCOMPATIBLE;
+    const auto* object = static_cast<const CSchemaType_Ptr*>(type)->m_pObjectType;
+    if (!object || object->m_eTypeCategory != SCHEMA_TYPE_DECLARED_CLASS || object->m_eAtomicCategory != SCHEMA_ATOMIC_INVALID ||
+        static_cast<const CSchemaType_DeclaredClass*>(object)->m_pClassInfo != rules)
+        return KEEL_RESULT_INCOMPATIBLE;
+    offset = selected->m_nSingleInheritanceOffset;
+    if (offset < static_cast<int>(sizeof(void*)) || static_cast<std::uint32_t>(offset) % alignof(void*) ||
+        static_cast<std::uint64_t>(offset) + sizeof(void*) > static_cast<std::uint64_t>(proxy->m_nSize))
+        return KEEL_RESULT_INCOMPATIBLE;
+    return KEEL_RESULT_OK;
+}
+KeelResult RoundInstance(CEntityIdentity* identity, const KeelCs2RoundContext& context,
+    const KeelCs2RoundBindings& bindings, void*& rules)
+{
+    if (!identity || identity->m_pClass->GetSchemaBinding() != context.proxy_class) return KEEL_RESULT_INCOMPATIBLE;
+    const auto proxy_address = reinterpret_cast<std::uintptr_t>(identity->m_pInstance);
+    const auto* proxy_class = static_cast<const CSchemaClassInfo*>(context.proxy_class);
+    const auto* rules_class = static_cast<const CSchemaClassInfo*>(context.rules_class);
+    std::int32_t offset{};
+    const auto valid = RoundPointerOffset(proxy_class,rules_class,offset);
+    if (valid != KEEL_RESULT_OK) return valid;
+    if (offset != context.pointer_offset || proxy_address % proxy_class->m_nAlignment ||
+        static_cast<std::uintptr_t>(offset) + sizeof(void*) - 1 > UINTPTR_MAX - proxy_address)
+        return KEEL_RESULT_INCOMPATIBLE;
+    void** table{};
+    std::memcpy(&table,identity->m_pInstance,sizeof(table));
+    if (table != bindings.proxy_vtable) return KEEL_RESULT_INCOMPATIBLE;
+    std::memcpy(&rules,reinterpret_cast<const void*>(proxy_address + static_cast<std::uintptr_t>(offset)),sizeof(rules));
+    if (!rules) return KEEL_RESULT_NOT_READY;
+    const auto rules_address = reinterpret_cast<std::uintptr_t>(rules);
+    if (rules_address % rules_class->m_nAlignment || sizeof(void*) - 1 > UINTPTR_MAX - rules_address)
+        return KEEL_RESULT_INCOMPATIBLE;
+    std::memcpy(&table,rules,sizeof(table));
+    return table == bindings.rules_vtable ? KEEL_RESULT_OK : KEEL_RESULT_INCOMPATIBLE;
+}
+}
+
+extern "C" KeelResult KeelCs2_ResolveRoundSchema(void* schema_system, const char* module, KeelCs2RoundContext* context)
+{
+    if (context) *context = {};
+    if (!schema_system || !module || !*module || !context) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        auto* schema = static_cast<ISchemaSystem*>(schema_system);
+        auto* scope = reinterpret_cast<ISchemaSystemTypeScope*>(schema->FindTypeScopeForModule(module));
+        if (!scope) return KEEL_RESULT_NOT_FOUND;
+        auto* proxy = scope->FindDeclaredClass("CCSGameRulesProxy").Get();
+        auto* rules = scope->FindDeclaredClass("CCSGameRules").Get();
+        if (!proxy || !rules) return KEEL_RESULT_NOT_FOUND;
+        std::int32_t offset{};
+        const auto result = RoundPointerOffset(proxy,rules,offset);
+        if (result != KEEL_RESULT_OK) return result;
+        context->proxy_class = proxy; context->rules_class = rules; context->pointer_offset = offset;
+        return KEEL_RESULT_OK;
+    }
+    catch (...) { *context = {}; return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+extern "C" KeelResult KeelCs2_FindRoundContext(void* entity_system,
+    const KeelCs2RoundBindings* bindings, KeelCs2RoundContext* context)
+{
+    if (!entity_system || !bindings || !bindings->rules_vtable || !bindings->proxy_vtable || !bindings->terminate || !context)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    context->proxy = {}; context->proxy_instance = nullptr; context->rules = nullptr;
+    try
+    {
+        std::int32_t offset{};
+        const auto valid = RoundPointerOffset(static_cast<const CSchemaClassInfo*>(context->proxy_class),
+            static_cast<const CSchemaClassInfo*>(context->rules_class),offset);
+        if (valid != KEEL_RESULT_OK) return valid;
+        if (offset != context->pointer_offset) return KEEL_RESULT_INCOMPATIBLE;
+        CEntityIdentity* selected{};
+        // The engine list has a fixed maximum. Do not follow unbounded links or
+        // cache a borrowed game-rules pointer across calls/maps.
+        for (std::int32_t i = 0; i < MAX_TOTAL_ENTITIES; ++i)
+        {
+            auto* candidate = IdentityByIndex(static_cast<CEntitySystem*>(entity_system),i);
+            if (!candidate) continue;
+            const auto* type = candidate->m_pClass->GetSchemaBinding();
+            if (!type || !type->m_pszName || std::strcmp(type->m_pszName,"CCSGameRulesProxy")) continue;
+            if (type != context->proxy_class || selected) return KEEL_RESULT_INCOMPATIBLE;
+            selected = candidate;
+        }
+        if (!selected) return KEEL_RESULT_NOT_FOUND;
+        void* rules{};
+        const auto result = RoundInstance(selected,*context,*bindings,rules);
+        if (result != KEEL_RESULT_OK) return result;
+        context->proxy = {selected->GetEntityIndex().Get(),static_cast<std::uint32_t>(selected->GetRefEHandle().ToInt())};
+        context->proxy_instance = selected->m_pInstance; context->rules = rules;
+        return KEEL_RESULT_OK;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+extern "C" KeelResult KeelCs2_TerminateRound(void* entity_system, const KeelCs2RoundContext* context,
+    const KeelRoundTermination* input, const KeelCs2RoundBindings* bindings)
+{
+    if (!entity_system || !context || !context->proxy_instance || !context->rules || !input || input->size != sizeof(*input) ||
+        !bindings || !bindings->rules_vtable || !bindings->proxy_vtable || !bindings->terminate) return KEEL_RESULT_INVALID_ARGUMENT;
+    const auto request = *input;
+    const bool reason = request.reason == 1 || (request.reason >= 4 && request.reason <= 14) || (request.reason >= 16 && request.reason <= 22);
+    if (!reason || request.reserved || !std::isfinite(request.delay) || request.delay < 0 || request.delay > 3600 ||
+        (request.team != 0 && request.team != 2 && request.team != 3)) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        auto* proxy = IdentityByHandle(static_cast<CEntitySystem*>(entity_system),context->proxy.source2_handle);
+        if (!proxy || proxy->GetEntityIndex().Get() != context->proxy.index || proxy->m_pInstance != context->proxy_instance)
+            return KEEL_RESULT_NOT_FOUND;
+        void* rules{};
+        const auto result = RoundInstance(proxy,*context,*bindings,rules);
+        if (result != KEEL_RESULT_OK) return result;
+        if (rules != context->rules) return KEEL_RESULT_NOT_FOUND;
+        const auto team = static_cast<std::uint32_t>(request.team);
+#if defined(_WIN32)
+        using Terminate = void (*)(void*,float,std::uint32_t,const std::uint32_t*);
+        NativeActionFunction<Terminate>(bindings->terminate)(rules,request.delay,request.reason,team ? &team : nullptr);
+#else
+        using Terminate = void (*)(void*,std::uint32_t,const std::uint32_t*,float);
+        NativeActionFunction<Terminate>(bindings->terminate)(rules,request.reason,team ? &team : nullptr,request.delay);
+#endif
+        // The callback can destroy the proxy/rules or change maps. No borrowed
+        // object, identity or schema pointer may be dereferenced after dispatch.
+        return KEEL_RESULT_OK;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
 extern "C" KeelResult KeelCs2_PrepareRespawn(void* system, void* schema, const char* module,
     const KeelCs2EntityIdentity* controller, const KeelCs2PlayerManagementBindings* bindings,
     KeelCs2EntityIdentity* prepared_pawn)

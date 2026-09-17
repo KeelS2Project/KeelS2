@@ -67,6 +67,10 @@ int main(int argument_count, char** arguments)
     const std::int32_t value = 1;
     if (module.EntityWriteCapabilities(capabilities) != KEEL_RESULT_UNSUPPORTED || capabilities ||
         module.WriteEntityField(entity,field,&value,sizeof(value)) != KEEL_RESULT_UNSUPPORTED) return 13;
+    capabilities = UINT32_MAX;
+    const KeelRoundTermination round{sizeof(round),8,1,0,0};
+    if (module.RoundCapabilities(capabilities) != KEEL_RESULT_UNSUPPORTED || capabilities ||
+        module.TerminateRound(round) != KEEL_RESULT_UNSUPPORTED) return 14;
     std::uint64_t buttons = UINT64_MAX, context = UINT64_MAX;
     if (module.ReadPlayerInput(0, 1, buttons, context) != KEEL_RESULT_UNSUPPORTED || buttons || context)
         return 11;

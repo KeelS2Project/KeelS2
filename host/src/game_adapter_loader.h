@@ -32,6 +32,8 @@ public:
     KeelResult EntityWriteCapabilities(std::uint32_t& capabilities) const noexcept;
     KeelResult WriteEntityField(const GameEntityIdentity& entity, const GameSchemaField& field, const void* value, std::uint32_t size) const noexcept;
     KeelResult PlayerManagementCapabilities(std::uint32_t& capabilities) const noexcept;
+    KeelResult RoundCapabilities(std::uint32_t& capabilities) const noexcept;
+    KeelResult TerminateRound(const KeelRoundTermination& request) const noexcept;
     KeelResult ManagePlayer(const GameEntityIdentity& entity, const KeelPlayerManagementAction& action) const noexcept;
     KeelResult PlayerAction(const GameEntityIdentity& entity, const KeelPlayerAction& action) const noexcept;
     KeelResult PrintChat(std::int32_t slot, KeelBool broadcast, const char* text) const noexcept;
@@ -49,6 +51,7 @@ private:
     GameAdapterPlayersApi players_{};
     GameAdapterPlayerManagementApi player_management_{};
     GameAdapterEntityWritesApi entity_writes_{};
+    GameAdapterRoundControlApi round_control_{};
     GameAdapterPlayerInputApi player_input_{};
     GameAdapterMessagingApi messaging_{};
     GameAdapterConVarObserversApi convar_observers_{};

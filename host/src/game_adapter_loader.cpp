@@ -140,6 +140,20 @@ bool GameAdapterModule::Load(
         library_.Symbol(kGameAdapterCommandCallerSymbol));
     player_action_ = SymbolFunction<GameAdapterPlayerActionFn>(
         library_.Symbol(kGameAdapterPlayerActionSymbol));
+    const auto query_round = SymbolFunction<GameAdapterQueryRoundControlFn>(library_.Symbol(kGameAdapterRoundControlSymbol));
+    if (query_round)
+    {
+        GameAdapterRoundControlApi round{};
+        round.size = sizeof(round); round.api_version = kGameAdapterRoundControlVersion;
+        if (query_round(kGameAdapterRoundControlVersion, &round) != KEEL_RESULT_OK ||
+            round.size != sizeof(round) || round.api_version != kGameAdapterRoundControlVersion || !round.capabilities || !round.terminate)
+        {
+            error = "game adapter round control API is incompatible";
+            Reset();
+            return false;
+        }
+        round_control_ = round;
+    }
     const auto query_writes = SymbolFunction<GameAdapterQueryEntityWritesFn>(library_.Symbol(kGameAdapterEntityWritesSymbol));
     if (query_writes)
     {
@@ -257,6 +271,7 @@ void GameAdapterModule::Reset() noexcept
     players_ = {};
     player_management_ = {};
     entity_writes_ = {};
+    round_control_ = {};
     player_input_ = {};
     messaging_ = {};
     convar_observers_ = {};
@@ -339,6 +354,19 @@ KeelResult GameAdapterModule::PlayerManagementCapabilities(std::uint32_t& capabi
     capabilities = 0;
     return adapter_ && player_management_.capabilities
         ? player_management_.capabilities(adapter_, &capabilities) : KEEL_RESULT_UNSUPPORTED;
+}
+
+KeelResult GameAdapterModule::RoundCapabilities(std::uint32_t& capabilities) const noexcept
+{
+    capabilities = 0;
+    return adapter_ && round_control_.capabilities
+        ? round_control_.capabilities(adapter_, &capabilities) : KEEL_RESULT_UNSUPPORTED;
+}
+
+KeelResult GameAdapterModule::TerminateRound(const KeelRoundTermination& request) const noexcept
+{
+    return adapter_ && round_control_.terminate
+        ? round_control_.terminate(adapter_, &request) : KEEL_RESULT_UNSUPPORTED;
 }
 
 KeelResult GameAdapterModule::ManagePlayer(const GameEntityIdentity& entity, const KeelPlayerManagementAction& action) const noexcept

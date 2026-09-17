@@ -4,6 +4,7 @@
 #include <keels2/cs2/native_bridge.h>
 #include <keels2/cs2/player_actions.h>
 #include <keels2/cs2/player_management.h>
+#include <keels2/cs2/round_control.h>
 #include <keels2/cs2/entity_writes.h>
 #include <keels2/keelhook.hpp>
 #include <keels2/platform/console.h>
@@ -15,6 +16,7 @@
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -649,6 +651,7 @@ public:
         compatibility_profile_.clear();
         player_action_bindings_ = {};
         player_management_bindings_ = {};
+        round_bindings_ = {};
         entity_write_notify_ = nullptr;
         if (trace)
         {
@@ -1764,6 +1767,66 @@ public:
         buttons = held;
         context = previous.token;
         return KEEL_RESULT_OK;
+    }
+
+    KeelResult RoundCapabilities(std::uint32_t& capabilities)
+    {
+        capabilities = 0;
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (!round_bindings_.terminate)
+        {
+            if (compatibility_profile_.empty()) return KEEL_RESULT_UNSUPPORTED;
+            platform::LoadedModule module;
+            std::string error;
+            if (platform::FindLoadedModule(server_.module_path,module,error) != platform::ModuleLookup::found)
+                return KEEL_RESULT_NOT_READY;
+            const auto result = cs2::ResolveRoundControl(module,compatibility_profile_,round_bindings_,error);
+            if (result != KEEL_RESULT_OK) return result;
+        }
+        capabilities = KEELS2_ROUND_CONTROL_TERMINATE;
+        return KEEL_RESULT_OK;
+    }
+
+    KeelResult TerminateRound(const KeelRoundTermination& request)
+    {
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (request.size != sizeof(request)) return KEEL_RESULT_INVALID_ARGUMENT;
+        const bool reason = request.reason == 1 || (request.reason >= 4 && request.reason <= 14) || (request.reason >= 16 && request.reason <= 22);
+        if (request.reserved || !reason || !std::isfinite(request.delay) ||
+            request.delay < 0 || request.delay > 3600 || (request.team != 0 && request.team != 2 && request.team != 3))
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        if (active_round_calls_ >= 8) return KEEL_RESULT_BUSY;
+        ++active_round_calls_;
+        struct Hold { unsigned& count; ~Hold() { --count; } } hold{active_round_calls_};
+        std::uint32_t capabilities{};
+        auto result = RoundCapabilities(capabilities);
+        if (result != KEEL_RESULT_OK) return result;
+        if (!(capabilities & KEELS2_ROUND_CONTROL_TERMINATE)) return KEEL_RESULT_UNSUPPORTED;
+        if (!schema_system_.instance || schema_server_module_.empty()) return KEEL_RESULT_NOT_READY;
+        KeelCs2RoundContext context{};
+        result = KeelCs2_ResolveRoundSchema(schema_system_.instance,schema_server_module_.c_str(),&context);
+        if (result != KEEL_RESULT_OK) return result;
+        void* system{};
+        std::uint64_t epoch{};
+        std::string error;
+        {
+            std::scoped_lock lock(schema_entity_mutex_);
+            result = CurrentEntitySystemLocked(system,error);
+            if (result != KEEL_RESULT_OK) return result;
+            epoch = entity_epoch_;
+        }
+        // All schema-interface calls precede acquiring the current entity list.
+        result = KeelCs2_FindRoundContext(system,&round_bindings_,&context);
+        if (result != KEEL_RESULT_OK) return result;
+        {
+            std::scoped_lock lock(schema_entity_mutex_);
+            void* current{};
+            result = CurrentEntitySystemLocked(current,error);
+            if (result != KEEL_RESULT_OK) return result;
+            if (!epoch || epoch != entity_epoch_ || current != system) return KEEL_RESULT_NOT_FOUND;
+        }
+        // No schema registry mutex held while game callbacks can run.
+        return KeelCs2_TerminateRound(system,&context,&request,&round_bindings_);
     }
 
     KeelResult EntityWriteCapabilities(std::uint32_t& capabilities)
@@ -3656,6 +3719,8 @@ private:
     std::string compatibility_profile_;
     KeelCs2PlayerActionBindings player_action_bindings_{};
     KeelCs2PlayerManagementBindings player_management_bindings_{};
+    KeelCs2RoundBindings round_bindings_{};
+    unsigned active_round_calls_{};
     void* entity_write_notify_{};
     std::string schema_server_module_;
     std::string entity_system_module_;
@@ -3786,6 +3851,27 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_PlayerAction(
         return KEEL_RESULT_INVALID_ARGUMENT;
     try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->PlayerAction(*entity, *action); }
     catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryRoundControl(
+    std::uint32_t version, keels2::host::GameAdapterRoundControlApi* api) noexcept
+{
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {};
+    if (version != keels2::host::kGameAdapterRoundControlVersion) return KEEL_RESULT_INCOMPATIBLE;
+    api->size = sizeof(*api); api->api_version = version;
+    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* capabilities) noexcept {
+        if (capabilities) *capabilities = 0;
+        if (!adapter || !capabilities) return KEEL_RESULT_INVALID_ARGUMENT;
+        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->RoundCapabilities(*capabilities); }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    };
+    api->terminate = [](keels2::host::GameAdapter* adapter, const KeelRoundTermination* request) noexcept {
+        if (!adapter || !request) return KEEL_RESULT_INVALID_ARGUMENT;
+        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->TerminateRound(*request); }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    };
+    return KEEL_RESULT_OK;
 }
 
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityWrites(
