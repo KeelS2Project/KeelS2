@@ -283,7 +283,7 @@ PluginRecord* Host::DiscoverPlugin(
         Write(KEEL_LOG_ERROR, record->diagnostic + ": " + path.string());
         return record;
     }
-    if (!record->library.Open(record->transient_path, error))
+    if (!record->library.OpenWithDependencies(record->transient_path, plugin_directory_ / "lib", error))
     {
         record->diagnostic = "could not load module: " + error;
         Write(KEEL_LOG_ERROR, record->diagnostic + ": " + path.string());

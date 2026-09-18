@@ -104,6 +104,60 @@ void DynamicLibrary::Close()
     handle_ = nullptr;
 }
 
+bool DynamicLibrary::OpenWithDependencies(const std::filesystem::path& path,
+    const std::filesystem::path& dependencies, std::string& error)
+{
+#if defined(_WIN32)
+    Close();
+    std::error_code filesystem_error;
+    const bool present = std::filesystem::is_directory(dependencies, filesystem_error);
+    if (filesystem_error && filesystem_error != std::errc::no_such_file_or_directory)
+    {
+        error = "cannot inspect plugin dependency directory: " + filesystem_error.message();
+        return false;
+    }
+    if (!present)
+    {
+        return Open(path, error);
+    }
+    const auto absolute_directory = std::filesystem::absolute(dependencies, filesystem_error);
+    if (filesystem_error)
+    {
+        error = filesystem_error.message();
+        return false;
+    }
+    const auto absolute_path = std::filesystem::absolute(path, filesystem_error);
+    if (filesystem_error)
+    {
+        error = filesystem_error.message();
+        return false;
+    }
+    const DLL_DIRECTORY_COOKIE cookie = AddDllDirectory(absolute_directory.c_str());
+    if (!cookie)
+    {
+        error = WindowsError(GetLastError());
+        return false;
+    }
+    // The cookie exists only during eager import resolution. Libraries with
+    // delayed/manual imports must resolve those through their own contract.
+    const HMODULE module = LoadLibraryExW(absolute_path.c_str(), nullptr,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    const DWORD result = module ? ERROR_SUCCESS : GetLastError();
+    RemoveDllDirectory(cookie);
+    handle_ = reinterpret_cast<void*>(module);
+    if (!handle_)
+    {
+        error = WindowsError(result);
+        return false;
+    }
+    error.clear();
+    return true;
+#else
+    static_cast<void>(dependencies);
+    return Open(path, error);
+#endif
+}
+
 void* DynamicLibrary::Symbol(const char* name) const
 {
     if (!handle_ || !name)

@@ -606,6 +606,24 @@ if(BUILD_TESTING)
     add_library(keels2_keelhook_backend_target SHARED
         tests/keelhook_backend_target.cpp
     )
+    add_library(keels2_dependency_fixture SHARED tests/plugin_dependency.cpp)
+    add_library(keels2_dependency_consumer SHARED tests/plugin_dependency_consumer.cpp)
+    target_link_libraries(keels2_dependency_consumer PRIVATE keels2_dependency_fixture)
+    set_target_properties(keels2_dependency_consumer PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "$ORIGIN/../../lib")
+    add_executable(keels2_dependency_loading tests/plugin_dependency_loading.cpp)
+    target_link_libraries(keels2_dependency_loading PRIVATE keels2_platform)
+    foreach(target IN ITEMS keels2_dependency_fixture keels2_dependency_consumer keels2_dependency_loading)
+        # Keep the dependency out of the runner's application directory so
+        # Windows cannot accidentally satisfy the test through that fallback.
+        set_target_properties(${target} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/dependency-fixtures/${target}"
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/dependency-fixtures/${target}")
+        keels2_enable_warnings(${target})
+    endforeach()
+    add_test(NAME plugin_dependency_loading COMMAND keels2_dependency_loading
+        $<TARGET_FILE:keels2_dependency_consumer> $<TARGET_FILE:keels2_dependency_fixture>
+        "${CMAKE_CURRENT_BINARY_DIR}/test-fixtures/plugin-dependencies")
     set_target_properties(keels2_keelhook_backend_target PROPERTIES
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN YES
@@ -2131,7 +2149,9 @@ if(BUILD_TESTING)
         )
     endforeach()
     get_property(KEELS2_REGISTERED_TESTS DIRECTORY PROPERTY TESTS)
+    list(REMOVE_ITEM KEELS2_REGISTERED_TESTS plugin_dependency_loading)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set_property(TEST plugin_dependency_loading PROPERTY ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=unset:")
         foreach(keels2_test ${KEELS2_REGISTERED_TESTS})
             set_property(
                 TEST ${keels2_test}

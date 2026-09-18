@@ -18,6 +18,11 @@ public:
     ~DynamicLibrary();
 
     bool Open(const std::filesystem::path& path, std::string& error);
+    // Windows dependency search for a staged plugin image. Linux uses the
+    // module's relative RUNPATH; the additional directory is not a search-path
+    // override there. Does not change the process default DLL search policy.
+    bool OpenWithDependencies(const std::filesystem::path& path,
+        const std::filesystem::path& dependencies, std::string& error);
     void Close();
     void* Symbol(const char* name) const;
     bool IsOpen() const;
