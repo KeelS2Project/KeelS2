@@ -58,6 +58,11 @@ int main(int argument_count, char** arguments)
     const KeelPlayerAction action{sizeof(KeelPlayerAction), KEELS2_PLAYER_ACTION_KILL, {}, 0};
     if (module.PlayerAction(entity, action) != KEEL_RESULT_UNSUPPORTED)
         return 10;
+    bool accessed = false;
+    const keels2::host::GameEntityAccessRequest access{entity, "CCSPlayerPawn"};
+    if (module.VisitEntities(&access, 1, [](void* data, void* const*, std::uint32_t) {
+        *static_cast<bool*>(data) = true; return KEEL_RESULT_OK;
+    }, &accessed) != KEEL_RESULT_UNSUPPORTED || accessed) return 16;
     std::uint32_t capabilities = UINT32_MAX;
     const KeelPlayerManagementAction management{sizeof(KeelPlayerManagementAction), KEELS2_PLAYER_MANAGEMENT_RESPAWN, 0, 0};
     if (module.PlayerManagementCapabilities(capabilities) != KEEL_RESULT_UNSUPPORTED || capabilities ||

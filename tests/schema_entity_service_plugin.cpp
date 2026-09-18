@@ -1,5 +1,6 @@
 #include <keels2/player_management.h>
 #include <keels2/entity_writes.h>
+#include <keels2/entity_access.h>
 #include <keels2/round_control.h>
 #include <keels2/player_statistics.h>
 #include <keels2/keels2.hpp>
@@ -115,13 +116,76 @@ private:
             FindEntity(CEntityHandle(retained_.Source2Handle()), same) &&
             retained_.Same(same) && retained_.Read(health_, health) && health == 42 &&
             ReadDiagnostics() &&
-            Actions())
+            Actions() && Access())
         {
             original_handle_ = retained_.Source2Handle();
             LogMessage("entity lookup and typed read passed");
             return;
         }
         LogError("entity lookup or typed read failed");
+    }
+
+    struct AccessProbe
+    {
+        const KeelEntityAccessApi* api;
+        KeelEntityAccessSpec spec;
+        unsigned calls = 0;
+        bool valid = true;
+    };
+    static KeelResult ProbeAccess(void* raw, void* const* pointers, std::uint32_t count)
+    {
+        auto& probe = *static_cast<AccessProbe*>(raw);
+        ++probe.calls;
+        probe.valid = probe.valid && count == 1 && pointers && pointers[0];
+        if (probe.valid)
+        {
+            const auto expected = probe.calls < KEELS2_ENTITY_ACCESS_MAX_DEPTH ? KEEL_RESULT_OK : KEEL_RESULT_BUSY;
+            probe.valid = probe.api->visit(g_owner, &probe.spec, 1, &ProbeAccess, &probe) == expected && probe.valid;
+        }
+        return KEEL_RESULT_OK;
+    }
+    bool Access()
+    {
+        const void* raw{};
+        if (g_api->query_service(g_owner, KEELS2_ENTITY_ACCESS_SERVICE_NAME, 2, &raw) != KEEL_RESULT_INCOMPATIBLE ||
+            g_api->query_service(g_owner, KEELS2_ENTITY_ACCESS_SERVICE_NAME, 1, &raw) != KEEL_RESULT_OK || !raw) return false;
+        const auto* access = static_cast<const KeelEntityAccessApi*>(raw);
+        if (access->size != sizeof(*access) || access->api_version != 1 || !access->visit) return false;
+        if (g_api->query_service(g_owner, KEELS2_ENTITIES_SERVICE_NAME, 1, &raw) != KEEL_RESULT_OK || !raw) return false;
+        const auto* entities = static_cast<const KeelEntitiesApi*>(raw);
+        KeelEntityHandle entity{};
+        if (entities->find_by_index(g_owner, 7, &entity) != KEEL_RESULT_OK) return false;
+        KeelEntityAccessSpec specs[2]{{sizeof(KeelEntityAccessSpec), 0, entity, "CCSPlayerPawn"},
+            {sizeof(KeelEntityAccessSpec), 0, entity, "CBaseEntity"}};
+        unsigned calls = 0;
+        const auto count = [](void* data, void* const* pointers, std::uint32_t size) -> KeelResult {
+            if (!pointers || !size || !pointers[0]) return KEEL_RESULT_ENGINE_FAILURE;
+            ++*static_cast<unsigned*>(data); return KEEL_RESULT_OK;
+        };
+        bool valid = access->visit(g_owner, specs, 1, count, &calls) == KEEL_RESULT_OK && calls == 1 &&
+            access->visit(g_owner, specs, 2, count, &calls) == KEEL_RESULT_INCOMPATIBLE && calls == 1 &&
+            access->visit(g_owner, specs, 0, count, &calls) == KEEL_RESULT_INVALID_ARGUMENT &&
+            access->visit(g_owner, specs, 33, count, &calls) == KEEL_RESULT_INVALID_ARGUMENT &&
+            access->visit(g_owner, nullptr, 1, count, &calls) == KEEL_RESULT_INVALID_ARGUMENT &&
+            access->visit(g_owner, specs, 1, nullptr, &calls) == KEEL_RESULT_INVALID_ARGUMENT &&
+            access->visit(g_owner + 10000, specs, 1, count, &calls) == KEEL_RESULT_NOT_READY;
+        specs[1] = specs[0]; specs[1].entity += 10000;
+        valid = valid && access->visit(g_owner, specs, 2, count, &calls) == KEEL_RESULT_NOT_FOUND && calls == 1;
+        specs[1] = specs[0]; specs[1].reserved = 1;
+        valid = valid && access->visit(g_owner, specs, 2, count, &calls) == KEEL_RESULT_INVALID_ARGUMENT && calls == 1;
+        AccessProbe probe{access, specs[0]};
+        valid = valid && access->visit(g_owner, specs, 1, &ProbeAccess, &probe) == KEEL_RESULT_OK &&
+            probe.valid && probe.calls == KEELS2_ENTITY_ACCESS_MAX_DEPTH;
+        struct Closing { const KeelEntitiesApi* api; KeelEntityHandle entity; } closing{entities, entity};
+        const auto close = [](void* data, void* const*, std::uint32_t) -> KeelResult {
+            auto& value = *static_cast<Closing*>(data);
+            return value.api->release(g_owner, value.entity);
+        };
+        valid = valid && access->visit(g_owner, specs, 1, close, &closing) == KEEL_RESULT_OK &&
+            access->visit(g_owner, specs, 1, count, &calls) == KEEL_RESULT_NOT_FOUND && calls == 1;
+        if (!valid) entities->release(g_owner, entity);
+        LogMessage(valid ? "checked entity access passed" : "checked entity access failed");
+        return valid;
     }
 
     void Stale()
@@ -144,6 +208,13 @@ private:
             LogError("player management wrong-thread service lookup failed");
             return;
         }
+        const void* access_raw{};
+        if (g_api->query_service(g_owner, KEELS2_ENTITY_ACCESS_SERVICE_NAME, 1, &access_raw) != KEEL_RESULT_OK || !access_raw)
+        { LogError("entity access wrong-thread lookup failed"); return; }
+        const auto* access = static_cast<const KeelEntityAccessApi*>(access_raw);
+        KeelEntityAccessSpec access_spec{sizeof(access_spec), 0, 1, "CCSPlayerPawn"};
+        if (access->visit(g_owner, &access_spec, 1, [](void*, void* const*, std::uint32_t) { return KEEL_RESULT_OK; }, nullptr) != KEEL_RESULT_WRONG_THREAD)
+        { LogError("entity access wrong-thread rejection failed"); return; }
         const auto* management = static_cast<const KeelPlayerManagementApi*>(raw);
         std::uint32_t capabilities = UINT32_MAX;
         const KeelPlayerManagementAction request{sizeof(request), KEELS2_PLAYER_MANAGEMENT_RESPAWN, 0, 0};

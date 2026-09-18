@@ -34,6 +34,7 @@ SchemaEntityService::SchemaEntityService(Host& host, GameAdapter& adapter)
     player_actions_api_ = {sizeof(KeelPlayerActionsApi), KEELS2_PLAYER_ACTIONS_API_VERSION, &PlayerActionEntry};
     player_management_api_ = {sizeof(KeelPlayerManagementApi), KEELS2_PLAYER_MANAGEMENT_API_VERSION,
         &ManagementCapabilitiesEntry, &ManagePlayerEntry};
+    entity_access_api_ = {sizeof(KeelEntityAccessApi), KEELS2_ENTITY_ACCESS_API_VERSION, &VisitEntitiesEntry};
     entity_writes_api_ = {sizeof(KeelEntityWritesApi), KEELS2_ENTITY_WRITES_API_VERSION, &WriteCapabilitiesEntry, &WriteFieldEntry};
     round_control_api_ = {sizeof(KeelRoundControlApi), KEELS2_ROUND_CONTROL_API_VERSION, &RoundCapabilitiesEntry, &TerminateRoundEntry};
     player_statistics_api_ = {sizeof(KeelPlayerStatisticsApi), KEELS2_PLAYER_STATISTICS_API_VERSION,
@@ -64,6 +65,60 @@ const KeelSchemaApi& SchemaEntityService::SchemaApi() const noexcept
 const KeelEntitiesApi& SchemaEntityService::EntitiesApi() const noexcept
 {
     return entities_api_;
+}
+
+const KeelEntityAccessApi& SchemaEntityService::EntityAccessApi() const noexcept
+{
+    return entity_access_api_;
+}
+
+KeelResult SchemaEntityService::VisitEntitiesEntry(KeelPluginHandle plugin, const KeelEntityAccessSpec* entities,
+    std::uint32_t count, KeelEntityAccessCallback callback, void* user_data)
+{
+    try
+    {
+        auto* service = active_.load(std::memory_order_acquire);
+        return service ? service->VisitEntities(plugin, entities, count, callback, user_data) : KEEL_RESULT_NOT_READY;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+KeelResult SchemaEntityService::VisitEntities(KeelPluginHandle plugin, const KeelEntityAccessSpec* entities,
+    std::uint32_t count, KeelEntityAccessCallback callback, void* user_data)
+{
+    if (!entities || !count || count > KEELS2_ENTITY_ACCESS_MAX_COUNT || !callback)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    std::scoped_lock state_lock(host_.state_mutex_);
+    if (!PluginReady(plugin)) return KEEL_RESULT_NOT_READY;
+    if (!adapter_.IsGameThread()) return KEEL_RESULT_WRONG_THREAD;
+    auto* owner = host_.PluginByHandle(plugin);
+    if (!owner || owner->cleanup_pending || owner->transitioning || owner->active_native_operations == UINT32_MAX ||
+        entity_access_depth_ == KEELS2_ENTITY_ACCESS_MAX_DEPTH) return KEEL_RESULT_BUSY;
+    std::array<std::string, KEELS2_ENTITY_ACCESS_MAX_COUNT> names;
+    std::array<GameEntityAccessRequest, KEELS2_ENTITY_ACCESS_MAX_COUNT> requests{};
+    {
+        std::scoped_lock registry_lock(registry_mutex_);
+        for (std::uint32_t i = 0; i < count; ++i)
+        {
+            const auto& spec = entities[i];
+            if (spec.size != sizeof(spec) || spec.reserved || !spec.entity || !ValidSchemaName(spec.class_name))
+                return KEEL_RESULT_INVALID_ARGUMENT;
+            const auto found = entities_.find(spec.entity);
+            if (found == entities_.end() || found->second.owner != plugin) return KEEL_RESULT_NOT_FOUND;
+            names[i] = spec.class_name;
+            requests[i] = {found->second.entity, names[i].c_str()};
+        }
+    }
+    ++owner->active_native_operations;
+    ++entity_access_depth_;
+    struct Hold
+    {
+        std::uint32_t& active;
+        unsigned& depth;
+        ~Hold() { --active; --depth; }
+    } hold{owner->active_native_operations, entity_access_depth_};
+    return host_.adapter_module_
+        ? host_.adapter_module_->VisitEntities(requests.data(), count, callback, user_data) : KEEL_RESULT_UNSUPPORTED;
 }
 
 const KeelPlayerActionsApi& SchemaEntityService::PlayerActionsApi() const noexcept

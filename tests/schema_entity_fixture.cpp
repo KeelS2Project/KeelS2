@@ -1282,6 +1282,21 @@ int RunNativeBridgeChecks()
     {
         return 17;
     }
+    void* pointer = reinterpret_cast<void*>(1);
+    if (KeelCs2_ResolveEntityPointer(system, &entity, "CCSPlayerPawn", &pointer) != KEEL_RESULT_OK ||
+        pointer != EntityInstance()) return 901;
+    if (KeelCs2_ResolveEntityPointer(system, &entity, "CBaseEntity", &pointer) != KEEL_RESULT_INCOMPATIBLE || pointer)
+        return 902;
+    if (KeelCs2_ResolveEntityPointer(system, &entity, nullptr, &pointer) != KEEL_RESULT_INVALID_ARGUMENT || pointer ||
+        KeelCs2_ResolveEntityPointer(system, &entity, "CCSPlayerPawn", nullptr) != KEEL_RESULT_INVALID_ARGUMENT) return 903;
+    auto stale_pointer_entity = entity; stale_pointer_entity.source2_handle += 0x8000;
+    pointer = reinterpret_cast<void*>(1);
+    if (KeelCs2_ResolveEntityPointer(system, &stale_pointer_entity, "CCSPlayerPawn", &pointer) != KEEL_RESULT_NOT_FOUND || pointer)
+        return 904;
+    const auto saved_alignment = g_derived_class.m_nAlignment; g_derived_class.m_nAlignment = 3;
+    const auto invalid_alignment = KeelCs2_ResolveEntityPointer(system, &entity, "CCSPlayerPawn", &pointer);
+    g_derived_class.m_nAlignment = saved_alignment;
+    if (invalid_alignment != KEEL_RESULT_INCOMPATIBLE || pointer) return 905;
     int32 health{};
     if (KeelCs2_ReadEntityField(
             system,

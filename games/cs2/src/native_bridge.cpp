@@ -618,6 +618,31 @@ extern "C" KeelResult KeelCs2_ValidateEntity(
     }
 }
 
+extern "C" KeelResult KeelCs2_ResolveEntityPointer(void* entity_system, const KeelCs2EntityIdentity* entity,
+    const char* class_name, void** output)
+{
+    if (output) *output = nullptr;
+    if (!entity_system || !entity || !class_name || !class_name[0] || !output ||
+        entity->index < 0 || entity->source2_handle == INVALID_EHANDLE_INDEX) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        auto* system = static_cast<CEntitySystem*>(entity_system);
+        auto* identity = IdentityByHandle(system, entity->source2_handle);
+        if (!identity || identity->GetEntityIndex().Get() != entity->index) return KEEL_RESULT_NOT_FOUND;
+        auto* instance = identity->m_pInstance;
+        auto* descriptor = identity->m_pClass;
+        const auto* type = descriptor->GetSchemaBinding();
+        if (!ValidClass(type) || !type->m_pszName || std::strcmp(type->m_pszName, class_name) ||
+            reinterpret_cast<std::uintptr_t>(instance) % type->m_nAlignment) return KEEL_RESULT_INCOMPATIBLE;
+        identity = IdentityByHandle(system, entity->source2_handle);
+        if (!identity || identity->GetEntityIndex().Get() != entity->index ||
+            identity->m_pInstance != instance || identity->m_pClass != descriptor) return KEEL_RESULT_NOT_FOUND;
+        *output = instance;
+        return KEEL_RESULT_OK;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
 extern "C" KeelResult KeelCs2_ReadEntityField(
     void* entity_system,
     const KeelCs2EntityIdentity* entity,

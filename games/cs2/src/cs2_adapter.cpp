@@ -2167,6 +2167,37 @@ public:
         return result;
     }
 
+    KeelResult VisitEntities(const GameEntityAccessRequest* requests, std::uint32_t count,
+        KeelEntityAccessCallback callback, void* user_data)
+    {
+        if (!requests || !count || count > KEELS2_ENTITY_ACCESS_MAX_COUNT || !callback)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        std::array<void*, KEELS2_ENTITY_ACCESS_MAX_COUNT> pointers{};
+        {
+            std::scoped_lock lock(schema_entity_mutex_);
+            void* system{};
+            std::string error;
+            const auto ready = CurrentEntitySystemLocked(system, error);
+            if (ready != KEEL_RESULT_OK) return ready;
+            for (std::uint32_t i = 0; i < count; ++i)
+            {
+                const auto& request = requests[i];
+                if (!request.entity.epoch || request.entity.epoch != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+                const KeelCs2EntityIdentity entity{request.entity.index, request.entity.source2_handle};
+                const auto result = KeelCs2_ResolveEntityPointer(system, &entity, request.class_name, &pointers[i]);
+                if (result != KEEL_RESULT_OK) return result;
+            }
+            for (std::uint32_t i = 0; i < count; ++i)
+            {
+                const KeelCs2EntityIdentity entity{requests[i].entity.index, requests[i].entity.source2_handle};
+                const auto result = KeelCs2_ValidateEntity(system, &entity);
+                if (result != KEEL_RESULT_OK) return result;
+            }
+        }
+        return callback(user_data, pointers.data(), count);
+    }
+
     KeelResult ReadEntityField(
         const GameEntityIdentity& entity,
         const GameSchemaField& field,
@@ -4130,6 +4161,22 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayerStat
     api->write = [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* entity, std::uint32_t key, std::int32_t value) noexcept {
         if (!adapter || !entity) return KEEL_RESULT_INVALID_ARGUMENT;
         try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->AccessPlayerStat(*entity,key,value,true); }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    };
+    return KEEL_RESULT_OK;
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityAccess(
+    std::uint32_t version, keels2::host::GameAdapterEntityAccessApi* api) noexcept
+{
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {};
+    if (version != keels2::host::kGameAdapterEntityAccessVersion) return KEEL_RESULT_INCOMPATIBLE;
+    api->size = sizeof(*api); api->api_version = version;
+    api->visit = [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityAccessRequest* entities,
+        std::uint32_t count, KeelEntityAccessCallback callback, void* user_data) noexcept {
+        if (!adapter) return KEEL_RESULT_INVALID_ARGUMENT;
+        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->VisitEntities(entities, count, callback, user_data); }
         catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
     };
     return KEEL_RESULT_OK;

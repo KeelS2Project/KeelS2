@@ -1,4 +1,5 @@
 #include <keels2/entities.h>
+#include <keels2/entity_access.h>
 #include <keels2/schema.h>
 #include <keels2/player_actions.h>
 #include <keels2/entity_writes.h>
@@ -30,6 +31,10 @@ _Static_assert(offsetof(KeelRoundControlApi, terminate) == 16, "round terminate 
 _Static_assert(sizeof(KeelPlayerStatisticsApi) == 32, "KeelPlayerStatisticsApi ABI");
 _Static_assert(offsetof(KeelPlayerStatisticsApi, read) == 16, "statistics read ABI");
 _Static_assert(offsetof(KeelPlayerStatisticsApi, write) == 24, "statistics write ABI");
+
+_Static_assert(sizeof(KeelEntityAccessSpec) == 24, "entity access spec ABI");
+_Static_assert(sizeof(KeelEntityAccessApi) == 16, "entity access table ABI");
+_Static_assert(offsetof(KeelEntityAccessSpec, class_name) == 16, "entity access class ABI");
 
 int main(void)
 {

@@ -7,6 +7,7 @@
 #include <keels2/player_actions.h>
 #include <keels2/player_management.h>
 #include <keels2/entity_writes.h>
+#include <keels2/entity_access.h>
 #include <keels2/round_control.h>
 #include <keels2/player_statistics.h>
 #include <keels2/player_input.h>
@@ -243,6 +244,22 @@ struct GameAdapterRoundControlApi
     KeelResult (*terminate)(GameAdapter*, const KeelRoundTermination*) noexcept;
 };
 using GameAdapterQueryRoundControlFn = KeelResult (*)(std::uint32_t, GameAdapterRoundControlApi*) noexcept;
+
+struct GameEntityAccessRequest
+{
+    GameEntityIdentity entity;
+    const char* class_name;
+};
+inline constexpr const char* kGameAdapterEntityAccessSymbol = "KeelGameAdapter_QueryEntityAccess";
+inline constexpr std::uint32_t kGameAdapterEntityAccessVersion = 1;
+struct GameAdapterEntityAccessApi
+{
+    std::uint32_t size;
+    std::uint32_t api_version;
+    KeelResult (*visit)(GameAdapter*, const GameEntityAccessRequest*, std::uint32_t,
+        KeelEntityAccessCallback, void*) noexcept;
+};
+using GameAdapterQueryEntityAccessFn = KeelResult (*)(std::uint32_t, GameAdapterEntityAccessApi*) noexcept;
 
 inline constexpr const char* kGameAdapterEntityWritesSymbol = "KeelGameAdapter_QueryEntityWrites";
 inline constexpr std::uint32_t kGameAdapterEntityWritesVersion = 1;
