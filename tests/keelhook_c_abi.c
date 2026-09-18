@@ -1,7 +1,11 @@
 #include <keels2/keelhook.h>
+#include <keels2/keelcall.h>
 
 #include <stddef.h>
 #include <string.h>
+
+_Static_assert(sizeof(KeelCallApi) == 16, "direct call API x64 layout");
+_Static_assert(offsetof(KeelCallApi, invoke) == 8, "direct call entry offset");
 
 /* This executable owns its storage. A real callback borrows frame storage only
  * until dispatch returns; copying a KeelHookValue does not copy its pointee. */

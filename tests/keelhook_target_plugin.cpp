@@ -2,6 +2,7 @@
 #include <keels2/plugin.h>
 
 #include "keelhook_virtual_fixture.h"
+#include "keelcall_fixture.h"
 
 #if defined(KEELHOOK_FIXTURE_PROFILE_TARGET)
 #include "native_authoring_fixture.h"
@@ -1335,6 +1336,12 @@ std::uint64_t BenchmarkTarget(std::int32_t expected)
 
 void RunCommand(const KeelCommandInvocation*, void*)
 {
+    if (!keelcall_fixture::Check(*g_host, *g_hook, g_plugin))
+    {
+        Log(KEEL_LOG_ERROR, "scalar direct-call service contract failed");
+        return;
+    }
+    Log(KEEL_LOG_INFO, "scalar direct-call service contract passed");
 #if defined(KEELHOOK_FIXTURE_PROFILE_TARGET)
     if (!native_authoring_fixture::Check(*g_hook, g_plugin))
     {

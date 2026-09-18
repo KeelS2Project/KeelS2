@@ -289,6 +289,11 @@ public:
         return api_;
     }
 
+    KeelResult InvokeScalar(KeelPluginHandle plugin, KeelHookTargetHandle handle,
+        std::uint32_t flags,
+        const std::array<KeelHookValue, KEELHOOK_MAX_ARGUMENTS>& arguments,
+        std::uint32_t argument_count, KeelHookValue& result);
+
     const KeelHookApiV3& ApiV3() const noexcept
     {
         return api_v3_;
@@ -721,6 +726,7 @@ private:
         std::unordered_map<KeelPluginHandle, std::shared_ptr<PrototypeBinding>> bindings;
         std::vector<std::shared_ptr<CallbackRecord>> callbacks;
         bool transition{};
+        std::uint32_t direct_calls{}; // Protected by registry_mutex_.
         std::mutex physical_mutex;
         std::unique_ptr<safetyhook::InlineHook> hook;
         std::unique_ptr<hooking::SharedVtableHook> virtual_hook;
@@ -1401,7 +1407,7 @@ private:
                 return KEEL_RESULT_NOT_FOUND;
             }
             const auto& target = iterator->second;
-            if (target->transition)
+            if (target->transition || target->direct_calls != 0)
             {
                 return KEEL_RESULT_BUSY;
             }
@@ -1447,7 +1453,7 @@ private:
                 return KEEL_RESULT_NOT_FOUND;
             }
             target = target_iterator->second;
-            if (target->transition)
+            if (target->transition || target->direct_calls != 0)
             {
                 return KEEL_RESULT_BUSY;
             }
@@ -1517,7 +1523,7 @@ private:
             }
             callback = iterator->second;
             target = callback->target.lock();
-            if (!target || target->transition)
+            if (!target || target->transition || target->direct_calls != 0)
             {
                 return KEEL_RESULT_BUSY;
             }
@@ -3490,8 +3496,13 @@ private:
         const PrototypeBinding& binding,
         void* function,
         const std::array<KeelHookValue, KEELHOOK_MAX_ARGUMENTS>& arguments,
-        AggregateStorage& result_storage) noexcept
+        AggregateStorage& result_storage,
+        KeelResult* status = nullptr) noexcept
     {
+        if (status)
+        {
+            *status = KEEL_RESULT_ENGINE_FAILURE;
+        }
         KeelHookValue result{};
         InitializeValue(
             target.prototype.return_type,
@@ -3601,6 +3612,20 @@ private:
                     target.prototype.argument_aggregates[index]);
             }
         }
+        if (dcGetError(machine) != DC_ERROR_NONE)
+        {
+            Log("native call adapter rejected the calling convention or arguments");
+            dcFree(machine);
+            static_cast<void>(InitializeValue(
+                target.prototype.return_type,
+                target.prototype.return_aggregate,
+                target.prototype.return_object,
+                binding.return_object.get(),
+                result,
+                result_storage,
+                true));
+            return result;
+        }
         switch (target.prototype.return_type)
         {
             case KH_VALUE_VOID: dcCallVoid(machine, function); break;
@@ -3630,6 +3655,10 @@ private:
             default: break;
         }
         const bool call_ok = dcGetError(machine) == DC_ERROR_NONE;
+        if (status && call_ok)
+        {
+            *status = KEEL_RESULT_OK;
+        }
         if (!call_ok)
         {
             Log("native call adapter reported an error");
@@ -4000,10 +4029,105 @@ private:
     inline static thread_local std::size_t callback_depth_{};
     inline static thread_local std::array<const TargetRecord*, 64> target_stack_{};
     inline static thread_local std::size_t target_depth_{};
+    inline static thread_local std::size_t direct_call_depth_{};
     inline static thread_local std::array<DispatchControl*, 64> dispatch_stack_{};
     inline static thread_local std::size_t dispatch_depth_{};
     inline static thread_local const RecallState* recall_state_{};
 };
+
+KeelResult KeelHookService::Implementation::InvokeScalar(
+    KeelPluginHandle plugin, KeelHookTargetHandle handle, std::uint32_t flags,
+    const std::array<KeelHookValue, KEELHOOK_MAX_ARGUMENTS>& arguments,
+    std::uint32_t argument_count, KeelHookValue& result)
+{
+    if (direct_call_depth_ >= KEELCALL_MAX_DEPTH || target_depth_ >= target_stack_.size())
+    {
+        return KEEL_RESULT_BUSY;
+    }
+    std::shared_ptr<TargetRecord> target;
+    std::shared_ptr<PrototypeBinding> binding;
+    void* function{};
+    {
+        std::scoped_lock lock(registry_mutex_);
+        if (!OwnerReadyLocked(plugin))
+        {
+            return KEEL_RESULT_NOT_READY;
+        }
+        const auto found = targets_.find(handle);
+        if (found == targets_.end() || !found->second->leases.contains(plugin))
+        {
+            return KEEL_RESULT_NOT_FOUND;
+        }
+        target = found->second;
+        if (target->transition)
+        {
+            return KEEL_RESULT_BUSY;
+        }
+        const auto& prototype = target->prototype;
+        if (target->key.mechanism != KH_MECHANISM_DETOUR || prototype.vafmt ||
+            (prototype.return_type != KH_VALUE_VOID && !IsScalarValueType(prototype.return_type)) ||
+            std::any_of(prototype.arguments.begin(), prototype.arguments.end(),
+                [](auto type) { return !IsScalarValueType(type); }))
+        {
+            return KEEL_RESULT_UNSUPPORTED;
+        }
+        if (prototype.arguments.size() != argument_count)
+        {
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+        for (std::size_t index{}; index < argument_count; ++index)
+        {
+            const auto& value = arguments[index];
+            if (value.type != prototype.arguments[index] || value.reserved != 0 ||
+                (value.type == KH_VALUE_BOOL && value.scalar.boolean != KEEL_FALSE &&
+                 value.scalar.boolean != KEEL_TRUE))
+            {
+                return KEEL_RESULT_INVALID_ARGUMENT;
+            }
+        }
+        if (prototype.method && !arguments[0].scalar.pointer)
+        {
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+        binding = target->bindings.at(plugin);
+        // Take the same lock used by physical destruction before admitting this
+        // call. Active retention prevents later destruction; direct_calls stops
+        // first-install/removal from changing the selected entry while it runs.
+        std::scoped_lock physical(target->physical_mutex);
+        function = (flags & KEELCALL_INVOKE_HOOKS) && target->closure
+            ? static_cast<void*>(target->closure)
+            : target->trampoline.load(std::memory_order_acquire);
+        if (!function)
+        {
+            function = target->address;
+        }
+        ++target->direct_calls;
+        target->active.fetch_add(1, std::memory_order_acq_rel);
+    }
+    target_stack_[target_depth_++] = target.get();
+    ++direct_call_depth_;
+    struct ActiveCall
+    {
+        Implementation& service;
+        TargetRecord& target;
+        ~ActiveCall()
+        {
+            --direct_call_depth_;
+            target_stack_[--target_depth_] = nullptr;
+            std::scoped_lock lock(service.registry_mutex_);
+            --target.direct_calls;
+            LeaveActive(target.active);
+        }
+    } hold{*this, *target};
+    AggregateStorage storage;
+    KeelResult status{};
+    const auto value = CallFunction(*target, *binding, function, arguments, storage, &status);
+    if (status == KEEL_RESULT_OK)
+    {
+        result = value;
+    }
+    return status;
+}
 
 std::vector<KeelHookService::TargetSnapshot>
 KeelHookService::Implementation::Snapshots() const
@@ -4085,6 +4209,72 @@ const KeelHookApiV4& KeelHookService::ApiV4() const noexcept
 const KeelHookApiV3& KeelHookService::ApiV3() const noexcept
 {
     return implementation_->ApiV3();
+}
+
+const KeelCallApi& KeelHookService::CallApi() const noexcept
+{
+    return call_api_;
+}
+
+KeelResult KeelHookService::InvokeEntry(KeelPluginHandle plugin, KeelHookTargetHandle target,
+    std::uint32_t flags, const KeelHookValue* arguments, std::uint32_t argument_count,
+    KeelHookValue* result)
+{
+    if (!result)
+    {
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    if (!target || (flags & ~KEELCALL_INVOKE_HOOKS) != 0 ||
+        argument_count > KEELHOOK_MAX_ARGUMENTS || (argument_count && !arguments))
+    {
+        *result = {};
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    std::array<KeelHookValue, KEELHOOK_MAX_ARGUMENTS> snapshot{};
+    if (argument_count)
+    {
+        std::copy_n(arguments, argument_count, snapshot.begin());
+    }
+    *result = {};
+    try
+    {
+        Host& host = Host::Instance();
+        std::unique_lock lock(host.state_mutex_);
+        PluginRecord* owner = host.PluginByHandle(plugin);
+        const bool running = owner && host.accepting_resources_ && owner->accepting_resources &&
+            !owner->cleanup_pending && (owner->loading ||
+                (owner->state == PluginState::loaded && !owner->transitioning));
+        if (!running || !host.adapter_ || !host.keelhook_)
+        {
+            return KEEL_RESULT_NOT_READY;
+        }
+        if (!host.adapter_->IsGameThread())
+        {
+            return KEEL_RESULT_WRONG_THREAD;
+        }
+        if (owner->active_native_operations == UINT32_MAX)
+        {
+            return KEEL_RESULT_BUSY;
+        }
+        ++owner->active_native_operations;
+        struct Operation
+        {
+            std::uint32_t& active;
+            std::unique_lock<std::recursive_mutex>& lock;
+            ~Operation()
+            {
+                if (!lock.owns_lock()) lock.lock();
+                --active;
+            }
+        } hold{owner->active_native_operations, lock};
+        auto& implementation = *host.keelhook_->implementation_;
+        lock.unlock();
+        return implementation.InvokeScalar(plugin, target, flags, snapshot, argument_count, *result);
+    }
+    catch (...)
+    {
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
 }
 
 void KeelHookService::Authorize(

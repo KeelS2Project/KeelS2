@@ -1564,6 +1564,7 @@ if(BUILD_TESTING)
         tests/keelhook_virtual_fixture.cpp
     )
     foreach(target IN ITEMS keels2_keelhook_target_plugin keels2_keelhook_live_target_plugin)
+        target_sources(${target} PRIVATE tests/keelcall_fixture.cpp)
         target_sources(${target} PRIVATE ${KEELS2_KEELHOOK_BOOL_TARGET})
         target_include_directories(${target} PRIVATE sdk/include)
         target_compile_definitions(${target} PRIVATE KEELS2_PLUGIN_BUILD=1)
@@ -2009,7 +2010,7 @@ if(BUILD_TESTING)
             _vsnprintf=vsnprintf
         )
     endif()
-    target_link_libraries(keels2_bootstrap_integration PRIVATE keels2_platform)
+    target_link_libraries(keels2_bootstrap_integration PRIVATE keels2_platform keels2_fake_tier0)
     add_dependencies(keels2_bootstrap_integration keels2_game_cs2)
     keels2_enable_warnings(keels2_bootstrap_integration)
     add_custom_target(keels2_unload_preparation_tests DEPENDS

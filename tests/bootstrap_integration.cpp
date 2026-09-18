@@ -1990,6 +1990,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
     {
         return selected_profile &&
             Contains(messages, "descriptor and service-query fuzz passed") &&
+            Contains(messages, "scalar direct-call service contract passed") &&
             Contains(messages, "[KeelHook Target Fixture] resolver and incompatible-prototype checks passed") &&
             Contains(messages, "callbacks remained staged until plugin activation") &&
             Contains(messages, "[KeelHook Peer Fixture] shared physical target joined") &&

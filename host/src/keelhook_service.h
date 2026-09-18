@@ -1,7 +1,7 @@
 #ifndef KEELS2_HOST_KEELHOOK_SERVICE_H
 #define KEELS2_HOST_KEELHOOK_SERVICE_H
 
-#include <keels2/keelhook.h>
+#include <keels2/keelcall.h>
 
 #include <filesystem>
 #include <memory>
@@ -51,6 +51,7 @@ public:
     const KeelHookApi& Api() const noexcept;
     const KeelHookApiV4& ApiV4() const noexcept;
     const KeelHookApiV3& ApiV3() const noexcept;
+    const KeelCallApi& CallApi() const noexcept;
     void Authorize(KeelPluginHandle plugin, const std::filesystem::path& path, bool active);
     void Activate(KeelPluginHandle plugin);
     KeelResult Deactivate(KeelPluginHandle plugin);
@@ -60,11 +61,15 @@ public:
     bool Shutdown();
 
 private:
+    static KeelResult InvokeEntry(KeelPluginHandle plugin, KeelHookTargetHandle target,
+        std::uint32_t flags, const KeelHookValue* arguments, std::uint32_t argument_count,
+        KeelHookValue* result);
     void Log(KeelLogLevel level, const std::string& message);
 
     class Implementation;
     Host& host_;
     std::unique_ptr<Implementation> implementation_;
+    const KeelCallApi call_api_{sizeof(KeelCallApi), KEELCALL_API_VERSION, &InvokeEntry};
 };
 
 }

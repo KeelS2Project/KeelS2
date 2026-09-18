@@ -1239,14 +1239,16 @@ KeelResult Host::QueryService(
             : static_cast<const void*>(&schema_entities_->EntitiesApi());
         return KEEL_RESULT_OK;
     }
-    if (std::strcmp(name, KEELHOOK_SERVICE_NAME) != 0)
+    const bool direct_call = std::strcmp(name, KEELCALL_SERVICE_NAME) == 0;
+    if (!direct_call && std::strcmp(name, KEELHOOK_SERVICE_NAME) != 0)
     {
         return published_services_
             ? published_services_->Query(plugin, name, version, service)
             : KEEL_RESULT_NOT_FOUND;
     }
-    if (version != KEELHOOK_API_VERSION && version != KEELHOOK_API_VERSION_4 &&
-        version != KEELHOOK_API_VERSION_3)
+    if (direct_call ? version != KEELCALL_API_VERSION :
+        (version != KEELHOOK_API_VERSION && version != KEELHOOK_API_VERSION_4 &&
+         version != KEELHOOK_API_VERSION_3))
     {
         return KEEL_RESULT_INCOMPATIBLE;
     }
@@ -1258,7 +1260,11 @@ KeelResult Host::QueryService(
         plugin,
         owner->transient_path.empty() ? owner->path : owner->transient_path,
         owner->state == PluginState::loaded && !owner->loading);
-    if (version == KEELHOOK_API_VERSION)
+    if (direct_call)
+    {
+        *service = static_cast<const void*>(&keelhook_->CallApi());
+    }
+    else if (version == KEELHOOK_API_VERSION)
     {
         *service = static_cast<const void*>(&keelhook_->Api());
     }
