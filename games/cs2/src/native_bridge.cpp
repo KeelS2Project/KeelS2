@@ -948,6 +948,7 @@ KeelResult RespawnPawn(void* system, void* schema, const char* module,
     result = ManagementField(system, schema, module, controller, "CCSPlayerController", "m_hPlayerPawn",
         KEELS2_SCHEMA_ENTITY_HANDLE, &handle, sizeof(handle));
     if (result != KEEL_RESULT_OK) return result;
+    if (handle == INVALID_EHANDLE_INDEX) return KEEL_RESULT_NOT_READY;
     result = KeelCs2_FindEntityBySource2Handle(system, handle, &pawn);
     if (result != KEEL_RESULT_OK) return result;
     auto* identity = IdentityByHandle(static_cast<CEntitySystem*>(system), handle);

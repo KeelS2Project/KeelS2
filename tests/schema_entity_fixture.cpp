@@ -19,6 +19,7 @@
 #include <cstring>
 #include <mutex>
 #include <limits>
+#include <iostream>
 #include <string>
 #include <stdexcept>
 #include <vector>
@@ -857,7 +858,10 @@ int RunPlayerManagementChecks()
     if (prepare() != KEEL_RESULT_INCOMPATIBLE || g_management_calls != 1111) return 411;
     table[102] = bindings.change_team;
     std::memcpy(g_controller_storage.data() + kHealthOffset + 8, &invalid, sizeof(invalid));
-    if (prepare() != KEEL_RESULT_NOT_FOUND || g_management_calls != 1111) return 412;
+    if (prepare() != KEEL_RESULT_NOT_READY || g_management_calls != 1111) return 412;
+    const CEntityHandle stale(kEntityIndex, 13);
+    std::memcpy(g_controller_storage.data() + kHealthOffset + 8, &stale, sizeof(stale));
+    if (prepare() != KEEL_RESULT_NOT_FOUND || g_management_calls != 1111) return 413;
     Reset();
     return 0;
 }
@@ -1500,20 +1504,14 @@ extern "C" KEELS2_SCHEMA_FIXTURE_EXPORT std::uint32_t KeelTest_SchemaLookupCount
 #if defined(KEELS2_SCHEMA_FIXTURE_NATIVE_TEST)
 int main()
 {
-    const int handles = RunHandleChecks();
-    if (handles) return handles;
-    const int input = RunPlayerInputChecks();
-    if (input) return input;
-    const int writes = RunEntityWriteChecks();
-    if (writes) return writes;
-    const int statistics = RunPlayerStatChecks();
-    if (statistics) return statistics;
-    const int round = RunRoundChecks();
-    if (round) return round;
-    const int management = RunPlayerManagementChecks();
-    if (management) return management;
-    const int actions = RunPlayerActionChecks();
-    return actions ? actions : RunNativeBridgeChecks();
+    for (const auto check : {RunHandleChecks, RunPlayerInputChecks, RunEntityWriteChecks,
+                            RunPlayerStatChecks, RunRoundChecks, RunPlayerManagementChecks,
+                            RunPlayerActionChecks, RunNativeBridgeChecks})
+        if (const int result = check()) {
+            std::cerr << "schema/entity native bridge check " << result << " failed\n";
+            return result;
+        }
+    return 0;
 }
 #endif
 
