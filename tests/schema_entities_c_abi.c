@@ -1,5 +1,6 @@
 #include <keels2/entities.h>
 #include <keels2/entity_access.h>
+#include <keels2/entity_hook_data.h>
 #include <keels2/schema.h>
 #include <keels2/player_actions.h>
 #include <keels2/entity_writes.h>
@@ -37,6 +38,12 @@ _Static_assert(sizeof(KeelEntityAccessApi) == 16, "entity access table ABI");
 _Static_assert(sizeof(KeelEntityCaptureApi) == 16, "entity capture table ABI");
 _Static_assert(offsetof(KeelEntityCaptureApi, capture) == 8, "entity capture function ABI");
 _Static_assert(offsetof(KeelEntityAccessSpec, class_name) == 16, "entity access class ABI");
+
+_Static_assert(sizeof(KeelDamageInfo) == 56, "damage snapshot ABI");
+_Static_assert(sizeof(KeelDamageEdit) == 40, "damage edit ABI");
+_Static_assert(sizeof(KeelEntityHookDataApi) == 32, "entity hook data table ABI");
+_Static_assert(offsetof(KeelDamageInfo, force) == 32, "damage force ABI");
+_Static_assert(offsetof(KeelEntityHookDataApi, weapon_matches) == 24, "weapon match ABI");
 
 int main(void)
 {

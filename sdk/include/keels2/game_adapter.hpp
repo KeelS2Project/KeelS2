@@ -8,6 +8,7 @@
 #include <keels2/player_management.h>
 #include <keels2/entity_writes.h>
 #include <keels2/entity_access.h>
+#include <keels2/entity_hook_data.h>
 #include <keels2/round_control.h>
 #include <keels2/player_statistics.h>
 #include <keels2/player_input.h>
@@ -244,6 +245,18 @@ struct GameAdapterRoundControlApi
     KeelResult (*terminate)(GameAdapter*, const KeelRoundTermination*) noexcept;
 };
 using GameAdapterQueryRoundControlFn = KeelResult (*)(std::uint32_t, GameAdapterRoundControlApi*) noexcept;
+
+inline constexpr const char* kGameAdapterEntityHookDataSymbol = "KeelGameAdapter_QueryEntityHookData";
+inline constexpr std::uint32_t kGameAdapterEntityHookDataVersion = 1;
+struct GameAdapterEntityHookDataApi
+{
+    std::uint32_t size;
+    std::uint32_t api_version;
+    KeelResult (*read_damage)(GameAdapter*, const void*, KeelDamageInfo*) noexcept;
+    KeelResult (*write_damage)(GameAdapter*, void*, const KeelDamageEdit*) noexcept;
+    KeelResult (*weapon_matches)(GameAdapter*, const GameEntityIdentity*, const void*, KeelBool*) noexcept;
+};
+using GameAdapterQueryEntityHookDataFn = KeelResult (*)(std::uint32_t, GameAdapterEntityHookDataApi*) noexcept;
 
 inline constexpr const char* kGameAdapterEntityCaptureSymbol = "KeelGameAdapter_QueryEntityCapture";
 inline constexpr std::uint32_t kGameAdapterEntityCaptureVersion = 1;

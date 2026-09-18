@@ -168,6 +168,21 @@ bool GameAdapterModule::Load(
         }
         round_control_ = round;
     }
+    const auto query_hook_data = SymbolFunction<GameAdapterQueryEntityHookDataFn>(library_.Symbol(kGameAdapterEntityHookDataSymbol));
+    if (query_hook_data)
+    {
+        GameAdapterEntityHookDataApi data{};
+        data.size = sizeof(data); data.api_version = kGameAdapterEntityHookDataVersion;
+        if (query_hook_data(kGameAdapterEntityHookDataVersion,&data) != KEEL_RESULT_OK ||
+            data.size != sizeof(data) || data.api_version != kGameAdapterEntityHookDataVersion ||
+            !data.read_damage || !data.write_damage || !data.weapon_matches)
+        {
+            error = "game adapter entity hook data API is incompatible";
+            Reset();
+            return false;
+        }
+        entity_hook_data_ = data;
+    }
     const auto query_capture = SymbolFunction<GameAdapterQueryEntityCaptureFn>(library_.Symbol(kGameAdapterEntityCaptureSymbol));
     if (query_capture)
     {
@@ -315,6 +330,7 @@ void GameAdapterModule::Reset() noexcept
     entity_writes_ = {};
     entity_access_ = {};
     entity_capture_ = {};
+    entity_hook_data_ = {};
     round_control_ = {};
     player_statistics_ = {};
     player_input_ = {};
@@ -379,6 +395,20 @@ KeelResult GameAdapterModule::ReadPlayer(std::int32_t slot, KeelPlayerInfo& play
     player.controller_handle = UINT32_MAX;
     player.pawn_handle = UINT32_MAX;
     return players_.read ? players_.read(adapter_, slot, &player) : KEEL_RESULT_UNSUPPORTED;
+}
+
+KeelResult GameAdapterModule::ReadDamage(const void* record, KeelDamageInfo& output) const noexcept
+{
+    return adapter_ && entity_hook_data_.read_damage ? entity_hook_data_.read_damage(adapter_,record,&output) : KEEL_RESULT_UNSUPPORTED;
+}
+KeelResult GameAdapterModule::WriteDamage(void* record, const KeelDamageEdit& edit) const noexcept
+{
+    return adapter_ && entity_hook_data_.write_damage ? entity_hook_data_.write_damage(adapter_,record,&edit) : KEEL_RESULT_UNSUPPORTED;
+}
+KeelResult GameAdapterModule::WeaponMatches(const GameEntityIdentity& pawn, const void* candidate, KeelBool& matches) const noexcept
+{
+    matches = KEEL_FALSE;
+    return adapter_ && entity_hook_data_.weapon_matches ? entity_hook_data_.weapon_matches(adapter_,&pawn,candidate,&matches) : KEEL_RESULT_UNSUPPORTED;
 }
 
 KeelResult GameAdapterModule::CaptureEntity(const void* instance, GameEntityIdentity& entity) const noexcept

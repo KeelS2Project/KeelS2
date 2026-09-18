@@ -33,12 +33,18 @@ public:
     const KeelEntityWritesApi& EntityWritesApi() const noexcept;
     const KeelEntityAccessApi& EntityAccessApi() const noexcept;
     const KeelEntityCaptureApi& EntityCaptureApi() const noexcept;
+    const KeelEntityHookDataApi& EntityHookDataApi() const noexcept;
     const KeelRoundControlApi& RoundControlApi() const noexcept;
     const KeelPlayerStatisticsApi& PlayerStatisticsApi() const noexcept;
     KeelResult ReleasePlugin(KeelPluginHandle plugin);
     bool Shutdown();
 
 private:
+    static KeelResult ReadDamageEntry(KeelPluginHandle plugin, const void* record, KeelDamageInfo* output);
+    static KeelResult WriteDamageEntry(KeelPluginHandle plugin, void* record, const KeelDamageEdit* edit);
+    static KeelResult WeaponMatchesEntry(KeelPluginHandle plugin, KeelEntityHandle pawn, const void* candidate, KeelBool* matches);
+    KeelResult AccessDamage(KeelPluginHandle plugin, const void* record, KeelDamageInfo* output, const KeelDamageEdit* edit);
+    KeelResult WeaponMatches(KeelPluginHandle plugin, KeelEntityHandle pawn, const void* candidate, KeelBool* matches);
     static KeelResult CaptureEntityEntry(KeelPluginHandle plugin, const void* instance, KeelEntityHandle* output);
     KeelResult CaptureEntity(KeelPluginHandle plugin, const void* instance, KeelEntityHandle* output);
     static KeelResult VisitEntitiesEntry(KeelPluginHandle plugin, const KeelEntityAccessSpec* entities,
@@ -168,6 +174,8 @@ private:
     KeelEntityWritesApi entity_writes_api_{};
     KeelEntityAccessApi entity_access_api_{};
     KeelEntityCaptureApi entity_capture_api_{};
+    KeelEntityHookDataApi entity_hook_data_api_{};
+    unsigned hook_data_depth_ = 0;
     unsigned entity_access_depth_ = 0;
     KeelRoundControlApi round_control_api_{};
     KeelPlayerStatisticsApi player_statistics_api_{};

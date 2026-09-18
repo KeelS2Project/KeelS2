@@ -34,6 +34,7 @@ SchemaEntityService::SchemaEntityService(Host& host, GameAdapter& adapter)
     player_actions_api_ = {sizeof(KeelPlayerActionsApi), KEELS2_PLAYER_ACTIONS_API_VERSION, &PlayerActionEntry};
     player_management_api_ = {sizeof(KeelPlayerManagementApi), KEELS2_PLAYER_MANAGEMENT_API_VERSION,
         &ManagementCapabilitiesEntry, &ManagePlayerEntry};
+    entity_hook_data_api_ = {sizeof(KeelEntityHookDataApi), KEELS2_ENTITY_HOOK_DATA_API_VERSION, &ReadDamageEntry, &WriteDamageEntry, &WeaponMatchesEntry};
     entity_capture_api_ = {sizeof(KeelEntityCaptureApi), KEELS2_ENTITY_CAPTURE_API_VERSION, &CaptureEntityEntry};
     entity_access_api_ = {sizeof(KeelEntityAccessApi), KEELS2_ENTITY_ACCESS_API_VERSION, &VisitEntitiesEntry};
     entity_writes_api_ = {sizeof(KeelEntityWritesApi), KEELS2_ENTITY_WRITES_API_VERSION, &WriteCapabilitiesEntry, &WriteFieldEntry};
@@ -66,6 +67,93 @@ const KeelSchemaApi& SchemaEntityService::SchemaApi() const noexcept
 const KeelEntitiesApi& SchemaEntityService::EntitiesApi() const noexcept
 {
     return entities_api_;
+}
+
+const KeelEntityHookDataApi& SchemaEntityService::EntityHookDataApi() const noexcept
+{
+    return entity_hook_data_api_;
+}
+KeelResult SchemaEntityService::ReadDamageEntry(KeelPluginHandle plugin, const void* record, KeelDamageInfo* output)
+{
+    const bool sized = output && output->size == sizeof(*output);
+    if (output) { *output = {}; output->size = sizeof(*output); output->inflictor = output->attacker = output->ability = UINT32_MAX; }
+    if (!record || !sized) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        auto* service = active_.load(std::memory_order_acquire);
+        if (!service) return KEEL_RESULT_NOT_READY;
+        KeelDamageInfo value{}; value.size = sizeof(value);
+        const auto status = service->AccessDamage(plugin,record,&value,nullptr);
+        if (status != KEEL_RESULT_OK) return status;
+        if (value.size != sizeof(value) || value.reserved || !std::isfinite(value.damage)) return KEEL_RESULT_INCOMPATIBLE;
+        for (unsigned i = 0; i < 3; ++i)
+            if (!std::isfinite(value.force[i]) || !std::isfinite(value.position[i])) return KEEL_RESULT_INCOMPATIBLE;
+        *output = value;
+        return KEEL_RESULT_OK;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+KeelResult SchemaEntityService::WriteDamageEntry(KeelPluginHandle plugin, void* record, const KeelDamageEdit* input)
+{
+    if (!record || !input || input->size != sizeof(*input)) return KEEL_RESULT_INVALID_ARGUMENT;
+    const auto edit = *input;
+    if (edit.reserved || !std::isfinite(edit.damage) || edit.damage < 0) return KEEL_RESULT_INVALID_ARGUMENT;
+    for (unsigned i = 0; i < 3; ++i)
+        if (!std::isfinite(edit.force[i]) || !std::isfinite(edit.position[i])) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        auto* service = active_.load(std::memory_order_acquire);
+        return service ? service->AccessDamage(plugin,record,nullptr,&edit) : KEEL_RESULT_NOT_READY;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+KeelResult SchemaEntityService::AccessDamage(KeelPluginHandle plugin, const void* record, KeelDamageInfo* output, const KeelDamageEdit* edit)
+{
+    std::scoped_lock state_lock(host_.state_mutex_);
+    if (!PluginReady(plugin)) return KEEL_RESULT_NOT_READY;
+    if (!adapter_.IsGameThread()) return KEEL_RESULT_WRONG_THREAD;
+    auto* owner = host_.PluginByHandle(plugin);
+    if (!owner || owner->cleanup_pending || owner->transitioning || owner->active_native_operations == UINT32_MAX ||
+        hook_data_depth_ >= 8) return KEEL_RESULT_BUSY;
+    ++owner->active_native_operations; ++hook_data_depth_;
+    struct Hold { std::uint32_t& active; unsigned& depth; ~Hold() { --active; --depth; } } hold{owner->active_native_operations,hook_data_depth_};
+    if (!host_.adapter_module_) return KEEL_RESULT_UNSUPPORTED;
+    return edit ? host_.adapter_module_->WriteDamage(const_cast<void*>(record),*edit) : host_.adapter_module_->ReadDamage(record,*output);
+}
+KeelResult SchemaEntityService::WeaponMatchesEntry(KeelPluginHandle plugin, KeelEntityHandle pawn, const void* candidate, KeelBool* matches)
+{
+    if (matches) *matches = KEEL_FALSE;
+    if (!pawn || !candidate || !matches) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        auto* service = active_.load(std::memory_order_acquire);
+        return service ? service->WeaponMatches(plugin,pawn,candidate,matches) : KEEL_RESULT_NOT_READY;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+KeelResult SchemaEntityService::WeaponMatches(KeelPluginHandle plugin, KeelEntityHandle pawn, const void* candidate, KeelBool* matches)
+{
+    std::scoped_lock state_lock(host_.state_mutex_);
+    if (!PluginReady(plugin)) return KEEL_RESULT_NOT_READY;
+    if (!adapter_.IsGameThread()) return KEEL_RESULT_WRONG_THREAD;
+    auto* owner = host_.PluginByHandle(plugin);
+    if (!owner || owner->cleanup_pending || owner->transitioning || owner->active_native_operations == UINT32_MAX ||
+        hook_data_depth_ >= 8) return KEEL_RESULT_BUSY;
+    GameEntityIdentity identity{};
+    {
+        std::scoped_lock registry_lock(registry_mutex_);
+        const auto found = entities_.find(pawn);
+        if (found == entities_.end() || found->second.owner != plugin) return KEEL_RESULT_NOT_FOUND;
+        identity = found->second.entity;
+    }
+    ++owner->active_native_operations; ++hook_data_depth_;
+    struct Hold { std::uint32_t& active; unsigned& depth; ~Hold() { --active; --depth; } } hold{owner->active_native_operations,hook_data_depth_};
+    if (!host_.adapter_module_) return KEEL_RESULT_UNSUPPORTED;
+    KeelBool value = KEEL_FALSE;
+    const auto status = host_.adapter_module_->WeaponMatches(identity,candidate,value);
+    if (status != KEEL_RESULT_OK) return status;
+    if (value != KEEL_FALSE && value != KEEL_TRUE) return KEEL_RESULT_INCOMPATIBLE;
+    *matches = value; return KEEL_RESULT_OK;
 }
 
 const KeelEntityCaptureApi& SchemaEntityService::EntityCaptureApi() const noexcept

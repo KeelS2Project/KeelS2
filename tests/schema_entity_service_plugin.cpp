@@ -1,6 +1,8 @@
 #include <keels2/player_management.h>
 #include <keels2/entity_writes.h>
 #include <keels2/entity_access.h>
+#include <keels2/entity_hook_data.h>
+#include "entity_hook_data_fixture.h"
 #include <keels2/round_control.h>
 #include <keels2/player_statistics.h>
 #include <keels2/keels2.hpp>
@@ -13,6 +15,22 @@ namespace
 const KeelHostApi* g_api{};
 KeelPluginHandle g_owner{};
 void (*g_deferred_dispatch)(){};
+void* g_hook_record{};
+void* g_hook_component{};
+void (*g_hook_set_callback)(void (*)()){};
+void (*g_hook_change_map)(){};
+const KeelEntityHookDataApi* g_hook_data{};
+unsigned g_hook_nested{};
+bool g_hook_valid{};
+void HookDataReentry()
+{
+    ++g_hook_nested;
+    g_hook_set_callback(&HookDataReentry);
+    KeelDamageInfo info{}; info.size = sizeof(info);
+    const auto expected = g_hook_nested < 8 ? KEEL_RESULT_OK : KEEL_RESULT_BUSY;
+    g_hook_valid = g_hook_data->read_damage(g_owner,g_hook_record,&info) == expected && g_hook_valid;
+}
+
 class DeferredDispatch
 {
 public:
@@ -86,6 +104,11 @@ private:
             LogError("usage: keel_schema_entity_check [initial|stale|reuse|offthread]");
             return;
         }
+        if (strcmp(command[1], "hookdata") == 0)
+        {
+            LogMessage(HookData() ? "typed hook data passed" : "typed hook data failed");
+            return;
+        }
         if (strcmp(command[1], "initial") == 0)
         {
             Initial();
@@ -107,6 +130,61 @@ private:
             return;
         }
         LogError("unknown schema and entity check");
+    }
+
+    bool HookData()
+    {
+        if (!g_hook_record || !g_hook_component || !g_hook_set_callback || !g_hook_change_map) return false;
+        const void* raw{};
+        if (g_api->query_service(g_owner,KEELS2_ENTITY_HOOK_DATA_SERVICE_NAME,2,&raw) != KEEL_RESULT_INCOMPATIBLE ||
+            g_api->query_service(g_owner,KEELS2_ENTITY_HOOK_DATA_SERVICE_NAME,1,&raw) != KEEL_RESULT_OK || !raw) return false;
+        g_hook_data = static_cast<const KeelEntityHookDataApi*>(raw);
+        if (g_hook_data->size != sizeof(*g_hook_data) || g_hook_data->api_version != 1 ||
+            !g_hook_data->read_damage || !g_hook_data->write_damage || !g_hook_data->weapon_matches) return false;
+        if (g_api->query_service(g_owner,KEELS2_ENTITIES_SERVICE_NAME,1,&raw) != KEEL_RESULT_OK || !raw) return false;
+        const auto* entities = static_cast<const KeelEntitiesApi*>(raw);
+        KeelEntityHandle pawn{};
+        if (entities->find_by_index(g_owner,7,&pawn) != KEEL_RESULT_OK) return false;
+        struct Hold { const KeelEntitiesApi* api; KeelEntityHandle handle; ~Hold() { api->release(g_owner,handle); } } hold{entities,pawn};
+        KeelDamageInfo info{}; info.size = sizeof(info);
+        if (g_hook_data->read_damage(g_owner,g_hook_record,&info) != KEEL_RESULT_OK || info.damage != 42.5f ||
+            info.damage_type != 0x80000040 || info.damage_custom != -7 || info.inflictor != 0x6007 ||
+            info.attacker != UINT32_MAX || info.ability != 0x7008 || info.force[1] != 2 || info.position[2] != 6) return false;
+        KeelDamageEdit edit{sizeof(edit),0,9.5f,32,{7,8,9},{10,11,12}};
+        auto expected = hook_data_fixture::MakeDamage();
+        std::memcpy(expected.bytes.data()+hook_data_fixture::offsets[0],&edit.damage,4);
+        std::memcpy(expected.bytes.data()+hook_data_fixture::offsets[1],&edit.damage_type,4);
+        std::memcpy(expected.bytes.data()+hook_data_fixture::offsets[6],edit.force,12);
+        std::memcpy(expected.bytes.data()+hook_data_fixture::offsets[7],edit.position,12);
+        if (g_hook_data->write_damage(g_owner,g_hook_record,&edit) != KEEL_RESULT_OK ||
+            std::memcmp(g_hook_record,expected.bytes.data(),expected.bytes.size()) ||
+            g_hook_data->read_damage(g_owner,g_hook_record,&info) != KEEL_RESULT_OK || info.damage != 9.5f) return false;
+        auto bad = edit; bad.force[2] = std::numeric_limits<float>::quiet_NaN();
+        if (g_hook_data->write_damage(g_owner,g_hook_record,&bad) != KEEL_RESULT_INVALID_ARGUMENT ||
+            std::memcmp(g_hook_record,expected.bytes.data(),expected.bytes.size())) return false;
+        bad = edit; bad.reserved = 1;
+        if (g_hook_data->write_damage(g_owner,g_hook_record,&bad) != KEEL_RESULT_INVALID_ARGUMENT ||
+            g_hook_data->read_damage(g_owner+10000,g_hook_record,&info) != KEEL_RESULT_NOT_READY ||
+            info.damage || info.inflictor != UINT32_MAX) return false;
+        info.size = 1;
+        if (g_hook_data->read_damage(g_owner,g_hook_record,&info) != KEEL_RESULT_INVALID_ARGUMENT || info.damage ||
+            g_hook_data->read_damage(g_owner,nullptr,&info) != KEEL_RESULT_INVALID_ARGUMENT) return false;
+        KeelBool matches = KEEL_FALSE;
+        if (g_hook_data->weapon_matches(g_owner,pawn,g_hook_component,&matches) != KEEL_RESULT_OK || !matches ||
+            g_hook_data->weapon_matches(g_owner,pawn,reinterpret_cast<void*>(1),&matches) != KEEL_RESULT_OK || matches ||
+            g_hook_data->weapon_matches(g_owner,pawn+10000,g_hook_component,&matches) != KEEL_RESULT_NOT_FOUND || matches) return false;
+        g_hook_nested = 0; g_hook_valid = true;
+        g_hook_set_callback(&HookDataReentry);
+        const auto nested_result = g_hook_data->read_damage(g_owner,g_hook_record,&info);
+        g_hook_set_callback(nullptr);
+        if (nested_result != KEEL_RESULT_OK || !g_hook_valid || g_hook_nested != 8) return false;
+        edit.damage = 55;
+        g_hook_set_callback(g_hook_change_map);
+        const auto changed = g_hook_data->write_damage(g_owner,g_hook_record,&edit);
+        g_hook_set_callback(nullptr);
+        if (changed != KEEL_RESULT_NOT_FOUND || std::memcmp(g_hook_record,expected.bytes.data(),expected.bytes.size()) ||
+            g_hook_data->weapon_matches(g_owner,pawn,g_hook_component,&matches) != KEEL_RESULT_NOT_FOUND || matches) return false;
+        return true;
     }
 
     void Initial()
@@ -255,6 +333,17 @@ private:
         KeelEntityHandle captured = 99;
         if (capture->capture(g_owner, &captured, &captured) != KEEL_RESULT_WRONG_THREAD || captured)
         { LogError("entity capture wrong-thread rejection failed"); return; }
+        const void* hook_raw{};
+        if (g_api->query_service(g_owner,KEELS2_ENTITY_HOOK_DATA_SERVICE_NAME,1,&hook_raw) != KEEL_RESULT_OK || !hook_raw)
+        { LogError("hook data wrong-thread lookup failed"); return; }
+        const auto* hook = static_cast<const KeelEntityHookDataApi*>(hook_raw);
+        KeelDamageInfo damage{}; damage.size = sizeof(damage);
+        KeelDamageEdit edit{sizeof(edit),0,1,2,{1,2,3},{4,5,6}};
+        KeelBool matched = KEEL_TRUE;
+        if (hook->read_damage(g_owner,&damage,&damage) != KEEL_RESULT_WRONG_THREAD || damage.damage ||
+            hook->write_damage(g_owner,&damage,&edit) != KEEL_RESULT_WRONG_THREAD ||
+            hook->weapon_matches(g_owner,1,&damage,&matched) != KEEL_RESULT_WRONG_THREAD || matched)
+        { LogError("hook data wrong-thread rejection failed"); return; }
         const auto* management = static_cast<const KeelPlayerManagementApi*>(raw);
         std::uint32_t capabilities = UINT32_MAX;
         const KeelPlayerManagementAction request{sizeof(request), KEELS2_PLAYER_MANAGEMENT_RESPAWN, 0, 0};
@@ -469,4 +558,10 @@ extern "C" KEELS2_PLUGIN_EXPORT void* KeelTest_DeferredDispatch(void (*callback)
 {
     g_deferred_dispatch = callback;
     return &g_deferred_target;
+}
+
+extern "C" KEELS2_PLUGIN_EXPORT void KeelTest_HookDataInputs(void* record, void* component,
+    void (*set_callback)(void (*)()), void (*change_map)())
+{
+    g_hook_record = record; g_hook_component = component; g_hook_set_callback = set_callback; g_hook_change_map = change_map;
 }

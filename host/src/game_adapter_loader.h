@@ -29,6 +29,9 @@ public:
     GameAdapter* Get() const noexcept;
     bool SupportsClientCommands() const noexcept;
     KeelResult CommandCaller(const void* context, std::int32_t& slot) const noexcept;
+    KeelResult ReadDamage(const void* record, KeelDamageInfo& output) const noexcept;
+    KeelResult WriteDamage(void* record, const KeelDamageEdit& edit) const noexcept;
+    KeelResult WeaponMatches(const GameEntityIdentity& pawn, const void* candidate, KeelBool& matches) const noexcept;
     KeelResult CaptureEntity(const void* instance, GameEntityIdentity& entity) const noexcept;
     KeelResult VisitEntities(const GameEntityAccessRequest* entities, std::uint32_t count,
         KeelEntityAccessCallback callback, void* user_data) const noexcept;
@@ -59,6 +62,7 @@ private:
     GameAdapterEntityWritesApi entity_writes_{};
     GameAdapterEntityAccessApi entity_access_{};
     GameAdapterEntityCaptureApi entity_capture_{};
+    GameAdapterEntityHookDataApi entity_hook_data_{};
     GameAdapterRoundControlApi round_control_{};
     GameAdapterPlayerStatisticsApi player_statistics_{};
     GameAdapterPlayerInputApi player_input_{};

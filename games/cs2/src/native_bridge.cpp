@@ -1580,3 +1580,200 @@ extern "C" KeelResult KeelCs2_WritePlayerStat(void* system, const KeelCs2EntityI
     catch (const StatFailure& failure) { return failure.result; }
     catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
 }
+
+namespace
+{
+constexpr const char* kDamageFields[]{"m_flDamage","m_bitsDamageType","m_iDamageCustom",
+    "m_hInflictor","m_hAttacker","m_hAbility","m_vecDamageForce","m_vecDamagePosition"};
+constexpr std::uint32_t kDamageSizes[]{4,4,4,4,4,4,12,12};
+void HookFieldType(const CSchemaType* type, unsigned index)
+{
+    StatRequire(type != nullptr);
+    if (index == 1)
+    {
+        StatRequire(type->m_eTypeCategory == SCHEMA_TYPE_DECLARED_ENUM && type->m_eAtomicCategory == SCHEMA_ATOMIC_INVALID);
+        const auto* info = static_cast<const CSchemaType_DeclaredEnum*>(type)->m_pEnumInfo;
+        StatRequire(info && info->m_pszName && std::strcmp(info->m_pszName,"DamageTypes_t") == 0 &&
+            info->m_nSize == 4 && info->m_nAlignment == 4);
+    }
+    else if (index >= 3 && index <= 5)
+    {
+        StatRequire(type->m_eTypeCategory == SCHEMA_TYPE_ATOMIC && type->m_eAtomicCategory == SCHEMA_ATOMIC_T);
+        const auto* atomic = static_cast<const CSchemaType_Atomic_T*>(type);
+        const auto* name = atomic->m_sTypeName.Get();
+        StatRequire(name && std::string_view(name).starts_with("CHandle<") && std::string_view(name).ends_with('>') &&
+            atomic->m_nSize == 4 && atomic->m_nAlignment == 4 && atomic->m_pTemplateType &&
+            atomic->m_pTemplateType->m_eTypeCategory == SCHEMA_TYPE_DECLARED_CLASS);
+    }
+    else if (index >= 6)
+    {
+        StatRequire(type->m_eTypeCategory == SCHEMA_TYPE_ATOMIC && type->m_eAtomicCategory == SCHEMA_ATOMIC_PLAIN);
+        const auto* atomic = static_cast<const CSchemaType_Atomic*>(type);
+        const auto* name = atomic->m_sTypeName.Get();
+        StatRequire(name && std::strcmp(name,"Vector") == 0 && atomic->m_nSize == 12 && atomic->m_nAlignment == 4);
+    }
+    else
+    {
+        StatRequire(type->m_eTypeCategory == SCHEMA_TYPE_BUILTIN && type->m_eAtomicCategory == SCHEMA_ATOMIC_INVALID);
+        const auto* builtin = static_cast<const CSchemaType_Builtin*>(type);
+        StatRequire(builtin->m_nSize == 4 &&
+            builtin->m_eBuiltinType == (index == 0 ? SCHEMA_BUILTIN_TYPE_FLOAT32 : SCHEMA_BUILTIN_TYPE_INT32));
+    }
+}
+void DamageOffsets(const KeelCs2DamageSchema& schema)
+{
+    const auto* type = static_cast<const CSchemaClassInfo*>(schema.class_info);
+    StatRequire(ValidClass(type) && type->m_pszName && std::strcmp(type->m_pszName,"CTakeDamageInfo") == 0);
+    for (unsigned i = 0; i < 8; ++i)
+    {
+        const auto offset = StatSpan(type,schema.offsets[i],kDamageSizes[i],4);
+        StatRequire(offset >= sizeof(void*));
+        for (unsigned j = 0; j < i; ++j)
+            StatRequire(offset + kDamageSizes[i] <= static_cast<unsigned>(schema.offsets[j]) ||
+                static_cast<unsigned>(schema.offsets[j]) + kDamageSizes[j] <= offset);
+    }
+}
+const std::byte* DamageAddress(const KeelCs2DamageSchema& schema, const void* record)
+{
+    StatRequire(record != nullptr,KEEL_RESULT_INVALID_ARGUMENT);
+    DamageOffsets(schema);
+    const auto* type = static_cast<const CSchemaClassInfo*>(schema.class_info);
+    const auto address = reinterpret_cast<std::uintptr_t>(record);
+    StatRequire(address % type->m_nAlignment == 0 && static_cast<unsigned>(type->m_nSize)-1 <= UINTPTR_MAX-address);
+    return static_cast<const std::byte*>(record);
+}
+bool DamageNumbers(float damage, const float* force, const float* position)
+{
+    if (!std::isfinite(damage)) return false;
+    for (unsigned i = 0; i < 3; ++i)
+        if (!std::isfinite(force[i]) || !std::isfinite(position[i])) return false;
+    return true;
+}
+}
+
+extern "C" KeelResult KeelCs2_ResolveDamageSchema(void* system, const char* module, KeelCs2DamageSchema* output)
+{
+    if (output) *output = {};
+    if (!system || !module || !*module || !output) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        auto* scope = reinterpret_cast<ISchemaSystemTypeScope*>(static_cast<ISchemaSystem*>(system)->FindTypeScopeForModule(module));
+        StatRequire(scope != nullptr,KEEL_RESULT_NOT_FOUND);
+        auto* type = StatClass(scope,"CTakeDamageInfo");
+        KeelCs2DamageSchema result{}; result.class_info = type;
+        for (unsigned i = 0; i < 8; ++i)
+        {
+            const auto& field = StatField(type,kDamageFields[i]);
+            HookFieldType(field.m_pType,i);
+            result.offsets[i] = static_cast<std::int32_t>(StatSpan(type,field.m_nSingleInheritanceOffset,kDamageSizes[i],4));
+        }
+        DamageOffsets(result);
+        *output = result;
+        return KEEL_RESULT_OK;
+    }
+    catch (const StatFailure& failure) { return failure.result; }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+extern "C" KeelResult KeelCs2_ReadDamage(const KeelCs2DamageSchema* schema, const void* record, KeelDamageInfo* output)
+{
+    const bool sized = output && output->size == sizeof(*output);
+    if (output) { *output = {}; output->size = sizeof(*output); output->inflictor = output->attacker = output->ability = UINT32_MAX; }
+    if (!schema || !sized) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        const auto* address = DamageAddress(*schema,record);
+        KeelDamageInfo result{}; result.size = sizeof(result);
+        void* values[]{&result.damage,&result.damage_type,&result.damage_custom,&result.inflictor,&result.attacker,
+            &result.ability,result.force,result.position};
+        for (unsigned i = 0; i < 8; ++i) std::memcpy(values[i],address+schema->offsets[i],kDamageSizes[i]);
+        if (!DamageNumbers(result.damage,result.force,result.position)) return KEEL_RESULT_INCOMPATIBLE;
+        *output = result;
+        return KEEL_RESULT_OK;
+    }
+    catch (const StatFailure& failure) { return failure.result; }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+extern "C" KeelResult KeelCs2_WriteDamage(const KeelCs2DamageSchema* schema, void* record, const KeelDamageEdit* input)
+{
+    if (!schema || !input || input->size != sizeof(*input)) return KEEL_RESULT_INVALID_ARGUMENT;
+    const auto edit = *input;
+    if (edit.reserved || edit.damage < 0 || !DamageNumbers(edit.damage,edit.force,edit.position)) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        auto* address = const_cast<std::byte*>(DamageAddress(*schema,record));
+        // All metadata/value checks precede the first mutation. Untouched
+        // members include handles, cached attacker metadata and owning vectors.
+        std::memcpy(address+schema->offsets[0],&edit.damage,4);
+        std::memcpy(address+schema->offsets[1],&edit.damage_type,4);
+        std::memcpy(address+schema->offsets[6],edit.force,12);
+        std::memcpy(address+schema->offsets[7],edit.position,12);
+        return KEEL_RESULT_OK;
+    }
+    catch (const StatFailure& failure) { return failure.result; }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+extern "C" KeelResult KeelCs2_ResolveWeaponSchema(void* system, const char* module, KeelCs2WeaponSchema* output)
+{
+    if (output) *output = {};
+    if (!system || !module || !*module || !output) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        auto* scope = reinterpret_cast<ISchemaSystemTypeScope*>(static_cast<ISchemaSystem*>(system)->FindTypeScopeForModule(module));
+        StatRequire(scope != nullptr,KEEL_RESULT_NOT_FOUND);
+        auto* pawn = StatClass(scope,"CCSPlayerPawn");
+        auto* base = StatClass(scope,"CBasePlayerPawn");
+        auto* component = StatClass(scope,"CPlayer_WeaponServices");
+        auto* component_base = StatClass(scope,"CPlayerPawnComponent");
+        const auto& pointer = StatField(base,"m_pWeaponServices");
+        StatRequire(pointer.m_pType->m_eTypeCategory == SCHEMA_TYPE_POINTER && pointer.m_pType->m_eAtomicCategory == SCHEMA_ATOMIC_INVALID);
+        StatDeclared(static_cast<const CSchemaType_Ptr*>(pointer.m_pType)->m_pObjectType,component);
+        const auto pointer_offset = StatBase(pawn,base)+StatSpan(base,pointer.m_nSingleInheritanceOffset,sizeof(void*),alignof(void*));
+        StatSpan(pawn,static_cast<std::int32_t>(pointer_offset),sizeof(void*),alignof(void*));
+        const auto& chain = StatField(component_base,"__m_pChainEntity");
+        StatChainer(chain.m_pType);
+        const auto chain_offset = StatBase(component,component_base)+StatSpan(component_base,chain.m_nSingleInheritanceOffset,40,8);
+        StatSpan(component,static_cast<std::int32_t>(chain_offset),40,8);
+        StatRequire(pointer_offset >= sizeof(void*) && chain_offset >= sizeof(void*));
+        *output = {pawn,component,static_cast<std::int32_t>(pointer_offset),static_cast<std::int32_t>(chain_offset)};
+        return KEEL_RESULT_OK;
+    }
+    catch (const StatFailure& failure) { return failure.result; }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+extern "C" KeelResult KeelCs2_WeaponMatches(void* system, const KeelCs2EntityIdentity* pawn,
+    const KeelCs2WeaponSchema* schema, const void* candidate, KeelBool* matches)
+{
+    if (matches) *matches = KEEL_FALSE;
+    if (!system || !pawn || !schema || !candidate || !matches) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        const auto* root = static_cast<const CSchemaClassInfo*>(schema->pawn_class);
+        const auto* type = static_cast<const CSchemaClassInfo*>(schema->component_class);
+        StatRequire(ValidClass(root) && ValidClass(type) && root->m_pszName && type->m_pszName &&
+            std::strcmp(root->m_pszName,"CCSPlayerPawn") == 0 && std::strcmp(type->m_pszName,"CPlayer_WeaponServices") == 0);
+        const auto pointer_offset = StatSpan(root,schema->pointer_offset,sizeof(void*),alignof(void*));
+        const auto chain_offset = StatSpan(type,schema->chain_offset,40,8);
+        StatRequire(pointer_offset >= sizeof(void*) && chain_offset >= sizeof(void*));
+        const auto* identity = IdentityByHandle(static_cast<CEntitySystem*>(system),pawn->source2_handle);
+        StatRequire(identity && identity->GetEntityIndex().Get() == pawn->index,KEEL_RESULT_NOT_FOUND);
+        StatRequire(identity->m_pClass->GetSchemaBinding() == root);
+        const auto address = reinterpret_cast<std::uintptr_t>(identity->m_pInstance);
+        StatRequire(address % root->m_nAlignment == 0 && pointer_offset+sizeof(void*)-1 <= UINTPTR_MAX-address);
+        const void* component{};
+        std::memcpy(&component,reinterpret_cast<const void*>(address+pointer_offset),sizeof(component));
+        if (component != candidate) return KEEL_RESULT_OK;
+        const auto component_address = reinterpret_cast<std::uintptr_t>(component);
+        StatRequire(component_address % type->m_nAlignment == 0 && chain_offset+40-1 <= UINTPTR_MAX-component_address);
+        const void* owner{};
+        std::memcpy(&owner,reinterpret_cast<const void*>(component_address+chain_offset),sizeof(owner));
+        StatRequire(owner == identity->m_pInstance,KEEL_RESULT_NOT_FOUND);
+        *matches = KEEL_TRUE;
+        return KEEL_RESULT_OK;
+    }
+    catch (const StatFailure& failure) { return failure.result; }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}

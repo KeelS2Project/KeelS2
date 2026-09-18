@@ -66,6 +66,12 @@ int main(int argument_count, char** arguments)
     keels2::host::GameEntityIdentity captured{3,4,5};
     if (module.CaptureEntity(&captured, captured) != KEEL_RESULT_UNSUPPORTED ||
         captured.index || captured.source2_handle || captured.epoch) return 17;
+    KeelDamageInfo damage{}; damage.size = sizeof(damage);
+    const KeelDamageEdit edit{sizeof(edit),0,1,2,{1,2,3},{4,5,6}};
+    KeelBool matches = KEEL_TRUE;
+    if (module.ReadDamage(&damage,damage) != KEEL_RESULT_UNSUPPORTED ||
+        module.WriteDamage(&damage,edit) != KEEL_RESULT_UNSUPPORTED ||
+        module.WeaponMatches(entity,&damage,matches) != KEEL_RESULT_UNSUPPORTED || matches) return 18;
     std::uint32_t capabilities = UINT32_MAX;
     const KeelPlayerManagementAction management{sizeof(KeelPlayerManagementAction), KEELS2_PLAYER_MANAGEMENT_RESPAWN, 0, 0};
     if (module.PlayerManagementCapabilities(capabilities) != KEEL_RESULT_UNSUPPORTED || capabilities ||

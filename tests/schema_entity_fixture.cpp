@@ -1,5 +1,6 @@
 #include <keels2/keelhook.hpp>
 #include <keels2/schema.hpp>
+#include "entity_hook_data_fixture.h"
 #include <eiface.h>
 #include <in_buttons.h>
 #include <entity2/entityclass.h>
@@ -80,9 +81,26 @@ SchemaStorage<CSchemaType_Builtin> g_input_uint64;
 SchemaStorage<CSchemaType_Atomic_T> g_input_handle;
 alignas(16) std::array<std::byte, 64> g_movement_storage{}, g_other_movement{};
 
+SchemaStorage<CSchemaType_Builtin> g_hook_float;
+SchemaStorage<CSchemaType_DeclaredEnum> g_hook_enum;
+SchemaStorage<CSchemaType_Atomic> g_hook_vector, g_hook_chainer;
+SchemaStorage<CSchemaType_Atomic_T> g_hook_handle;
+SchemaStorage<CSchemaType_DeclaredClass> g_hook_entity_type, g_hook_component_type;
+SchemaStorage<CSchemaType_Ptr> g_hook_pointer;
+CSchemaEnumInfo g_hook_damage_enum{};
+SchemaClassFieldData_t g_hook_damage_fields[8]{}, g_hook_weapon_pointer{}, g_hook_chain{};
+CSchemaClassInfo g_hook_component{}, g_hook_component_base{};
+SchemaBaseClassInfoData_t g_hook_component_inherit{};
+alignas(16) std::array<std::byte,128> g_hook_weapon{};
+hook_data_fixture::DamageRecord g_hook_damage{};
+void (*g_hook_schema_callback)(){};
+
 CSchemaClassInfo* DeclaredClass(const char* name)
 {
     ++g_schema_lookup_count;
+    if (g_hook_schema_callback && name && std::strcmp(name,"CTakeDamageInfo") == 0) {
+        const auto callback = g_hook_schema_callback; g_hook_schema_callback = nullptr; callback();
+    }
     if (g_input_read_callback && name && std::strcmp(name, "CPlayer_MovementServices") == 0)
     {
         const auto callback = g_input_read_callback;
@@ -100,7 +118,7 @@ CSchemaClassInfo* DeclaredClass(const char* name)
     if (name && std::strcmp(name, "CTakeDamageInfo") == 0)
         return &g_damage_class;
     if (!g_buttons_registered && name && std::strcmp(name, "CInButtonState") == 0) return nullptr;
-    for (auto* type : {&g_input_pawn_class, &g_movement_class, &g_buttons_class, &g_controller_base, &g_controller_class, &g_round_proxy_class, &g_round_rules_class, &g_stat_base, &g_stat_money, &g_stat_tracking, &g_stat_match, &g_stat_values, &g_stat_chainer})
+    for (auto* type : {&g_input_pawn_class, &g_movement_class, &g_buttons_class, &g_controller_base, &g_controller_class, &g_round_proxy_class, &g_round_rules_class, &g_stat_base, &g_stat_money, &g_stat_tracking, &g_stat_match, &g_stat_values, &g_stat_chainer, &g_hook_component, &g_hook_component_base})
         if (name && type->m_pszName && std::strcmp(name, type->m_pszName) == 0) return type;
     return nullptr;
 }
@@ -235,6 +253,7 @@ void Reset()
 {
     g_schema_lookup_count = 0;
     g_input_read_callback = nullptr;
+    g_hook_schema_callback = nullptr; g_hook_component = g_hook_component_base = {};
     g_input_pawn_class = g_movement_class = g_buttons_class = g_controller_base = g_controller_class = {};
     g_round_proxy_class = g_round_rules_class = {};
     g_stat_base = g_stat_money = g_stat_tracking = g_stat_match = g_stat_values = g_stat_chainer = {};
@@ -366,6 +385,57 @@ void InputFixture(std::uint64_t held)
     SetGameEntitySystem(true);
 }
 
+void HookDataFixture()
+{
+    auto* number = g_hook_float.Get();
+    number->m_eTypeCategory = SCHEMA_TYPE_BUILTIN; number->m_eAtomicCategory = SCHEMA_ATOMIC_INVALID;
+    number->m_eBuiltinType = SCHEMA_BUILTIN_TYPE_FLOAT32; number->m_nSize = 4;
+    g_hook_damage_enum = {}; g_hook_damage_enum.m_pszName = "DamageTypes_t";
+    g_hook_damage_enum.m_nSize = g_hook_damage_enum.m_nAlignment = 4;
+    auto* enumeration = g_hook_enum.Get();
+    enumeration->m_eTypeCategory = SCHEMA_TYPE_DECLARED_ENUM; enumeration->m_eAtomicCategory = SCHEMA_ATOMIC_INVALID;
+    enumeration->m_pEnumInfo = &g_hook_damage_enum;
+    auto* vector = g_hook_vector.Get();
+    vector->m_eTypeCategory = SCHEMA_TYPE_ATOMIC; vector->m_eAtomicCategory = SCHEMA_ATOMIC_PLAIN;
+    vector->m_sTypeName = "Vector"; vector->m_nSize = 12; vector->m_nAlignment = 4;
+    auto* entity_type = g_hook_entity_type.Get();
+    entity_type->m_eTypeCategory = SCHEMA_TYPE_DECLARED_CLASS; entity_type->m_eAtomicCategory = SCHEMA_ATOMIC_INVALID;
+    entity_type->m_pClassInfo = &g_base_class;
+    auto* handle = g_hook_handle.Get();
+    handle->m_eTypeCategory = SCHEMA_TYPE_ATOMIC; handle->m_eAtomicCategory = SCHEMA_ATOMIC_T;
+    handle->m_sTypeName = "CHandle<CBaseEntity>"; handle->m_nSize = handle->m_nAlignment = 4; handle->m_pTemplateType = entity_type;
+    const char* names[]{"m_flDamage","m_bitsDamageType","m_iDamageCustom","m_hInflictor","m_hAttacker","m_hAbility","m_vecDamageForce","m_vecDamagePosition"};
+    CSchemaType* types[]{number,enumeration,reinterpret_cast<CSchemaType_Builtin*>(g_int32_type_storage.data()),handle,handle,handle,vector,vector};
+    for (unsigned i = 0; i < 8; ++i) g_hook_damage_fields[i] = {names[i],types[i],hook_data_fixture::offsets[i],0,nullptr};
+    g_damage_class = {}; g_damage_class.m_pszName = "CTakeDamageInfo"; g_damage_class.m_nSize = 0x118;
+    g_damage_class.m_nAlignment = 8; g_damage_class.m_nFieldCount = 8; g_damage_class.m_pFields = g_hook_damage_fields;
+    g_hook_damage = hook_data_fixture::MakeDamage();
+    auto* chainer = g_hook_chainer.Get();
+    chainer->m_eTypeCategory = SCHEMA_TYPE_ATOMIC; chainer->m_eAtomicCategory = SCHEMA_ATOMIC_PLAIN;
+    chainer->m_sTypeName = "CNetworkVarChainer"; chainer->m_nSize = 40; chainer->m_nAlignment = 8;
+    g_hook_chain = {"__m_pChainEntity",chainer,16,0,nullptr};
+    g_hook_component_base = {}; g_hook_component_base.m_pszName = "CPlayerPawnComponent";
+    g_hook_component_base.m_nSize = 72; g_hook_component_base.m_nAlignment = 8;
+    g_hook_component_base.m_nFieldCount = 1; g_hook_component_base.m_pFields = &g_hook_chain;
+    g_hook_component_inherit = {0,&g_hook_component_base};
+    g_hook_component = {}; g_hook_component.m_pszName = "CPlayer_WeaponServices"; g_hook_component.m_nSize = 128;
+    g_hook_component.m_nAlignment = 8; g_hook_component.m_nBaseClassCount = 1; g_hook_component.m_pBaseClasses = &g_hook_component_inherit;
+    auto* component_type = g_hook_component_type.Get();
+    component_type->m_eTypeCategory = SCHEMA_TYPE_DECLARED_CLASS; component_type->m_eAtomicCategory = SCHEMA_ATOMIC_INVALID;
+    component_type->m_pClassInfo = &g_hook_component;
+    auto* pointer = g_hook_pointer.Get();
+    pointer->m_eTypeCategory = SCHEMA_TYPE_POINTER; pointer->m_eAtomicCategory = SCHEMA_ATOMIC_INVALID; pointer->m_pObjectType = component_type;
+    constexpr auto pointer_offset = Align(kHealthOffset+16,alignof(void*));
+    g_hook_weapon_pointer = {"m_pWeaponServices",pointer,static_cast<int>(pointer_offset),0,nullptr};
+    g_input_pawn_class = {}; g_input_pawn_class.m_pszName = "CBasePlayerPawn"; g_input_pawn_class.m_nSize = static_cast<int>(kEntitySize);
+    g_input_pawn_class.m_nAlignment = 16; g_input_pawn_class.m_nFieldCount = 1; g_input_pawn_class.m_pFields = &g_hook_weapon_pointer;
+    g_input_pawn_base = {0,&g_base_class}; g_input_pawn_class.m_nBaseClassCount = 1; g_input_pawn_class.m_pBaseClasses = &g_input_pawn_base;
+    g_derived_bases[0].m_pClass = &g_input_pawn_class;
+    g_hook_weapon.fill(std::byte{});
+    StorePointer(g_hook_weapon.data()+16,EntityInstance());
+    StorePointer(g_entity_storage.data()+pointer_offset,g_hook_weapon.data());
+}
+
 struct Initialize
 {
     Initialize()
@@ -375,6 +445,77 @@ struct Initialize
 } g_initialize;
 
 #if defined(KEELS2_SCHEMA_FIXTURE_NATIVE_TEST)
+int RunHookDataChecks()
+{
+    Reset(); HookDataFixture(); SetGameEntitySystem(true);
+#if defined(_WIN32)
+    constexpr const char* module = "server.dll";
+#else
+    constexpr const char* module = "libserver.so";
+#endif
+    KeelCs2DamageSchema schema{};
+    if (KeelCs2_ResolveDamageSchema(&g_schema_system,module,&schema) != KEEL_RESULT_OK) return 1001;
+    KeelDamageInfo info{}; info.size = sizeof(info);
+    const auto read = [&] { return KeelCs2_ReadDamage(&schema,g_hook_damage.bytes.data(),&info); };
+    if (read() != KEEL_RESULT_OK || info.damage != 42.5f || info.damage_type != 0x80000040 || info.damage_custom != -7 ||
+        info.inflictor != 0x6007 || info.attacker != UINT32_MAX || info.ability != 0x7008 || info.force[1] != 2 || info.position[2] != 6) return 1002;
+    KeelDamageEdit edit{sizeof(edit),0,12.25f,32,{7,8,9},{10,11,12}};
+    auto expected = g_hook_damage;
+    std::memcpy(expected.bytes.data()+hook_data_fixture::offsets[0],&edit.damage,4);
+    std::memcpy(expected.bytes.data()+hook_data_fixture::offsets[1],&edit.damage_type,4);
+    std::memcpy(expected.bytes.data()+hook_data_fixture::offsets[6],edit.force,12);
+    std::memcpy(expected.bytes.data()+hook_data_fixture::offsets[7],edit.position,12);
+    if (KeelCs2_WriteDamage(&schema,g_hook_damage.bytes.data(),&edit) != KEEL_RESULT_OK ||
+        g_hook_damage.bytes != expected.bytes || read() != KEEL_RESULT_OK || info.damage_custom != -7 || info.damage != 12.25f) return 1003;
+    edit.position[2] = std::numeric_limits<float>::infinity();
+    if (KeelCs2_WriteDamage(&schema,g_hook_damage.bytes.data(),&edit) != KEEL_RESULT_INVALID_ARGUMENT ||
+        g_hook_damage.bytes != expected.bytes) return 1004;
+    edit.position[2] = 12; edit.damage = -1;
+    if (KeelCs2_WriteDamage(&schema,g_hook_damage.bytes.data(),&edit) != KEEL_RESULT_INVALID_ARGUMENT ||
+        g_hook_damage.bytes != expected.bytes) return 1005;
+    edit.damage = 1; auto invalid = schema; invalid.offsets[7] = invalid.offsets[0];
+    if (KeelCs2_WriteDamage(&invalid,g_hook_damage.bytes.data(),&edit) != KEEL_RESULT_INCOMPATIBLE ||
+        g_hook_damage.bytes != expected.bytes) return 1006;
+    if (KeelCs2_ReadDamage(&schema,g_hook_damage.bytes.data()+1,&info) != KEEL_RESULT_INCOMPATIBLE || info.damage ||
+        info.inflictor != UINT32_MAX) return 1007;
+    const auto old = g_hook_damage_fields[0]; g_hook_damage_fields[0].m_nSingleInheritanceOffset = 112;
+    if (KeelCs2_ResolveDamageSchema(&g_schema_system,module,&invalid) != KEEL_RESULT_INCOMPATIBLE || invalid.class_info) return 1008;
+    g_hook_damage_fields[0] = old; g_hook_damage_enum.m_nSize = 8;
+    if (KeelCs2_ResolveDamageSchema(&g_schema_system,module,&invalid) != KEEL_RESULT_INCOMPATIBLE) return 1009;
+    g_hook_damage_enum.m_nSize = 4; g_hook_damage_fields[2].m_pszName = "missing";
+    if (KeelCs2_ResolveDamageSchema(&g_schema_system,module,&invalid) != KEEL_RESULT_NOT_FOUND) return 1010;
+    HookDataFixture();
+    const auto nonfinite = std::numeric_limits<float>::quiet_NaN();
+    std::memcpy(g_hook_damage.bytes.data()+hook_data_fixture::offsets[0],&nonfinite,4);
+    if (read() != KEEL_RESULT_INCOMPATIBLE || info.damage || info.attacker != UINT32_MAX || info.force[0]) return 1018;
+    HookDataFixture();
+    info.size = 0;
+    if (KeelCs2_ReadDamage(&schema,g_hook_damage.bytes.data(),&info) != KEEL_RESULT_INVALID_ARGUMENT || info.damage) return 1019;
+    edit.size = 0;
+    if (KeelCs2_WriteDamage(&schema,g_hook_damage.bytes.data(),&edit) != KEEL_RESULT_INVALID_ARGUMENT ||
+        g_hook_damage.bytes != hook_data_fixture::MakeDamage().bytes) return 1020;
+    KeelCs2WeaponSchema weapon{};
+    KeelCs2EntityIdentity pawn{};
+    if (KeelCs2_ResolveWeaponSchema(&g_schema_system,module,&weapon) != KEEL_RESULT_OK ||
+        KeelCs2_FindEntityByIndex(EntitySystem(),7,&pawn) != KEEL_RESULT_OK) return 1011;
+    KeelBool matches = KEEL_FALSE;
+    if (KeelCs2_WeaponMatches(EntitySystem(),&pawn,&weapon,g_hook_weapon.data(),&matches) != KEEL_RESULT_OK || !matches) return 1012;
+    if (KeelCs2_WeaponMatches(EntitySystem(),&pawn,&weapon,reinterpret_cast<void*>(1),&matches) != KEEL_RESULT_OK || matches) return 1013;
+    StorePointer(g_entity_storage.data()+weapon.pointer_offset,nullptr);
+    if (KeelCs2_WeaponMatches(EntitySystem(),&pawn,&weapon,g_hook_weapon.data(),&matches) != KEEL_RESULT_OK || matches) return 1021;
+    StorePointer(g_entity_storage.data()+weapon.pointer_offset,g_hook_weapon.data());
+    StorePointer(g_hook_weapon.data()+16,nullptr);
+    if (KeelCs2_WeaponMatches(EntitySystem(),&pawn,&weapon,g_hook_weapon.data(),&matches) != KEEL_RESULT_NOT_FOUND || matches) return 1014;
+    StorePointer(g_hook_weapon.data()+16,EntityInstance());
+    auto stale = pawn; stale.source2_handle += 0x8000;
+    if (KeelCs2_WeaponMatches(EntitySystem(),&stale,&weapon,g_hook_weapon.data(),&matches) != KEEL_RESULT_NOT_FOUND || matches) return 1015;
+    g_hook_weapon_pointer.m_pType = g_hook_float.Get();
+    if (KeelCs2_ResolveWeaponSchema(&g_schema_system,module,&weapon) != KEEL_RESULT_INCOMPATIBLE || weapon.pawn_class) return 1016;
+    HookDataFixture(); g_hook_component_inherit.m_pClass = &g_hook_component;
+    if (KeelCs2_ResolveWeaponSchema(&g_schema_system,module,&weapon) != KEEL_RESULT_INCOMPATIBLE) return 1017;
+    return 0;
+}
+
 int RunHandleChecks()
 {
     static_assert(keels2::schema::detail::ValueType<CEntityHandle>() == KEELS2_SCHEMA_ENTITY_HANDLE);
@@ -1503,6 +1644,17 @@ int RunNativeBridgeChecks()
 
 }
 
+extern "C" KEELS2_SCHEMA_FIXTURE_EXPORT void KeelTest_HookDataFixture(void** damage, void** component)
+{
+    HookDataFixture();
+    if (damage) *damage = g_hook_damage.bytes.data();
+    if (component) *component = g_hook_weapon.data();
+}
+extern "C" KEELS2_SCHEMA_FIXTURE_EXPORT void KeelTest_HookDataSchemaCallback(void (*callback)())
+{
+    g_hook_schema_callback = callback;
+}
+
 extern "C" KEELS2_SCHEMA_FIXTURE_EXPORT void* KeelTest_SchemaSystem()
 {
     return &g_schema_system;
@@ -1551,7 +1703,7 @@ int main()
 {
     for (const auto check : {RunHandleChecks, RunPlayerInputChecks, RunEntityWriteChecks,
                             RunPlayerStatChecks, RunRoundChecks, RunPlayerManagementChecks,
-                            RunPlayerActionChecks, RunNativeBridgeChecks})
+                            RunPlayerActionChecks, RunNativeBridgeChecks, RunHookDataChecks})
         if (const int result = check()) {
             std::cerr << "schema/entity native bridge check " << result << " failed\n";
             return result;

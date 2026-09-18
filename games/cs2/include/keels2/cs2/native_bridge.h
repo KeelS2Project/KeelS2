@@ -6,6 +6,7 @@
 #include <keels2/player_actions.h>
 #include <keels2/player_management.h>
 #include <keels2/entity_writes.h>
+#include <keels2/entity_hook_data.h>
 #include <keels2/round_control.h>
 #include <keels2/player_statistics.h>
 #include <keels2/players.h>
@@ -33,6 +34,27 @@ typedef struct KeelCs2EntityIdentity
     int32_t index;
     uint32_t source2_handle;
 } KeelCs2EntityIdentity;
+
+/* Per-operation schema snapshots. Resolve before reacquiring the adapter map
+ * epoch and entity system; never retain native argument pointers in these. */
+typedef struct KeelCs2DamageSchema
+{
+    void* class_info;
+    int32_t offsets[8];
+} KeelCs2DamageSchema;
+typedef struct KeelCs2WeaponSchema
+{
+    void* pawn_class;
+    void* component_class;
+    int32_t pointer_offset;
+    int32_t chain_offset;
+} KeelCs2WeaponSchema;
+KeelResult KeelCs2_ResolveDamageSchema(void* schema_system, const char* module, KeelCs2DamageSchema* output);
+KeelResult KeelCs2_ReadDamage(const KeelCs2DamageSchema* schema, const void* record, KeelDamageInfo* output);
+KeelResult KeelCs2_WriteDamage(const KeelCs2DamageSchema* schema, void* record, const KeelDamageEdit* edit);
+KeelResult KeelCs2_ResolveWeaponSchema(void* schema_system, const char* module, KeelCs2WeaponSchema* output);
+KeelResult KeelCs2_WeaponMatches(void* entity_system, const KeelCs2EntityIdentity* pawn,
+    const KeelCs2WeaponSchema* schema, const void* candidate, KeelBool* matches);
 
 typedef struct KeelCs2PlayerActionBindings
 {

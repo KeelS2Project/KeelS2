@@ -2167,6 +2167,51 @@ public:
         return result;
     }
 
+    KeelResult AccessDamage(const void* record, KeelDamageInfo* output, const KeelDamageEdit* edit)
+    {
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (!schema_system_.instance || schema_server_module_.empty()) return KEEL_RESULT_NOT_READY;
+        void* system{}; std::string error; std::uint64_t epoch{};
+        {
+            std::scoped_lock lock(schema_entity_mutex_);
+            const auto ready = CurrentEntitySystemLocked(system,error);
+            if (ready != KEEL_RESULT_OK) return ready;
+            epoch = entity_epoch_;
+        }
+        KeelCs2DamageSchema schema{};
+        const auto resolved = KeelCs2_ResolveDamageSchema(schema_system_.instance,schema_server_module_.c_str(),&schema);
+        if (resolved != KEEL_RESULT_OK) return resolved;
+        std::scoped_lock lock(schema_entity_mutex_);
+        void* current{};
+        const auto ready = CurrentEntitySystemLocked(current,error);
+        if (ready != KEEL_RESULT_OK) return ready;
+        if (epoch != entity_epoch_ || current != system) return KEEL_RESULT_NOT_FOUND;
+        return edit ? KeelCs2_WriteDamage(&schema,const_cast<void*>(record),edit) : KeelCs2_ReadDamage(&schema,record,output);
+    }
+    KeelResult WeaponMatches(const GameEntityIdentity& pawn, const void* candidate, KeelBool& matches)
+    {
+        matches = KEEL_FALSE;
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (!schema_system_.instance || schema_server_module_.empty()) return KEEL_RESULT_NOT_READY;
+        void* system{}; std::string error;
+        {
+            std::scoped_lock lock(schema_entity_mutex_);
+            const auto ready = CurrentEntitySystemLocked(system,error);
+            if (ready != KEEL_RESULT_OK) return ready;
+            if (!pawn.epoch || pawn.epoch != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+        }
+        KeelCs2WeaponSchema schema{};
+        const auto resolved = KeelCs2_ResolveWeaponSchema(schema_system_.instance,schema_server_module_.c_str(),&schema);
+        if (resolved != KEEL_RESULT_OK) return resolved;
+        std::scoped_lock lock(schema_entity_mutex_);
+        void* current{};
+        const auto ready = CurrentEntitySystemLocked(current,error);
+        if (ready != KEEL_RESULT_OK) return ready;
+        if (pawn.epoch != entity_epoch_ || current != system) return KEEL_RESULT_NOT_FOUND;
+        const KeelCs2EntityIdentity identity{pawn.index,pawn.source2_handle};
+        return KeelCs2_WeaponMatches(system,&identity,&schema,candidate,&matches);
+    }
+
     KeelResult CaptureEntity(const void* instance, GameEntityIdentity& entity)
     {
         entity = {};
@@ -4180,6 +4225,34 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayerStat
         try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->AccessPlayerStat(*entity,key,value,true); }
         catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
     };
+    return KEEL_RESULT_OK;
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityHookData(
+    std::uint32_t version, keels2::host::GameAdapterEntityHookDataApi* api) noexcept
+{
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {};
+    if (version != keels2::host::kGameAdapterEntityHookDataVersion) return KEEL_RESULT_INCOMPATIBLE;
+    *api = {sizeof(*api),keels2::host::kGameAdapterEntityHookDataVersion,
+        [](keels2::host::GameAdapter* adapter, const void* record, KeelDamageInfo* output) noexcept -> KeelResult {
+            const bool sized = output && output->size == sizeof(*output);
+            if (output) { *output = {}; output->size = sizeof(*output); output->inflictor = output->attacker = output->ability = UINT32_MAX; }
+            if (!adapter || !record || !sized) return KEEL_RESULT_INVALID_ARGUMENT;
+            try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->AccessDamage(record,output,nullptr); }
+            catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        },
+        [](keels2::host::GameAdapter* adapter, void* record, const KeelDamageEdit* edit) noexcept -> KeelResult {
+            if (!adapter || !record || !edit) return KEEL_RESULT_INVALID_ARGUMENT;
+            try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->AccessDamage(record,nullptr,edit); }
+            catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        },
+        [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* pawn, const void* candidate, KeelBool* matches) noexcept -> KeelResult {
+            if (matches) *matches = KEEL_FALSE;
+            if (!adapter || !pawn || !candidate || !matches) return KEEL_RESULT_INVALID_ARGUMENT;
+            try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->WeaponMatches(*pawn,candidate,*matches); }
+            catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        }};
     return KEEL_RESULT_OK;
 }
 

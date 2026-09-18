@@ -1742,6 +1742,8 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "[Schema Entity Test] entity serial reuse validation passed") &&
             Contains(messages, "[Schema Entity Test] map epoch invalidation passed") &&
             Contains(messages, "[Schema Entity Test] wrong-thread access rejected") &&
+            Contains(messages, "[Schema Entity Test] typed hook data passed") &&
+            !Contains(messages, "[Schema Entity Test] typed hook data failed") &&
             Count(messages, "[Schema Entity Test] schema and entity views invalidated before unload") == 2 &&
             Count(messages, "plugin unloaded: [01] Schema Entity Test") == 2 &&
             !Contains(messages, "schema and entity load validation failed") &&
@@ -3697,6 +3699,22 @@ int main(int argument_count, char** arguments)
         const auto deferred_path = plugin_directory / (std::string("01_schema_entity_service") + plugin_extension);
         if (!deferred_fixture.Open(RuntimePluginPath(plugin_directory, deferred_path), loader_error))
             return 210;
+        using HookFixture = void (*)(void**,void**);
+        using HookCallbackSetter = void (*)(void (*)());
+        using HookInputs = void (*)(void*,void*,HookCallbackSetter,void (*)());
+        const auto hook_fixture = reinterpret_cast<HookFixture>(schema_entity_fixture.Symbol("KeelTest_HookDataFixture"));
+        const auto hook_callback = reinterpret_cast<HookCallbackSetter>(schema_entity_fixture.Symbol("KeelTest_HookDataSchemaCallback"));
+        const auto hook_inputs = reinterpret_cast<HookInputs>(deferred_fixture.Symbol("KeelTest_HookDataInputs"));
+        if (!hook_fixture || !hook_callback || !hook_inputs) return 216;
+        void* damage_record{}; void* weapon_component{};
+        hook_fixture(&damage_record,&weapon_component);
+        hook_inputs(damage_record,weapon_component,hook_callback,+[] {
+            DispatchSource2LevelShutdown(); DispatchSource2LevelInit();
+        });
+        if (!g_cvar.Dispatch({"keel_schema_entity_check","hookdata"}) ||
+            !Contains(messages(),"[Schema Entity Test] typed hook data passed")) {
+            std::fputs(messages(),stderr); return 217;
+        }
         using DeferredFixture = void* (*)(void (*)());
         const auto deferred = reinterpret_cast<DeferredFixture>(deferred_fixture.Symbol("KeelTest_DeferredDispatch"));
         if (!deferred)
