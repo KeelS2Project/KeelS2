@@ -71,6 +71,11 @@ int main(int argument_count, char** arguments)
     const KeelRoundTermination round{sizeof(round),8,1,0,0};
     if (module.RoundCapabilities(capabilities) != KEEL_RESULT_UNSUPPORTED || capabilities ||
         module.TerminateRound(round) != KEEL_RESULT_UNSUPPORTED) return 14;
+    std::uint32_t read_mask = UINT32_MAX, write_mask = UINT32_MAX;
+    std::int32_t statistic = 99;
+    if (module.PlayerStatCapabilities(read_mask,write_mask) != KEEL_RESULT_UNSUPPORTED || read_mask || write_mask ||
+        module.ReadPlayerStat(entity,KEELS2_PLAYER_STAT_MONEY,statistic) != KEEL_RESULT_UNSUPPORTED || statistic ||
+        module.WritePlayerStat(entity,KEELS2_PLAYER_STAT_MONEY,1) != KEEL_RESULT_UNSUPPORTED) return 15;
     std::uint64_t buttons = UINT64_MAX, context = UINT64_MAX;
     if (module.ReadPlayerInput(0, 1, buttons, context) != KEEL_RESULT_UNSUPPORTED || buttons || context)
         return 11;

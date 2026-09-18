@@ -65,7 +65,7 @@ SchemaClassFieldData_t g_input_pointer{}, g_input_state{}, g_input_masks{};
 SchemaBaseClassInfoData_t g_input_pawn_base{};
 CSchemaClassInfo g_controller_base{}, g_controller_class{};
 CSchemaClassInfo g_round_proxy_class{}, g_round_rules_class{};
-SchemaClassFieldData_t g_round_field{};
+CSchemaClassInfo g_stat_base{}, g_stat_money{}, g_stat_tracking{}, g_stat_match{}, g_stat_values{}, g_stat_chainer{};
 SchemaClassFieldData_t g_controller_fields[2]{}, g_controller_pawn{};
 SchemaBaseClassInfoData_t g_controller_inherit{};
 template <typename T> struct SchemaStorage {
@@ -99,7 +99,7 @@ CSchemaClassInfo* DeclaredClass(const char* name)
     if (name && std::strcmp(name, "CTakeDamageInfo") == 0)
         return &g_damage_class;
     if (!g_buttons_registered && name && std::strcmp(name, "CInButtonState") == 0) return nullptr;
-    for (auto* type : {&g_input_pawn_class, &g_movement_class, &g_buttons_class, &g_controller_base, &g_controller_class, &g_round_proxy_class, &g_round_rules_class})
+    for (auto* type : {&g_input_pawn_class, &g_movement_class, &g_buttons_class, &g_controller_base, &g_controller_class, &g_round_proxy_class, &g_round_rules_class, &g_stat_base, &g_stat_money, &g_stat_tracking, &g_stat_match, &g_stat_values, &g_stat_chainer})
         if (name && type->m_pszName && std::strcmp(name, type->m_pszName) == 0) return type;
     return nullptr;
 }
@@ -236,6 +236,7 @@ void Reset()
     g_input_read_callback = nullptr;
     g_input_pawn_class = g_movement_class = g_buttons_class = g_controller_base = g_controller_class = {};
     g_round_proxy_class = g_round_rules_class = {};
+    g_stat_base = g_stat_money = g_stat_tracking = g_stat_match = g_stat_values = g_stat_chainer = {};
     g_int32_type_storage.fill(std::byte{});
     g_entity_system_storage.fill(std::byte{});
     g_identity_storage.fill(std::byte{});
@@ -499,6 +500,7 @@ void TestTerminateRound(void* rules, std::uint32_t reason, const std::uint32_t* 
 }
 int RunRoundChecks()
 {
+    SchemaClassFieldData_t g_round_field{};
     Reset();
 #if defined(_WIN32)
     constexpr const char* module = "server.dll";
@@ -582,6 +584,143 @@ int RunRoundChecks()
     if (find() != KEEL_RESULT_OK || g_round_calls != valid_calls) return 719;
     g_round_destroy = true;
     if (apply() != KEEL_RESULT_OK || g_round_calls != valid_calls+1 || Identity()->m_pInstance) return 720;
+    Reset();
+    return 0;
+}
+
+unsigned g_stat_notifications{};
+bool g_stat_notification_valid{}, g_stat_destroy{}, g_stat_throw{};
+void* g_stat_notify_address{};
+std::int32_t g_stat_observed{};
+void TestStatNotify(void* controller, const NetworkStateChangedData& changed)
+{
+    ++g_stat_notifications;
+    g_stat_notification_valid = controller == EntityInstance() && changed.m_unk001 == 0;
+    if (g_stat_notify_address) std::memcpy(&g_stat_observed,g_stat_notify_address,sizeof(g_stat_observed));
+    if (g_stat_destroy) Identity()->m_pInstance = nullptr;
+    if (g_stat_throw) throw std::runtime_error("fixture notification failed after mutation");
+}
+int RunPlayerStatChecks()
+{
+    Reset();
+#if defined(_WIN32)
+    constexpr const char* module = "server.dll";
+#else
+    constexpr const char* module = "libserver.so";
+#endif
+    std::array<void*,30> controller_table{};
+    std::array<void*,3> money_table{}, tracking_table{}, wrong_table{};
+    controller_table[29] = FunctionAddress(&TestStatNotify);
+    alignas(16) std::array<std::byte,128> money{};
+    alignas(16) std::array<std::byte,256> tracking{};
+    const auto info = [](CSchemaClassInfo& type, const char* name, int size, std::uint8_t alignment) {
+        type = {}; type.m_pszName = name; type.m_nSize = size; type.m_nAlignment = alignment;
+    };
+    info(g_controller_class,"CCSPlayerController",static_cast<int>(kEntitySize),16);
+    info(g_stat_base,"CPlayerControllerComponent",64,16);
+    info(g_stat_money,"CCSPlayerController_InGameMoneyServices",128,16);
+    info(g_stat_tracking,"CCSPlayerController_ActionTrackingServices",256,16);
+    info(g_stat_match,"CSMatchStats_t",32,4);
+    info(g_stat_values,"CSPerRoundStats_t",16,4);
+    info(g_stat_chainer,"CNetworkVarChainer",40,8);
+    SchemaBaseClassInfoData_t root_base{0,&g_base_class}, component_base{0,&g_stat_base}, match_base{0,&g_stat_values};
+    g_controller_class.m_nBaseClassCount = 1; g_controller_class.m_pBaseClasses = &root_base;
+    g_stat_money.m_nBaseClassCount = g_stat_tracking.m_nBaseClassCount = 1;
+    g_stat_money.m_pBaseClasses = g_stat_tracking.m_pBaseClasses = &component_base;
+    g_stat_match.m_nBaseClassCount = 1; g_stat_match.m_pBaseClasses = &match_base;
+    SchemaStorage<CSchemaType_DeclaredClass> money_type, tracking_type, match_type, chain_type;
+    const auto declared = [](CSchemaType_DeclaredClass* type, CSchemaClassInfo* target) {
+        type->m_eTypeCategory = SCHEMA_TYPE_DECLARED_CLASS; type->m_eAtomicCategory = SCHEMA_ATOMIC_INVALID; type->m_pClassInfo = target;
+    };
+    declared(money_type.Get(),&g_stat_money); declared(tracking_type.Get(),&g_stat_tracking);
+    declared(match_type.Get(),&g_stat_match); declared(chain_type.Get(),&g_stat_chainer);
+    SchemaStorage<CSchemaType_Ptr> money_pointer, tracking_pointer;
+    const auto pointer = [](CSchemaType_Ptr* type, CSchemaType* target) {
+        type->m_eTypeCategory = SCHEMA_TYPE_POINTER; type->m_eAtomicCategory = SCHEMA_ATOMIC_INVALID; type->m_pObjectType = target;
+    };
+    pointer(money_pointer.Get(),money_type.Get()); pointer(tracking_pointer.Get(),tracking_type.Get());
+    constexpr auto money_pointer_offset = static_cast<std::int32_t>(Align(kHealthOffset+8,8));
+    constexpr auto tracking_pointer_offset = money_pointer_offset+8;
+    g_controller_fields[0] = {"m_pInGameMoneyServices",money_pointer.Get(),money_pointer_offset,0,nullptr};
+    g_controller_fields[1] = {"m_pActionTrackingServices",tracking_pointer.Get(),tracking_pointer_offset,0,nullptr};
+    g_controller_class.m_nFieldCount = 2; g_controller_class.m_pFields = g_controller_fields;
+    SchemaClassFieldData_t chain_field{"__m_pChainEntity",chain_type.Get(),8,0,nullptr};
+    g_stat_base.m_nFieldCount = 1; g_stat_base.m_pFields = &chain_field;
+    auto* integer = reinterpret_cast<CSchemaType_Builtin*>(g_int32_type_storage.data());
+    SchemaClassFieldData_t money_field{"m_iAccount",integer,80,0,nullptr};
+    SchemaClassFieldData_t tracking_field{"m_matchStats",match_type.Get(),80,0,nullptr};
+    SchemaClassFieldData_t values[]{{"m_iKills",integer,0,0,nullptr},{"m_iDeaths",integer,4,0,nullptr},{"m_iAssists",integer,8,0,nullptr}};
+    g_stat_money.m_nFieldCount = g_stat_tracking.m_nFieldCount = 1;
+    g_stat_money.m_pFields = &money_field; g_stat_tracking.m_pFields = &tracking_field;
+    g_stat_values.m_nFieldCount = 3; g_stat_values.m_pFields = values;
+    g_entity_class_info.m_pSchemaBinding = &g_controller_class;
+    StorePointer(g_entity_storage.data(),controller_table.data());
+    StorePointer(g_entity_storage.data()+money_pointer_offset,money.data());
+    StorePointer(g_entity_storage.data()+tracking_pointer_offset,tracking.data());
+    StorePointer(money.data(),money_table.data()); StorePointer(tracking.data(),tracking_table.data());
+    StorePointer(money.data()+8,EntityInstance()); StorePointer(tracking.data()+8,EntityInstance());
+    const KeelCs2PlayerStatisticsBindings bindings{controller_table.data(),money_table.data(),tracking_table.data(),controller_table[29]};
+    KeelCs2EntityIdentity entity{};
+    if (KeelCs2_FindEntityByIndex(EntitySystem(),kEntityIndex,&entity) != KEEL_RESULT_OK) return 801;
+    KeelCs2PlayerStatSchema schema{};
+    const auto resolve = [&](unsigned key) { return KeelCs2_ResolvePlayerStatSchema(&g_schema_system,module,key,&schema); };
+    std::int32_t value{};
+    const auto read = [&] { value = 99; return KeelCs2_ReadPlayerStat(EntitySystem(),&entity,&schema,&bindings,&value); };
+    const auto write = [&](std::int32_t next) { return KeelCs2_WritePlayerStat(EntitySystem(),&entity,&schema,&bindings,next); };
+    g_stat_notifications = 0; g_stat_destroy = g_stat_throw = false;
+    for (unsigned key : {1u,2u,4u,8u})
+    {
+        if (resolve(key) != KEEL_RESULT_OK || read() != KEEL_RESULT_OK || value) return 802;
+        g_stat_notify_address = key == 1 ? money.data()+80 : tracking.data()+80+(key == 2 ? 0 : key == 4 ? 4 : 8);
+        const auto expected = static_cast<std::int32_t>(20+key);
+        if (write(expected) != KEEL_RESULT_OK || !g_stat_notification_valid || g_stat_observed != expected ||
+            read() != KEEL_RESULT_OK || value != expected) return 803;
+        const auto notifications = g_stat_notifications;
+        if (write(expected) != KEEL_RESULT_OK || g_stat_notifications != notifications) return 804;
+    }
+    if (g_stat_notifications != 4 || resolve(1) != KEEL_RESULT_OK) return 805;
+    g_stat_notify_address = money.data()+80;
+    if (write(INT32_MAX) != KEEL_RESULT_OK || read() != KEEL_RESULT_OK || value != INT32_MAX) return 806;
+    const auto valid_notifications = g_stat_notifications;
+    if (write(-1) != KEEL_RESULT_INVALID_ARGUMENT) return 807;
+    SetHandle(*Identity(),13); if (read() != KEEL_RESULT_NOT_FOUND || value || write(1) != KEEL_RESULT_NOT_FOUND) return 808;
+    SetHandle(*Identity(),12);
+    StorePointer(money.data()+8,tracking.data()); if (read() != KEEL_RESULT_INCOMPATIBLE || value || write(1) != KEEL_RESULT_INCOMPATIBLE) return 809;
+    StorePointer(money.data()+8,EntityInstance());
+    StorePointer(g_entity_storage.data()+money_pointer_offset,nullptr); if (read() != KEEL_RESULT_NOT_READY || value) return 810;
+    StorePointer(g_entity_storage.data()+money_pointer_offset,money.data());
+    StorePointer(money.data(),wrong_table.data()); if (read() != KEEL_RESULT_INCOMPATIBLE || value) return 811;
+    StorePointer(money.data(),money_table.data());
+    const auto original = schema;
+    schema.value_offset = 8; if (write(1) != KEEL_RESULT_INCOMPATIBLE) return 812;
+    schema = original; schema.value_offset = INT32_MAX; if (write(1) != KEEL_RESULT_INCOMPATIBLE) return 813;
+    schema = original;
+    for (int bad : {-1,81,128,8}) { money_field.m_nSingleInheritanceOffset = bad; if (resolve(1) != KEEL_RESULT_INCOMPATIBLE) return 814; }
+    money_field.m_nSingleInheritanceOffset = 80;
+    integer->m_eBuiltinType = SCHEMA_BUILTIN_TYPE_UINT32; if (resolve(1) != KEEL_RESULT_INCOMPATIBLE) return 815;
+    integer->m_eBuiltinType = SCHEMA_BUILTIN_TYPE_INT32;
+    money_pointer.Get()->m_pObjectType = tracking_type.Get(); if (resolve(1) != KEEL_RESULT_INCOMPATIBLE) return 816;
+    money_pointer.Get()->m_pObjectType = money_type.Get();
+    chain_field.m_nSingleInheritanceOffset = 0; if (resolve(1) != KEEL_RESULT_INCOMPATIBLE) return 817; chain_field.m_nSingleInheritanceOffset = 8;
+    g_stat_chainer.m_nSize = 32; if (resolve(1) != KEEL_RESULT_INCOMPATIBLE) return 818; g_stat_chainer.m_nSize = 40;
+    SchemaClassFieldData_t duplicates[]{money_field,money_field}; g_stat_money.m_pFields = duplicates; g_stat_money.m_nFieldCount = 2;
+    if (resolve(1) != KEEL_RESULT_INCOMPATIBLE) return 819;
+    g_stat_money.m_pFields = &money_field; g_stat_money.m_nFieldCount = 1;
+    tracking_field.m_nSingleInheritanceOffset = 250; if (resolve(2) != KEEL_RESULT_INCOMPATIBLE) return 820; tracking_field.m_nSingleInheritanceOffset = 80;
+    SchemaStorage<CSchemaType_Atomic> atomic_storage;
+    auto* atomic = atomic_storage.Get(); atomic->m_eTypeCategory = SCHEMA_TYPE_ATOMIC; atomic->m_eAtomicCategory = SCHEMA_ATOMIC_PLAIN;
+    atomic->m_sTypeName = "CNetworkVarChainer"; atomic->m_nSize = 40; atomic->m_nAlignment = 8;
+    struct NameHold { CSchemaType_Atomic* type; ~NameHold() { type->m_sTypeName.Purge(); } } name_hold{atomic};
+    chain_field.m_pType = atomic;
+    if (resolve(1) != KEEL_RESULT_OK || read() != KEEL_RESULT_OK) return 821;
+    atomic->m_nSize = 32; if (resolve(1) != KEEL_RESULT_INCOMPATIBLE) return 822; atomic->m_nSize = 40;
+    for (unsigned invalid : {0u,3u,16u,UINT32_MAX}) if (resolve(invalid) != KEEL_RESULT_INVALID_ARGUMENT || schema.controller_class) return 823;
+    if (g_stat_notifications != valid_notifications || resolve(1) != KEEL_RESULT_OK) return 824;
+    g_stat_throw = true;
+    if (write(10) != KEEL_RESULT_ENGINE_FAILURE || g_stat_observed != 10 || read() != KEEL_RESULT_OK || value != 10) return 825;
+    g_stat_throw = false; g_stat_destroy = true;
+    if (write(11) != KEEL_RESULT_OK || Identity()->m_pInstance || g_stat_observed != 11) return 826;
+    g_stat_destroy = false; g_stat_notify_address = nullptr;
     Reset();
     return 0;
 }
@@ -1367,6 +1506,8 @@ int main()
     if (input) return input;
     const int writes = RunEntityWriteChecks();
     if (writes) return writes;
+    const int statistics = RunPlayerStatChecks();
+    if (statistics) return statistics;
     const int round = RunRoundChecks();
     if (round) return round;
     const int management = RunPlayerManagementChecks();

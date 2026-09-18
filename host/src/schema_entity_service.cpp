@@ -36,6 +36,8 @@ SchemaEntityService::SchemaEntityService(Host& host, GameAdapter& adapter)
         &ManagementCapabilitiesEntry, &ManagePlayerEntry};
     entity_writes_api_ = {sizeof(KeelEntityWritesApi), KEELS2_ENTITY_WRITES_API_VERSION, &WriteCapabilitiesEntry, &WriteFieldEntry};
     round_control_api_ = {sizeof(KeelRoundControlApi), KEELS2_ROUND_CONTROL_API_VERSION, &RoundCapabilitiesEntry, &TerminateRoundEntry};
+    player_statistics_api_ = {sizeof(KeelPlayerStatisticsApi), KEELS2_PLAYER_STATISTICS_API_VERSION,
+        &PlayerStatCapabilitiesEntry, &ReadPlayerStatEntry, &WritePlayerStatEntry};
     entities_api_ = {
         sizeof(KeelEntitiesApi),
         KEELS2_ENTITIES_API_VERSION,
@@ -201,6 +203,78 @@ KeelResult SchemaEntityService::ManagePlayer(KeelPluginHandle plugin, KeelEntity
 const KeelEntityWritesApi& SchemaEntityService::EntityWritesApi() const noexcept { return entity_writes_api_; }
 
 const KeelRoundControlApi& SchemaEntityService::RoundControlApi() const noexcept { return round_control_api_; }
+const KeelPlayerStatisticsApi& SchemaEntityService::PlayerStatisticsApi() const noexcept { return player_statistics_api_; }
+KeelResult SchemaEntityService::PlayerStatCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* readable, std::uint32_t* writable)
+{
+    if (readable) *readable = 0;
+    if (writable) *writable = 0;
+    try
+    {
+        auto* service = active_.load(std::memory_order_acquire);
+        return service ? service->PlayerStatCapabilities(plugin,readable,writable) : KEEL_RESULT_NOT_READY;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+KeelResult SchemaEntityService::PlayerStatCapabilities(KeelPluginHandle plugin, std::uint32_t* readable, std::uint32_t* writable)
+{
+    if (!readable || !writable) return KEEL_RESULT_INVALID_ARGUMENT;
+    std::scoped_lock state_lock(host_.state_mutex_);
+    if (!PluginReady(plugin)) return KEEL_RESULT_NOT_READY;
+    if (!adapter_.IsGameThread()) return KEEL_RESULT_WRONG_THREAD;
+    std::uint32_t reads{},writes{};
+    const auto result = host_.adapter_module_ ? host_.adapter_module_->PlayerStatCapabilities(reads,writes) : KEEL_RESULT_UNSUPPORTED;
+    if (result == KEEL_RESULT_OK) { *readable = reads; *writable = writes; }
+    return result;
+}
+KeelResult SchemaEntityService::ReadPlayerStatEntry(KeelPluginHandle plugin, KeelEntityHandle entity, std::uint32_t key, std::int32_t* output)
+{
+    if (!output) return KEEL_RESULT_INVALID_ARGUMENT;
+    *output = 0;
+    try
+    {
+        auto* service = active_.load(std::memory_order_acquire);
+        if (!service) return KEEL_RESULT_NOT_READY;
+        std::int32_t value{};
+        const auto result = service->AccessPlayerStat(plugin,entity,key,value,false);
+        if (result == KEEL_RESULT_OK) *output = value;
+        return result;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+KeelResult SchemaEntityService::WritePlayerStatEntry(KeelPluginHandle plugin, KeelEntityHandle entity, std::uint32_t key, std::int32_t value)
+{
+    try
+    {
+        auto* service = active_.load(std::memory_order_acquire);
+        return service ? service->AccessPlayerStat(plugin,entity,key,value,true) : KEEL_RESULT_NOT_READY;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+KeelResult SchemaEntityService::AccessPlayerStat(KeelPluginHandle plugin, KeelEntityHandle entity, std::uint32_t key, std::int32_t& value, bool write)
+{
+    if (!entity || (key != KEELS2_PLAYER_STAT_MONEY && key != KEELS2_PLAYER_STAT_MATCH_KILLS &&
+        key != KEELS2_PLAYER_STAT_MATCH_DEATHS && key != KEELS2_PLAYER_STAT_MATCH_ASSISTS) || (write && value < 0))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    std::scoped_lock state_lock(host_.state_mutex_);
+    if (!PluginReady(plugin)) return KEEL_RESULT_NOT_READY;
+    if (!adapter_.IsGameThread()) return KEEL_RESULT_WRONG_THREAD;
+    GameEntityIdentity identity;
+    {
+        std::scoped_lock lock(registry_mutex_);
+        const auto found = entities_.find(entity);
+        if (found == entities_.end() || found->second.owner != plugin) return KEEL_RESULT_NOT_FOUND;
+        identity = found->second.entity;
+    }
+    std::string error;
+    const auto valid = adapter_.ValidateEntity(identity,error);
+    if (valid != KEEL_RESULT_OK) return valid;
+    auto* owner = host_.PluginByHandle(plugin);
+    if (!owner || owner->active_native_operations == UINT32_MAX) return KEEL_RESULT_BUSY;
+    ++owner->active_native_operations;
+    struct Hold { std::uint32_t& count; ~Hold() { --count; } } hold{owner->active_native_operations};
+    if (!host_.adapter_module_) return KEEL_RESULT_UNSUPPORTED;
+    return write ? host_.adapter_module_->WritePlayerStat(identity,key,value) : host_.adapter_module_->ReadPlayerStat(identity,key,value);
+}
 KeelResult SchemaEntityService::RoundCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* capabilities)
 {
     if (capabilities) *capabilities = 0;

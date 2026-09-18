@@ -7,6 +7,7 @@
 #include <keels2/player_management.h>
 #include <keels2/entity_writes.h>
 #include <keels2/round_control.h>
+#include <keels2/player_statistics.h>
 #include <keels2/players.h>
 #include <keels2/player_input.h>
 
@@ -58,6 +59,33 @@ typedef struct KeelCs2RoundBindings
     void** proxy_vtable;
     void* terminate;
 } KeelCs2RoundBindings;
+
+typedef struct KeelCs2PlayerStatisticsBindings
+{
+    void** controller_vtable;
+    void** money_vtable;
+    void** tracking_vtable;
+    void* notify;
+} KeelCs2PlayerStatisticsBindings;
+
+/* Private, per-call metadata. Resolve before acquiring the current entity list;
+ * never retain a component pointer across schema calls or map transitions. */
+typedef struct KeelCs2PlayerStatSchema
+{
+    void* controller_class;
+    void* component_class;
+    int32_t pointer_offset;
+    int32_t chain_offset;
+    int32_t value_offset;
+    uint32_t key;
+} KeelCs2PlayerStatSchema;
+
+KeelResult KeelCs2_ResolvePlayerStatSchema(void* schema_system, const char* module, uint32_t key,
+    KeelCs2PlayerStatSchema* schema);
+KeelResult KeelCs2_ReadPlayerStat(void* entity_system, const KeelCs2EntityIdentity* controller,
+    const KeelCs2PlayerStatSchema* schema, const KeelCs2PlayerStatisticsBindings* bindings, int32_t* value);
+KeelResult KeelCs2_WritePlayerStat(void* entity_system, const KeelCs2EntityIdentity* controller,
+    const KeelCs2PlayerStatSchema* schema, const KeelCs2PlayerStatisticsBindings* bindings, int32_t value);
 
 /* Private bridge context, never exposed to plugins/scripts. Preparation may
  * call schema interfaces; revalidate the adapter map epoch before dispatch. */

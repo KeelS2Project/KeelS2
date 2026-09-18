@@ -1,6 +1,7 @@
 #include <keels2/player_management.h>
 #include <keels2/entity_writes.h>
 #include <keels2/round_control.h>
+#include <keels2/player_statistics.h>
 #include <keels2/keels2.hpp>
 
 #include <string.h>
@@ -168,6 +169,15 @@ private:
         if (round->capabilities(g_owner,&capabilities) != KEEL_RESULT_WRONG_THREAD || capabilities ||
             round->terminate(g_owner,&termination) != KEEL_RESULT_WRONG_THREAD)
         { LogError("round control wrong-thread rejection failed"); return; }
+        if (g_api->query_service(g_owner,KEELS2_PLAYER_STATISTICS_SERVICE_NAME,1,&raw) != KEEL_RESULT_OK || !raw)
+        { LogError("statistics wrong-thread lookup failed"); return; }
+        const auto* stats = static_cast<const KeelPlayerStatisticsApi*>(raw);
+        std::uint32_t reads = UINT32_MAX, writes_mask = UINT32_MAX;
+        std::int32_t result_value = 99;
+        if (stats->capabilities(g_owner,&reads,&writes_mask) != KEEL_RESULT_WRONG_THREAD || reads || writes_mask ||
+            stats->read(g_owner,1,KEELS2_PLAYER_STAT_MONEY,&result_value) != KEEL_RESULT_WRONG_THREAD || result_value ||
+            stats->write(g_owner,1,KEELS2_PLAYER_STAT_MONEY,1) != KEEL_RESULT_WRONG_THREAD)
+        { LogError("statistics wrong-thread rejection failed"); return; }
         keels2::SchemaField<int32> field;
         keels2::Entity entity;
         int32 health;
@@ -251,6 +261,22 @@ private:
         valid = valid && management->apply(g_owner, entity, &request) == KEEL_RESULT_INVALID_ARGUMENT;
         request.kind = KEELS2_PLAYER_MANAGEMENT_CHANGE_TEAM; request.team = 256;
         valid = valid && management->apply(g_owner, entity, &request) == KEEL_RESULT_INVALID_ARGUMENT;
+        const void* stat_raw{};
+        valid = valid && g_api->query_service(g_owner,KEELS2_PLAYER_STATISTICS_SERVICE_NAME,2,&stat_raw) == KEEL_RESULT_INCOMPATIBLE &&
+            g_api->query_service(g_owner,KEELS2_PLAYER_STATISTICS_SERVICE_NAME,1,&stat_raw) == KEEL_RESULT_OK;
+        const auto* stats = static_cast<const KeelPlayerStatisticsApi*>(stat_raw);
+        if (!valid || !stats || stats->size != sizeof(*stats) || stats->api_version != 1 || !stats->capabilities || !stats->read || !stats->write) return false;
+        std::uint32_t readable = UINT32_MAX, writable = UINT32_MAX;
+        std::int32_t stat_value = 99;
+        valid = valid && stats->capabilities(g_owner,&readable,&writable) == KEEL_RESULT_UNSUPPORTED && !readable && !writable &&
+            stats->capabilities(g_owner,nullptr,&writable) == KEEL_RESULT_INVALID_ARGUMENT &&
+            stats->read(g_owner,entity,KEELS2_PLAYER_STAT_MONEY,&stat_value) == KEEL_RESULT_UNSUPPORTED && !stat_value &&
+            stats->write(g_owner,entity,KEELS2_PLAYER_STAT_MONEY,1) == KEEL_RESULT_UNSUPPORTED &&
+            stats->write(g_owner+10000,entity,KEELS2_PLAYER_STAT_MONEY,1) == KEEL_RESULT_NOT_READY &&
+            stats->write(g_owner,entity+10000,KEELS2_PLAYER_STAT_MONEY,1) == KEEL_RESULT_NOT_FOUND &&
+            stats->read(g_owner,entity,KEELS2_PLAYER_STAT_MONEY,nullptr) == KEEL_RESULT_INVALID_ARGUMENT &&
+            stats->write(g_owner,entity,3,1) == KEEL_RESULT_INVALID_ARGUMENT &&
+            stats->write(g_owner,entity,KEELS2_PLAYER_STAT_MONEY,-1) == KEEL_RESULT_INVALID_ARGUMENT;
         const void* round_raw{};
         valid = valid && g_api->query_service(g_owner,KEELS2_ROUND_CONTROL_SERVICE_NAME,2,&round_raw) == KEEL_RESULT_INCOMPATIBLE &&
             g_api->query_service(g_owner,KEELS2_ROUND_CONTROL_SERVICE_NAME,1,&round_raw) == KEEL_RESULT_OK;

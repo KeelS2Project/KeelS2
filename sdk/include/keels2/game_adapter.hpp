@@ -8,6 +8,7 @@
 #include <keels2/player_management.h>
 #include <keels2/entity_writes.h>
 #include <keels2/round_control.h>
+#include <keels2/player_statistics.h>
 #include <keels2/player_input.h>
 #include <keels2/players.h>
 #include <keels2/keelhook.h>
@@ -219,6 +220,18 @@ using GameAdapterCreateFn = GameAdapter* (*)(const GameAdapterHostApi* host);
 inline constexpr const char* kGameAdapterPlayerActionSymbol = "KeelGameAdapter_PlayerAction";
 using GameAdapterPlayerActionFn = KeelResult (*)(GameAdapter*, const GameEntityIdentity*, const KeelPlayerAction*) noexcept;
 using GameAdapterDestroyFn = void (*)(GameAdapter* adapter);
+
+inline constexpr const char* kGameAdapterPlayerStatisticsSymbol = "KeelGameAdapter_QueryPlayerStatistics";
+inline constexpr std::uint32_t kGameAdapterPlayerStatisticsVersion = 1;
+struct GameAdapterPlayerStatisticsApi
+{
+    std::uint32_t size;
+    std::uint32_t api_version;
+    KeelResult (*capabilities)(GameAdapter*, std::uint32_t*, std::uint32_t*) noexcept;
+    KeelResult (*read)(GameAdapter*, const GameEntityIdentity*, std::uint32_t, std::int32_t*) noexcept;
+    KeelResult (*write)(GameAdapter*, const GameEntityIdentity*, std::uint32_t, std::int32_t) noexcept;
+};
+using GameAdapterQueryPlayerStatisticsFn = KeelResult (*)(std::uint32_t, GameAdapterPlayerStatisticsApi*) noexcept;
 
 inline constexpr const char* kGameAdapterRoundControlSymbol = "KeelGameAdapter_QueryRoundControl";
 inline constexpr std::uint32_t kGameAdapterRoundControlVersion = 1;

@@ -1184,6 +1184,13 @@ KeelResult Host::QueryService(
         *service = &published_services_->Api();
         return KEEL_RESULT_OK;
     }
+    if (std::strcmp(name, KEELS2_PLAYER_STATISTICS_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_PLAYER_STATISTICS_API_VERSION) return KEEL_RESULT_INCOMPATIBLE;
+        if (!schema_entities_) schema_entities_ = std::make_unique<SchemaEntityService>(*this, *adapter_);
+        *service = &schema_entities_->PlayerStatisticsApi();
+        return KEEL_RESULT_OK;
+    }
     if (std::strcmp(name, KEELS2_ROUND_CONTROL_SERVICE_NAME) == 0)
     {
         if (version != KEELS2_ROUND_CONTROL_API_VERSION) return KEEL_RESULT_INCOMPATIBLE;

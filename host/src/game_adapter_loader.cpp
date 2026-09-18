@@ -140,6 +140,20 @@ bool GameAdapterModule::Load(
         library_.Symbol(kGameAdapterCommandCallerSymbol));
     player_action_ = SymbolFunction<GameAdapterPlayerActionFn>(
         library_.Symbol(kGameAdapterPlayerActionSymbol));
+    const auto query_stats = SymbolFunction<GameAdapterQueryPlayerStatisticsFn>(library_.Symbol(kGameAdapterPlayerStatisticsSymbol));
+    if (query_stats)
+    {
+        GameAdapterPlayerStatisticsApi stats{};
+        stats.size = sizeof(stats); stats.api_version = kGameAdapterPlayerStatisticsVersion;
+        if (query_stats(kGameAdapterPlayerStatisticsVersion,&stats) != KEEL_RESULT_OK || stats.size != sizeof(stats) ||
+            stats.api_version != kGameAdapterPlayerStatisticsVersion || !stats.capabilities || !stats.read || !stats.write)
+        {
+            error = "game adapter player statistics API is incompatible";
+            Reset();
+            return false;
+        }
+        player_statistics_ = stats;
+    }
     const auto query_round = SymbolFunction<GameAdapterQueryRoundControlFn>(library_.Symbol(kGameAdapterRoundControlSymbol));
     if (query_round)
     {
@@ -272,6 +286,7 @@ void GameAdapterModule::Reset() noexcept
     player_management_ = {};
     entity_writes_ = {};
     round_control_ = {};
+    player_statistics_ = {};
     player_input_ = {};
     messaging_ = {};
     convar_observers_ = {};
@@ -361,6 +376,24 @@ KeelResult GameAdapterModule::RoundCapabilities(std::uint32_t& capabilities) con
     capabilities = 0;
     return adapter_ && round_control_.capabilities
         ? round_control_.capabilities(adapter_, &capabilities) : KEEL_RESULT_UNSUPPORTED;
+}
+
+KeelResult GameAdapterModule::PlayerStatCapabilities(std::uint32_t& readable, std::uint32_t& writable) const noexcept
+{
+    readable = writable = 0;
+    return adapter_ && player_statistics_.capabilities
+        ? player_statistics_.capabilities(adapter_,&readable,&writable) : KEEL_RESULT_UNSUPPORTED;
+}
+KeelResult GameAdapterModule::ReadPlayerStat(const GameEntityIdentity& controller, std::uint32_t key, std::int32_t& value) const noexcept
+{
+    value = 0;
+    return adapter_ && player_statistics_.read
+        ? player_statistics_.read(adapter_,&controller,key,&value) : KEEL_RESULT_UNSUPPORTED;
+}
+KeelResult GameAdapterModule::WritePlayerStat(const GameEntityIdentity& controller, std::uint32_t key, std::int32_t value) const noexcept
+{
+    return adapter_ && player_statistics_.write
+        ? player_statistics_.write(adapter_,&controller,key,value) : KEEL_RESULT_UNSUPPORTED;
 }
 
 KeelResult GameAdapterModule::TerminateRound(const KeelRoundTermination& request) const noexcept

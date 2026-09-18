@@ -1315,3 +1315,205 @@ extern "C" KeelResult KeelCs2_ReadControllerInput(void* entity_system, void* sch
     }
     catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
 }
+
+namespace
+{
+struct StatFailure { KeelResult result; };
+void StatRequire(bool valid, KeelResult result = KEEL_RESULT_INCOMPATIBLE)
+{
+    if (!valid) throw StatFailure{result};
+}
+bool StatKey(std::uint32_t key)
+{
+    return key == KEELS2_PLAYER_STAT_MONEY || key == KEELS2_PLAYER_STAT_MATCH_KILLS ||
+        key == KEELS2_PLAYER_STAT_MATCH_DEATHS || key == KEELS2_PLAYER_STAT_MATCH_ASSISTS;
+}
+CSchemaClassInfo* StatClass(ISchemaSystemTypeScope* scope, const char* name)
+{
+    auto* type = scope->FindDeclaredClass(name).Get();
+    StatRequire(type != nullptr,KEEL_RESULT_NOT_FOUND);
+    StatRequire(ValidClass(type) && type->m_pszName && std::strcmp(type->m_pszName,name) == 0);
+    return type;
+}
+const SchemaClassFieldData_t& StatField(const CSchemaClassInfo* type, const char* name)
+{
+    const SchemaClassFieldData_t* result{};
+    StatRequire(ValidClass(type));
+    for (std::uint32_t i = 0; i < type->m_nFieldCount; ++i)
+    {
+        const auto& field = type->m_pFields[i];
+        if (!field.m_pszName || std::strcmp(field.m_pszName,name)) continue;
+        StatRequire(result == nullptr);
+        result = &field;
+    }
+    StatRequire(result != nullptr,KEEL_RESULT_NOT_FOUND);
+    StatRequire(result->m_pType != nullptr);
+    return *result;
+}
+std::uint32_t StatSpan(const CSchemaClassInfo* type, std::int32_t offset, std::uint32_t size, std::uint32_t alignment)
+{
+    StatRequire(ValidClass(type) && offset >= 0 && size && PowerOfTwo(alignment) && type->m_nAlignment >= alignment);
+    const auto start = static_cast<std::uint32_t>(offset);
+    StatRequire(start % alignment == 0 && static_cast<std::uint64_t>(start)+size <= static_cast<std::uint64_t>(type->m_nSize));
+    return start;
+}
+void StatDeclared(const CSchemaType* type, const CSchemaClassInfo* expected)
+{
+    StatRequire(type && type->m_eTypeCategory == SCHEMA_TYPE_DECLARED_CLASS && type->m_eAtomicCategory == SCHEMA_ATOMIC_INVALID &&
+        static_cast<const CSchemaType_DeclaredClass*>(type)->m_pClassInfo == expected);
+}
+std::uint32_t StatBase(const CSchemaClassInfo* derived, const CSchemaClassInfo* base)
+{
+    std::array<const CSchemaClassInfo*,64> path{};
+    std::size_t visited{};
+    bool found{};
+    std::uint64_t offset{};
+    StatRequire(FindBaseOffset(derived,base,0,path,0,visited,found,offset) == HierarchyResult::found && found && offset <= INT32_MAX);
+    return static_cast<std::uint32_t>(offset);
+}
+void StatChainer(const CSchemaType* type)
+{
+    StatRequire(type != nullptr);
+    // This pinned CS2 ABI has a 40-byte chainer: owner pointer at offset0,
+    // serializer path index at32. No plugin-controlled pointer layout is used.
+    if (type->m_eTypeCategory == SCHEMA_TYPE_ATOMIC && type->m_eAtomicCategory == SCHEMA_ATOMIC_PLAIN)
+    {
+        const auto* atomic = static_cast<const CSchemaType_Atomic*>(type);
+        const auto* name = atomic->m_sTypeName.Get();
+        StatRequire(name && std::strcmp(name,"CNetworkVarChainer") == 0 && atomic->m_nSize == 40 && atomic->m_nAlignment == 8);
+        return;
+    }
+    StatRequire(type->m_eTypeCategory == SCHEMA_TYPE_DECLARED_CLASS && type->m_eAtomicCategory == SCHEMA_ATOMIC_INVALID);
+    const auto* info = static_cast<const CSchemaType_DeclaredClass*>(type)->m_pClassInfo;
+    StatRequire(ValidClass(info) && info->m_pszName && std::strcmp(info->m_pszName,"CNetworkVarChainer") == 0 &&
+        info->m_nSize == 40 && info->m_nAlignment == 8);
+}
+const char* StatComponentName(std::uint32_t key)
+{
+    return key == KEELS2_PLAYER_STAT_MONEY ? "CCSPlayerController_InGameMoneyServices" : "CCSPlayerController_ActionTrackingServices";
+}
+void* StatAddress(void* system, const KeelCs2EntityIdentity& entity, const KeelCs2PlayerStatSchema& schema,
+    const KeelCs2PlayerStatisticsBindings& bindings, void*& controller)
+{
+    StatRequire(system && StatKey(schema.key) && bindings.controller_vtable && bindings.money_vtable &&
+        bindings.tracking_vtable && bindings.notify,KEEL_RESULT_INVALID_ARGUMENT);
+    const auto* root = static_cast<const CSchemaClassInfo*>(schema.controller_class);
+    const auto* type = static_cast<const CSchemaClassInfo*>(schema.component_class);
+    StatRequire(ValidClass(root) && ValidClass(type) && root->m_pszName && type->m_pszName &&
+        std::strcmp(root->m_pszName,"CCSPlayerController") == 0 && std::strcmp(type->m_pszName,StatComponentName(schema.key)) == 0);
+    const auto pointer_offset = StatSpan(root,schema.pointer_offset,sizeof(void*),alignof(void*));
+    const auto chain_offset = StatSpan(type,schema.chain_offset,40,8);
+    const auto value_offset = StatSpan(type,schema.value_offset,4,4);
+    StatRequire(pointer_offset >= sizeof(void*) && chain_offset >= sizeof(void*) && value_offset >= sizeof(void*) &&
+        (value_offset+4 <= chain_offset || value_offset >= chain_offset+40));
+    auto* identity = IdentityByHandle(static_cast<CEntitySystem*>(system),entity.source2_handle);
+    StatRequire(identity && identity->GetEntityIndex().Get() == entity.index,KEEL_RESULT_NOT_FOUND);
+    StatRequire(identity->m_pClass->GetSchemaBinding() == root);
+    controller = identity->m_pInstance;
+    const auto address = reinterpret_cast<std::uintptr_t>(controller);
+    StatRequire(address % root->m_nAlignment == 0 && pointer_offset+sizeof(void*)-1 <= UINTPTR_MAX-address);
+    void** table{};
+    std::memcpy(&table,controller,sizeof(table));
+    StatRequire(table == bindings.controller_vtable && table[29] == bindings.notify);
+    void* component{};
+    std::memcpy(&component,reinterpret_cast<const void*>(address+pointer_offset),sizeof(component));
+    StatRequire(component != nullptr,KEEL_RESULT_NOT_READY);
+    const auto component_address = reinterpret_cast<std::uintptr_t>(component);
+    StatRequire(component_address % type->m_nAlignment == 0 &&
+        static_cast<std::uint32_t>(type->m_nSize)-1 <= UINTPTR_MAX-component_address);
+    std::memcpy(&table,component,sizeof(table));
+    StatRequire(table == (schema.key == KEELS2_PLAYER_STAT_MONEY ? bindings.money_vtable : bindings.tracking_vtable));
+    void* owner{};
+    std::memcpy(&owner,reinterpret_cast<const void*>(component_address+chain_offset),sizeof(owner));
+    StatRequire(owner == controller);
+    return reinterpret_cast<void*>(component_address+value_offset);
+}
+}
+
+extern "C" KeelResult KeelCs2_ResolvePlayerStatSchema(void* schema_system, const char* module, std::uint32_t key,
+    KeelCs2PlayerStatSchema* output)
+{
+    if (output) *output = {};
+    if (!output || !schema_system || !module || !*module || !StatKey(key)) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        auto* scope = reinterpret_cast<ISchemaSystemTypeScope*>(static_cast<ISchemaSystem*>(schema_system)->FindTypeScopeForModule(module));
+        StatRequire(scope != nullptr,KEEL_RESULT_NOT_FOUND);
+        auto* controller = StatClass(scope,"CCSPlayerController");
+        auto* component = StatClass(scope,StatComponentName(key));
+        auto* base = StatClass(scope,"CPlayerControllerComponent");
+        auto* entity = StatClass(scope,"CBaseEntity");
+        StatRequire(StatBase(controller,entity) == 0);
+        const auto& pointer = StatField(controller,key == KEELS2_PLAYER_STAT_MONEY ? "m_pInGameMoneyServices" : "m_pActionTrackingServices");
+        StatRequire(pointer.m_pType->m_eTypeCategory == SCHEMA_TYPE_POINTER && pointer.m_pType->m_eAtomicCategory == SCHEMA_ATOMIC_INVALID);
+        StatDeclared(static_cast<const CSchemaType_Ptr*>(pointer.m_pType)->m_pObjectType,component);
+        const auto pointer_offset = StatSpan(controller,pointer.m_nSingleInheritanceOffset,sizeof(void*),alignof(void*));
+        const auto& chainer = StatField(base,"__m_pChainEntity");
+        StatChainer(chainer.m_pType);
+        const auto chain_offset = StatBase(component,base)+StatSpan(base,chainer.m_nSingleInheritanceOffset,40,8);
+        StatSpan(component,static_cast<std::int32_t>(chain_offset),40,8);
+        auto* values = component;
+        std::uint32_t embedded_offset{};
+        if (key != KEELS2_PLAYER_STAT_MONEY)
+        {
+            auto* match = StatClass(scope,"CSMatchStats_t");
+            values = StatClass(scope,"CSPerRoundStats_t");
+            const auto& embedded = StatField(component,"m_matchStats");
+            StatDeclared(embedded.m_pType,match);
+            embedded_offset = StatSpan(component,embedded.m_nSingleInheritanceOffset,
+                static_cast<std::uint32_t>(match->m_nSize),match->m_nAlignment)+StatBase(match,values);
+        }
+        const char* name = key == KEELS2_PLAYER_STAT_MONEY ? "m_iAccount" : key == KEELS2_PLAYER_STAT_MATCH_KILLS ? "m_iKills" :
+            key == KEELS2_PLAYER_STAT_MATCH_DEATHS ? "m_iDeaths" : "m_iAssists";
+        const auto& field = StatField(values,name);
+        StatRequire(field.m_pType->m_eTypeCategory == SCHEMA_TYPE_BUILTIN && field.m_pType->m_eAtomicCategory == SCHEMA_ATOMIC_INVALID);
+        const auto* integer = static_cast<const CSchemaType_Builtin*>(field.m_pType);
+        StatRequire(integer->m_eBuiltinType == SCHEMA_BUILTIN_TYPE_INT32 && integer->m_nSize == 4);
+        const auto value_offset = embedded_offset+StatSpan(values,field.m_nSingleInheritanceOffset,4,4);
+        StatSpan(component,static_cast<std::int32_t>(value_offset),4,4);
+        StatRequire(pointer_offset >= sizeof(void*) && chain_offset >= sizeof(void*) && value_offset >= sizeof(void*) &&
+            (value_offset+4 <= chain_offset || value_offset >= chain_offset+40));
+        *output = {controller,component,static_cast<std::int32_t>(pointer_offset),static_cast<std::int32_t>(chain_offset),
+            static_cast<std::int32_t>(value_offset),key};
+        return KEEL_RESULT_OK;
+    }
+    catch (const StatFailure& failure) { return failure.result; }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+extern "C" KeelResult KeelCs2_ReadPlayerStat(void* system, const KeelCs2EntityIdentity* entity,
+    const KeelCs2PlayerStatSchema* schema, const KeelCs2PlayerStatisticsBindings* bindings, std::int32_t* output)
+{
+    if (output) *output = 0;
+    if (!entity || !schema || !bindings || !output) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        void* controller{};
+        const auto* address = StatAddress(system,*entity,*schema,*bindings,controller);
+        std::memcpy(output,address,sizeof(*output));
+        return KEEL_RESULT_OK;
+    }
+    catch (const StatFailure& failure) { return failure.result; }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+extern "C" KeelResult KeelCs2_WritePlayerStat(void* system, const KeelCs2EntityIdentity* entity,
+    const KeelCs2PlayerStatSchema* schema, const KeelCs2PlayerStatisticsBindings* bindings, std::int32_t value)
+{
+    if (!entity || !schema || !bindings || value < 0) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        void* controller{};
+        auto* address = StatAddress(system,*entity,*schema,*bindings,controller);
+        std::int32_t previous{};
+        std::memcpy(&previous,address,sizeof(previous));
+        if (previous == value) return KEEL_RESULT_OK;
+        const NetworkStateChangedData changed(true);
+        const auto notify = NativeActionFunction<void (*)(void*,const NetworkStateChangedData&)>(bindings->notify);
+        std::memcpy(address,&value,sizeof(value));
+        notify(controller,changed);
+        // Component, controller and schema lifetimes can change in callbacks.
+        // Do not touch any of those borrowed pointers after notification.
+        return KEEL_RESULT_OK;
+    }
+    catch (const StatFailure& failure) { return failure.result; }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}

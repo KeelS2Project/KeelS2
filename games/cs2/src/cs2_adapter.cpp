@@ -5,6 +5,7 @@
 #include <keels2/cs2/player_actions.h>
 #include <keels2/cs2/player_management.h>
 #include <keels2/cs2/round_control.h>
+#include <keels2/cs2/player_statistics.h>
 #include <keels2/cs2/entity_writes.h>
 #include <keels2/keelhook.hpp>
 #include <keels2/platform/console.h>
@@ -652,6 +653,7 @@ public:
         player_action_bindings_ = {};
         player_management_bindings_ = {};
         round_bindings_ = {};
+        player_statistics_bindings_ = {};
         entity_write_notify_ = nullptr;
         if (trace)
         {
@@ -1767,6 +1769,54 @@ public:
         buttons = held;
         context = previous.token;
         return KEEL_RESULT_OK;
+    }
+
+    KeelResult PlayerStatCapabilities(std::uint32_t& readable, std::uint32_t& writable)
+    {
+        readable = writable = 0;
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (!player_statistics_bindings_.notify)
+        {
+            if (compatibility_profile_.empty()) return KEEL_RESULT_UNSUPPORTED;
+            platform::LoadedModule module;
+            std::string error;
+            if (platform::FindLoadedModule(server_.module_path,module,error) != platform::ModuleLookup::found)
+                return KEEL_RESULT_NOT_READY;
+            const auto result = cs2::ResolvePlayerStatistics(module,compatibility_profile_,player_statistics_bindings_,error);
+            if (result != KEEL_RESULT_OK) return result;
+        }
+        readable = writable = KEELS2_PLAYER_STAT_MONEY | KEELS2_PLAYER_STAT_MATCH_KILLS |
+            KEELS2_PLAYER_STAT_MATCH_DEATHS | KEELS2_PLAYER_STAT_MATCH_ASSISTS;
+        return KEEL_RESULT_OK;
+    }
+    KeelResult AccessPlayerStat(const GameEntityIdentity& entity, std::uint32_t key, std::int32_t& value, bool write)
+    {
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if ((key != KEELS2_PLAYER_STAT_MONEY && key != KEELS2_PLAYER_STAT_MATCH_KILLS &&
+            key != KEELS2_PLAYER_STAT_MATCH_DEATHS && key != KEELS2_PLAYER_STAT_MATCH_ASSISTS) || (write && value < 0))
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        if (active_stat_calls_ >= 8) return KEEL_RESULT_BUSY;
+        ++active_stat_calls_;
+        struct Hold { unsigned& count; ~Hold() { --count; } } hold{active_stat_calls_};
+        std::uint32_t readable{},writable{};
+        auto result = PlayerStatCapabilities(readable,writable);
+        if (result != KEEL_RESULT_OK) return result;
+        if (!((write ? writable : readable) & key)) return KEEL_RESULT_UNSUPPORTED;
+        if (!schema_system_.instance || schema_server_module_.empty()) return KEEL_RESULT_NOT_READY;
+        KeelCs2PlayerStatSchema schema{};
+        result = KeelCs2_ResolvePlayerStatSchema(schema_system_.instance,schema_server_module_.c_str(),key,&schema);
+        if (result != KEEL_RESULT_OK) return result;
+        void* system{};
+        std::string error;
+        {
+            std::scoped_lock lock(schema_entity_mutex_);
+            result = CurrentEntitySystemLocked(system,error);
+            if (result != KEEL_RESULT_OK) return result;
+            if (!entity.epoch || entity.epoch != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+        }
+        const KeelCs2EntityIdentity controller{entity.index,entity.source2_handle};
+        return write ? KeelCs2_WritePlayerStat(system,&controller,&schema,&player_statistics_bindings_,value) :
+            KeelCs2_ReadPlayerStat(system,&controller,&schema,&player_statistics_bindings_,&value);
     }
 
     KeelResult RoundCapabilities(std::uint32_t& capabilities)
@@ -3721,6 +3771,8 @@ private:
     KeelCs2PlayerManagementBindings player_management_bindings_{};
     KeelCs2RoundBindings round_bindings_{};
     unsigned active_round_calls_{};
+    KeelCs2PlayerStatisticsBindings player_statistics_bindings_{};
+    unsigned active_stat_calls_{};
     void* entity_write_notify_{};
     std::string schema_server_module_;
     std::string entity_system_module_;
@@ -4045,6 +4097,40 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayerInpu
             *buttons = *context = 0;
             return KEEL_RESULT_ENGINE_FAILURE;
         }
+    };
+    return KEEL_RESULT_OK;
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayerStatistics(
+    std::uint32_t version, keels2::host::GameAdapterPlayerStatisticsApi* api) noexcept
+{
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {};
+    if (version != keels2::host::kGameAdapterPlayerStatisticsVersion) return KEEL_RESULT_INCOMPATIBLE;
+    api->size = sizeof(*api); api->api_version = version;
+    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* readable, std::uint32_t* writable) noexcept {
+        if (readable) *readable = 0;
+        if (writable) *writable = 0;
+        if (!adapter || !readable || !writable) return KEEL_RESULT_INVALID_ARGUMENT;
+        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->PlayerStatCapabilities(*readable,*writable); }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    };
+    api->read = [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* entity, std::uint32_t key, std::int32_t* output) noexcept {
+        if (output) *output = 0;
+        if (!adapter || !entity || !output) return KEEL_RESULT_INVALID_ARGUMENT;
+        try
+        {
+            std::int32_t value{};
+            const auto result = static_cast<keels2::host::Cs2Adapter*>(adapter)->AccessPlayerStat(*entity,key,value,false);
+            if (result == KEEL_RESULT_OK) *output = value;
+            return result;
+        }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    };
+    api->write = [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* entity, std::uint32_t key, std::int32_t value) noexcept {
+        if (!adapter || !entity) return KEEL_RESULT_INVALID_ARGUMENT;
+        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->AccessPlayerStat(*entity,key,value,true); }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
     };
     return KEEL_RESULT_OK;
 }

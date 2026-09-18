@@ -32,10 +32,16 @@ public:
     const KeelPlayerManagementApi& PlayerManagementApi() const noexcept;
     const KeelEntityWritesApi& EntityWritesApi() const noexcept;
     const KeelRoundControlApi& RoundControlApi() const noexcept;
+    const KeelPlayerStatisticsApi& PlayerStatisticsApi() const noexcept;
     KeelResult ReleasePlugin(KeelPluginHandle plugin);
     bool Shutdown();
 
 private:
+    static KeelResult PlayerStatCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* readable, std::uint32_t* writable);
+    static KeelResult ReadPlayerStatEntry(KeelPluginHandle plugin, KeelEntityHandle entity, std::uint32_t key, std::int32_t* value);
+    static KeelResult WritePlayerStatEntry(KeelPluginHandle plugin, KeelEntityHandle entity, std::uint32_t key, std::int32_t value);
+    KeelResult PlayerStatCapabilities(KeelPluginHandle plugin, std::uint32_t* readable, std::uint32_t* writable);
+    KeelResult AccessPlayerStat(KeelPluginHandle plugin, KeelEntityHandle entity, std::uint32_t key, std::int32_t& value, bool write);
     static KeelResult RoundCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* capabilities);
     static KeelResult TerminateRoundEntry(KeelPluginHandle plugin, const KeelRoundTermination* request);
     KeelResult RoundCapabilities(KeelPluginHandle plugin, std::uint32_t* capabilities);
@@ -153,6 +159,7 @@ private:
     KeelPlayerManagementApi player_management_api_{};
     KeelEntityWritesApi entity_writes_api_{};
     KeelRoundControlApi round_control_api_{};
+    KeelPlayerStatisticsApi player_statistics_api_{};
     mutable std::mutex registry_mutex_;
     std::unordered_map<std::string, std::shared_ptr<GameSchemaField>> field_cache_;
     std::unordered_map<KeelSchemaFieldHandle, FieldRecord> fields_;
