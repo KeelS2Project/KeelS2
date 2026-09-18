@@ -2167,6 +2167,23 @@ public:
         return result;
     }
 
+    KeelResult CaptureEntity(const void* instance, GameEntityIdentity& entity)
+    {
+        entity = {};
+        if (!instance) return KEEL_RESULT_INVALID_ARGUMENT;
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        std::scoped_lock lock(schema_entity_mutex_);
+        void* system{};
+        std::string error;
+        const auto ready = CurrentEntitySystemLocked(system, error);
+        if (ready != KEEL_RESULT_OK) return ready;
+        KeelCs2EntityIdentity native{};
+        const auto result = KeelCs2_CaptureEntity(system, instance, &native);
+        if (result != KEEL_RESULT_OK) return result;
+        entity = {native.index, native.source2_handle, entity_epoch_};
+        return KEEL_RESULT_OK;
+    }
+
     KeelResult VisitEntities(const GameEntityAccessRequest* requests, std::uint32_t count,
         KeelEntityAccessCallback callback, void* user_data)
     {
@@ -4163,6 +4180,22 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayerStat
         try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->AccessPlayerStat(*entity,key,value,true); }
         catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
     };
+    return KEEL_RESULT_OK;
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityCapture(
+    std::uint32_t version, keels2::host::GameAdapterEntityCaptureApi* api) noexcept
+{
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {};
+    if (version != keels2::host::kGameAdapterEntityCaptureVersion) return KEEL_RESULT_INCOMPATIBLE;
+    *api = {sizeof(*api), keels2::host::kGameAdapterEntityCaptureVersion,
+        [](keels2::host::GameAdapter* adapter, const void* instance, keels2::host::GameEntityIdentity* entity) noexcept -> KeelResult {
+            if (entity) *entity = {};
+            if (!adapter || !instance || !entity) return KEEL_RESULT_INVALID_ARGUMENT;
+            try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->CaptureEntity(instance, *entity); }
+            catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        }};
     return KEEL_RESULT_OK;
 }
 

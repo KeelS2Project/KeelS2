@@ -32,12 +32,15 @@ public:
     const KeelPlayerManagementApi& PlayerManagementApi() const noexcept;
     const KeelEntityWritesApi& EntityWritesApi() const noexcept;
     const KeelEntityAccessApi& EntityAccessApi() const noexcept;
+    const KeelEntityCaptureApi& EntityCaptureApi() const noexcept;
     const KeelRoundControlApi& RoundControlApi() const noexcept;
     const KeelPlayerStatisticsApi& PlayerStatisticsApi() const noexcept;
     KeelResult ReleasePlugin(KeelPluginHandle plugin);
     bool Shutdown();
 
 private:
+    static KeelResult CaptureEntityEntry(KeelPluginHandle plugin, const void* instance, KeelEntityHandle* output);
+    KeelResult CaptureEntity(KeelPluginHandle plugin, const void* instance, KeelEntityHandle* output);
     static KeelResult VisitEntitiesEntry(KeelPluginHandle plugin, const KeelEntityAccessSpec* entities,
         std::uint32_t count, KeelEntityAccessCallback callback, void* user_data);
     KeelResult VisitEntities(KeelPluginHandle plugin, const KeelEntityAccessSpec* entities,
@@ -164,6 +167,7 @@ private:
     KeelPlayerManagementApi player_management_api_{};
     KeelEntityWritesApi entity_writes_api_{};
     KeelEntityAccessApi entity_access_api_{};
+    KeelEntityCaptureApi entity_capture_api_{};
     unsigned entity_access_depth_ = 0;
     KeelRoundControlApi round_control_api_{};
     KeelPlayerStatisticsApi player_statistics_api_{};

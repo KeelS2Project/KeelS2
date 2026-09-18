@@ -145,6 +145,7 @@ KeelResult KeelCs2_FindEntityBySource2Handle(
 KeelResult KeelCs2_ValidateEntity(
     void* entity_system,
     const KeelCs2EntityIdentity* entity);
+KeelResult KeelCs2_CaptureEntity(void* entity_system, const void* instance, KeelCs2EntityIdentity* output);
 KeelResult KeelCs2_ResolveEntityPointer(void* entity_system, const KeelCs2EntityIdentity* entity,
     const char* class_name, void** output);
 KeelResult KeelCs2_ReadEntityField(

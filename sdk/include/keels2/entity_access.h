@@ -39,6 +39,25 @@ typedef struct KeelEntityAccessApi
     KeelResult (*visit)(KeelPluginHandle plugin, const KeelEntityAccessSpec* entities,
         uint32_t count, KeelEntityAccessCallback callback, void* user_data);
 } KeelEntityAccessApi;
+
+#define KEELS2_ENTITY_CAPTURE_SERVICE_NAME "keels2.entity_capture"
+#define KEELS2_ENTITY_CAPTURE_API_VERSION 1u
+
+typedef struct KeelEntityCaptureApi
+{
+    uint32_t size;
+    uint32_t api_version;
+    /* Game-thread native bridge for an entity pointer from a reviewed engine
+     * callback. The caller must supply a readable complete entity instance,
+     * not an interior/base-adjusted pointer or a script-provided address.
+     * The adapter checks the canonical entity registry, liveness and schema
+     * alignment before capturing the current identity and map epoch.
+     * Success returns an owned KeelEntities handle; release it with that API.
+     * Failure clears entity. Missing adapters return UNSUPPORTED. A retained
+     * handle detects deletion, serial reuse and map changes; it does not pin
+     * engine memory. Do not use a stale native pointer to reacquire identity. */
+    KeelResult (*capture)(KeelPluginHandle plugin, const void* instance, KeelEntityHandle* entity);
+} KeelEntityCaptureApi;
 #ifdef __cplusplus
 }
 #endif

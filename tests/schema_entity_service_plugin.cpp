@@ -61,6 +61,7 @@ public:
 
     void Unload() override
     {
+        if (captured_ && captured_api_) { captured_api_->release(g_owner,captured_); captured_ = 0; }
         LogMessage(!health_ && !retained_
             ? "schema and entity views invalidated before unload"
             : "schema or entity view remained active during unload");
@@ -69,7 +70,7 @@ public:
     void OnLevelShutdown() override
     {
         int32 health;
-        LogMessage(!retained_.Valid() && !retained_.Read(health_, health)
+        LogMessage(CapturedStale() && !retained_.Valid() && !retained_.Read(health_, health)
             ? "map epoch invalidation passed"
             : "map epoch invalidation failed");
     }
@@ -153,10 +154,37 @@ private:
         if (access->size != sizeof(*access) || access->api_version != 1 || !access->visit) return false;
         if (g_api->query_service(g_owner, KEELS2_ENTITIES_SERVICE_NAME, 1, &raw) != KEEL_RESULT_OK || !raw) return false;
         const auto* entities = static_cast<const KeelEntitiesApi*>(raw);
+        const void* capture_raw{};
+        if (g_api->query_service(g_owner, KEELS2_ENTITY_CAPTURE_SERVICE_NAME, 2, &capture_raw) != KEEL_RESULT_INCOMPATIBLE ||
+            g_api->query_service(g_owner, KEELS2_ENTITY_CAPTURE_SERVICE_NAME, 1, &capture_raw) != KEEL_RESULT_OK || !capture_raw) return false;
+        const auto* capture = static_cast<const KeelEntityCaptureApi*>(capture_raw);
+        if (capture->size != sizeof(*capture) || capture->api_version != 1 || !capture->capture) return false;
         KeelEntityHandle entity{};
         if (entities->find_by_index(g_owner, 7, &entity) != KEEL_RESULT_OK) return false;
         KeelEntityAccessSpec specs[2]{{sizeof(KeelEntityAccessSpec), 0, entity, "CCSPlayerPawn"},
             {sizeof(KeelEntityAccessSpec), 0, entity, "CBaseEntity"}};
+        if (captured_ && captured_api_) { captured_api_->release(g_owner,captured_); captured_ = 0; }
+        captured_api_ = entities;
+        struct CaptureProbe { const KeelEntityCaptureApi* capture; const KeelEntitiesApi* entities; KeelEntityHandle source; KeelEntityHandle* retained; } capture_probe{capture,entities,entity,&captured_};
+        const auto capture_pointer = [](void* data, void* const* pointers, std::uint32_t count) -> KeelResult {
+            auto& probe = *static_cast<CaptureProbe*>(data);
+            if (!pointers || count != 1 || !pointers[0]) return KEEL_RESULT_ENGINE_FAILURE;
+            KeelEntityHandle handle = 99;
+            if (probe.capture->capture(g_owner, nullptr, &handle) != KEEL_RESULT_INVALID_ARGUMENT || handle ||
+                probe.capture->capture(g_owner, pointers[0], nullptr) != KEEL_RESULT_INVALID_ARGUMENT ||
+                probe.capture->capture(g_owner + 10000, pointers[0], &handle) != KEEL_RESULT_NOT_READY || handle)
+                return KEEL_RESULT_ENGINE_FAILURE;
+            if (probe.capture->capture(g_owner, pointers[0], &handle) != KEEL_RESULT_OK || !handle || handle == probe.source)
+                return KEEL_RESULT_ENGINE_FAILURE;
+            KeelBool equal = KEEL_FALSE;
+            KeelEntityInfo info{}; info.size = sizeof(info);
+            const bool valid = probe.entities->equal(g_owner, handle, probe.source, &equal) == KEEL_RESULT_OK && equal &&
+                probe.entities->describe(g_owner, handle, &info) == KEEL_RESULT_OK && info.index == 7 && info.epoch;
+            if (probe.entities->release(g_owner, handle) != KEEL_RESULT_OK ||
+                probe.entities->describe(g_owner, handle, &info) != KEEL_RESULT_NOT_FOUND) return KEEL_RESULT_ENGINE_FAILURE;
+            return valid ? probe.capture->capture(g_owner,pointers[0],probe.retained) : KEEL_RESULT_ENGINE_FAILURE;
+        };
+        if (access->visit(g_owner, specs, 1, capture_pointer, &capture_probe) != KEEL_RESULT_OK) { entities->release(g_owner, entity); return false; }
         unsigned calls = 0;
         const auto count = [](void* data, void* const* pointers, std::uint32_t size) -> KeelResult {
             if (!pointers || !size || !pointers[0]) return KEEL_RESULT_ENGINE_FAILURE;
@@ -188,10 +216,15 @@ private:
         return valid;
     }
 
+    bool CapturedStale()
+    {
+        KeelEntityInfo info{}; info.size = sizeof(info);
+        return captured_ && captured_api_ && captured_api_->describe(g_owner,captured_,&info) != KEEL_RESULT_OK;
+    }
     void Stale()
     {
         int32 health;
-        LogMessage(!retained_.Valid() && !retained_.Read(health_, health) &&
+        LogMessage(CapturedStale() && !retained_.Valid() && !retained_.Read(health_, health) &&
                 health == 0 && retained_.LastResult() == KEEL_RESULT_NOT_FOUND &&
                 strcmp(retained_.LastError(), "not found") == 0 &&
                 !retained_.Same(retained_) && retained_.Kill() == KEEL_RESULT_NOT_FOUND &&
@@ -215,6 +248,13 @@ private:
         KeelEntityAccessSpec access_spec{sizeof(access_spec), 0, 1, "CCSPlayerPawn"};
         if (access->visit(g_owner, &access_spec, 1, [](void*, void* const*, std::uint32_t) { return KEEL_RESULT_OK; }, nullptr) != KEEL_RESULT_WRONG_THREAD)
         { LogError("entity access wrong-thread rejection failed"); return; }
+        const void* capture_raw{};
+        if (g_api->query_service(g_owner, KEELS2_ENTITY_CAPTURE_SERVICE_NAME, 1, &capture_raw) != KEEL_RESULT_OK || !capture_raw)
+        { LogError("entity capture wrong-thread lookup failed"); return; }
+        const auto* capture = static_cast<const KeelEntityCaptureApi*>(capture_raw);
+        KeelEntityHandle captured = 99;
+        if (capture->capture(g_owner, &captured, &captured) != KEEL_RESULT_WRONG_THREAD || captured)
+        { LogError("entity capture wrong-thread rejection failed"); return; }
         const auto* management = static_cast<const KeelPlayerManagementApi*>(raw);
         std::uint32_t capabilities = UINT32_MAX;
         const KeelPlayerManagementAction request{sizeof(request), KEELS2_PLAYER_MANAGEMENT_RESPAWN, 0, 0};
@@ -266,10 +306,10 @@ private:
     void Reuse()
     {
         int32 health;
-        const bool old_stale = !retained_.Valid();
+        const bool old_stale = CapturedStale() && !retained_.Valid();
         if (old_stale && FindEntity(7, retained_) &&
             retained_.Source2Handle() != original_handle_ &&
-            retained_.Read(health_, health) && health == 84)
+            retained_.Read(health_, health) && health == 84 && Access())
         {
             LogMessage("entity serial reuse validation passed");
             return;
@@ -401,6 +441,8 @@ private:
     keels2::SchemaField<int32> health_;
     keels2::Entity retained_;
     uint32 original_handle_ = 0;
+    KeelEntityHandle captured_ = 0;
+    const KeelEntitiesApi* captured_api_ = nullptr;
 };
 
 }

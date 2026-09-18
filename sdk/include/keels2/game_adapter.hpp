@@ -245,6 +245,16 @@ struct GameAdapterRoundControlApi
 };
 using GameAdapterQueryRoundControlFn = KeelResult (*)(std::uint32_t, GameAdapterRoundControlApi*) noexcept;
 
+inline constexpr const char* kGameAdapterEntityCaptureSymbol = "KeelGameAdapter_QueryEntityCapture";
+inline constexpr std::uint32_t kGameAdapterEntityCaptureVersion = 1;
+struct GameAdapterEntityCaptureApi
+{
+    std::uint32_t size;
+    std::uint32_t api_version;
+    KeelResult (*capture)(GameAdapter*, const void*, GameEntityIdentity*) noexcept;
+};
+using GameAdapterQueryEntityCaptureFn = KeelResult (*)(std::uint32_t, GameAdapterEntityCaptureApi*) noexcept;
+
 struct GameEntityAccessRequest
 {
     GameEntityIdentity entity;

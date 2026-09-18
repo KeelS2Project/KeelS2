@@ -1297,6 +1297,36 @@ int RunNativeBridgeChecks()
     const auto invalid_alignment = KeelCs2_ResolveEntityPointer(system, &entity, "CCSPlayerPawn", &pointer);
     g_derived_class.m_nAlignment = saved_alignment;
     if (invalid_alignment != KEEL_RESULT_INCOMPATIBLE || pointer) return 905;
+    KeelCs2EntityIdentity captured{};
+    if (KeelCs2_CaptureEntity(system, EntityInstance(), &captured) != KEEL_RESULT_OK ||
+        captured.index != entity.index || captured.source2_handle != entity.source2_handle) return 906;
+    if (KeelCs2_CaptureEntity(system, nullptr, &captured) != KEEL_RESULT_INVALID_ARGUMENT ||
+        captured.index || captured.source2_handle ||
+        KeelCs2_CaptureEntity(system, EntityInstance(), nullptr) != KEEL_RESULT_INVALID_ARGUMENT ||
+        KeelCs2_CaptureEntity(nullptr, EntityInstance(), &captured) != KEEL_RESULT_INVALID_ARGUMENT) return 907;
+    if (KeelCs2_CaptureEntity(system, reinterpret_cast<std::byte*>(EntityInstance()) + 1, &captured) != KEEL_RESULT_INVALID_ARGUMENT)
+        return 908;
+    auto* saved_backlink = EntityInstance()->m_pEntity;
+    for (auto* invalid : {static_cast<CEntityIdentity*>(nullptr), reinterpret_cast<CEntityIdentity*>(1),
+        reinterpret_cast<CEntityIdentity*>(reinterpret_cast<std::byte*>(Identity()) + 1)})
+    {
+        EntityInstance()->m_pEntity = invalid;
+        const auto status = KeelCs2_CaptureEntity(system, EntityInstance(), &captured);
+        EntityInstance()->m_pEntity = saved_backlink;
+        if (status != KEEL_RESULT_NOT_FOUND || captured.index || captured.source2_handle) return 909;
+    }
+    const auto saved_flags = Identity()->m_flags;
+    Identity()->m_flags = EF_DELETE_IN_PROGRESS;
+    const auto deleted = KeelCs2_CaptureEntity(system, EntityInstance(), &captured);
+    Identity()->m_flags = saved_flags;
+    if (deleted != KEEL_RESULT_NOT_FOUND || captured.index || captured.source2_handle) return 910;
+    alignas(CEntityInstance) std::array<std::byte, sizeof(CEntityInstance)> copy{};
+    std::memcpy(copy.data(), EntityInstance(), copy.size());
+    if (KeelCs2_CaptureEntity(system, copy.data(), &captured) != KEEL_RESULT_NOT_FOUND) return 911;
+    g_derived_class.m_nAlignment = 3;
+    const auto capture_alignment = KeelCs2_CaptureEntity(system, EntityInstance(), &captured);
+    g_derived_class.m_nAlignment = saved_alignment;
+    if (capture_alignment != KEEL_RESULT_INCOMPATIBLE || captured.index || captured.source2_handle) return 912;
     int32 health{};
     if (KeelCs2_ReadEntityField(
             system,

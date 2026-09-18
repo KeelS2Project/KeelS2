@@ -34,6 +34,8 @@ _Static_assert(offsetof(KeelPlayerStatisticsApi, write) == 24, "statistics write
 
 _Static_assert(sizeof(KeelEntityAccessSpec) == 24, "entity access spec ABI");
 _Static_assert(sizeof(KeelEntityAccessApi) == 16, "entity access table ABI");
+_Static_assert(sizeof(KeelEntityCaptureApi) == 16, "entity capture table ABI");
+_Static_assert(offsetof(KeelEntityCaptureApi, capture) == 8, "entity capture function ABI");
 _Static_assert(offsetof(KeelEntityAccessSpec, class_name) == 16, "entity access class ABI");
 
 int main(void)

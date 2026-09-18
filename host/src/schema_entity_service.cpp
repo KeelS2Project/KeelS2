@@ -34,6 +34,7 @@ SchemaEntityService::SchemaEntityService(Host& host, GameAdapter& adapter)
     player_actions_api_ = {sizeof(KeelPlayerActionsApi), KEELS2_PLAYER_ACTIONS_API_VERSION, &PlayerActionEntry};
     player_management_api_ = {sizeof(KeelPlayerManagementApi), KEELS2_PLAYER_MANAGEMENT_API_VERSION,
         &ManagementCapabilitiesEntry, &ManagePlayerEntry};
+    entity_capture_api_ = {sizeof(KeelEntityCaptureApi), KEELS2_ENTITY_CAPTURE_API_VERSION, &CaptureEntityEntry};
     entity_access_api_ = {sizeof(KeelEntityAccessApi), KEELS2_ENTITY_ACCESS_API_VERSION, &VisitEntitiesEntry};
     entity_writes_api_ = {sizeof(KeelEntityWritesApi), KEELS2_ENTITY_WRITES_API_VERSION, &WriteCapabilitiesEntry, &WriteFieldEntry};
     round_control_api_ = {sizeof(KeelRoundControlApi), KEELS2_ROUND_CONTROL_API_VERSION, &RoundCapabilitiesEntry, &TerminateRoundEntry};
@@ -65,6 +66,45 @@ const KeelSchemaApi& SchemaEntityService::SchemaApi() const noexcept
 const KeelEntitiesApi& SchemaEntityService::EntitiesApi() const noexcept
 {
     return entities_api_;
+}
+
+const KeelEntityCaptureApi& SchemaEntityService::EntityCaptureApi() const noexcept
+{
+    return entity_capture_api_;
+}
+
+KeelResult SchemaEntityService::CaptureEntityEntry(KeelPluginHandle plugin, const void* instance, KeelEntityHandle* output)
+{
+    if (output) *output = 0;
+    try
+    {
+        auto* service = active_.load(std::memory_order_acquire);
+        return service ? service->CaptureEntity(plugin, instance, output) : KEEL_RESULT_NOT_READY;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+KeelResult SchemaEntityService::CaptureEntity(KeelPluginHandle plugin, const void* instance, KeelEntityHandle* output)
+{
+    if (!instance || !output) return KEEL_RESULT_INVALID_ARGUMENT;
+    std::scoped_lock state_lock(host_.state_mutex_);
+    if (!PluginReady(plugin)) return KEEL_RESULT_NOT_READY;
+    if (!adapter_.IsGameThread()) return KEEL_RESULT_WRONG_THREAD;
+    GameEntityIdentity identity{};
+    const auto status = host_.adapter_module_
+        ? host_.adapter_module_->CaptureEntity(instance, identity) : KEEL_RESULT_UNSUPPORTED;
+    if (status != KEEL_RESULT_OK) return status;
+    if (identity.index < 0 || !identity.epoch || identity.source2_handle == KEELS2_INVALID_SOURCE2_ENTITY_HANDLE)
+        return KEEL_RESULT_INCOMPATIBLE;
+    std::string error;
+    const auto valid = adapter_.ValidateEntity(identity, error);
+    if (valid != KEEL_RESULT_OK) return valid;
+    std::scoped_lock lock(registry_mutex_);
+    if (shutting_down_.load(std::memory_order_acquire) || !next_entity_) return KEEL_RESULT_ENGINE_FAILURE;
+    const auto handle = next_entity_++;
+    entities_.emplace(handle, EntityRecord{plugin, identity});
+    *output = handle;
+    return KEEL_RESULT_OK;
 }
 
 const KeelEntityAccessApi& SchemaEntityService::EntityAccessApi() const noexcept

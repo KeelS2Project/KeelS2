@@ -168,6 +168,20 @@ bool GameAdapterModule::Load(
         }
         round_control_ = round;
     }
+    const auto query_capture = SymbolFunction<GameAdapterQueryEntityCaptureFn>(library_.Symbol(kGameAdapterEntityCaptureSymbol));
+    if (query_capture)
+    {
+        GameAdapterEntityCaptureApi capture{};
+        capture.size = sizeof(capture); capture.api_version = kGameAdapterEntityCaptureVersion;
+        if (query_capture(kGameAdapterEntityCaptureVersion, &capture) != KEEL_RESULT_OK ||
+            capture.size != sizeof(capture) || capture.api_version != kGameAdapterEntityCaptureVersion || !capture.capture)
+        {
+            error = "game adapter entity capture API is incompatible";
+            Reset();
+            return false;
+        }
+        entity_capture_ = capture;
+    }
     const auto query_access = SymbolFunction<GameAdapterQueryEntityAccessFn>(library_.Symbol(kGameAdapterEntityAccessSymbol));
     if (query_access)
     {
@@ -300,6 +314,7 @@ void GameAdapterModule::Reset() noexcept
     player_management_ = {};
     entity_writes_ = {};
     entity_access_ = {};
+    entity_capture_ = {};
     round_control_ = {};
     player_statistics_ = {};
     player_input_ = {};
@@ -364,6 +379,13 @@ KeelResult GameAdapterModule::ReadPlayer(std::int32_t slot, KeelPlayerInfo& play
     player.controller_handle = UINT32_MAX;
     player.pawn_handle = UINT32_MAX;
     return players_.read ? players_.read(adapter_, slot, &player) : KEEL_RESULT_UNSUPPORTED;
+}
+
+KeelResult GameAdapterModule::CaptureEntity(const void* instance, GameEntityIdentity& entity) const noexcept
+{
+    entity = {};
+    return adapter_ && entity_capture_.capture
+        ? entity_capture_.capture(adapter_, instance, &entity) : KEEL_RESULT_UNSUPPORTED;
 }
 
 KeelResult GameAdapterModule::VisitEntities(const GameEntityAccessRequest* entities, std::uint32_t count,

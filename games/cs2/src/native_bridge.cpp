@@ -618,6 +618,43 @@ extern "C" KeelResult KeelCs2_ValidateEntity(
     }
 }
 
+extern "C" KeelResult KeelCs2_CaptureEntity(void* entity_system, const void* instance, KeelCs2EntityIdentity* output)
+{
+    if (output) *output = {};
+    if (!entity_system || !instance || !output ||
+        reinterpret_cast<std::uintptr_t>(instance) % alignof(CEntityInstance)) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        // Only the caller-provided instance is read before registry membership
+        // is established. Never dereference its backlink until it matches a
+        // canonical, aligned identity slot in a registered entity chunk.
+        auto* system = static_cast<CEntitySystem*>(entity_system);
+        const auto* backlink = static_cast<const CEntityInstance*>(instance)->m_pEntity;
+        if (!backlink) return KEEL_RESULT_NOT_FOUND;
+        const auto address = reinterpret_cast<std::uintptr_t>(backlink);
+        for (std::size_t chunk_index = 0; chunk_index < std::size(system->m_EntityList.m_pIdentityChunks); ++chunk_index)
+        {
+            const auto* chunk = system->m_EntityList.m_pIdentityChunks[chunk_index];
+            if (!chunk) continue;
+            const auto begin = reinterpret_cast<std::uintptr_t>(chunk);
+            constexpr std::size_t bytes = sizeof(CEntityIdentity) * MAX_ENTITIES_IN_LIST;
+            if (address < begin || address - begin >= bytes || (address - begin) % sizeof(CEntityIdentity)) continue;
+            const auto index = static_cast<std::int32_t>(chunk_index * MAX_ENTITIES_IN_LIST +
+                (address - begin) / sizeof(CEntityIdentity));
+            auto* identity = IdentityByIndex(system, index);
+            if (!identity || identity != backlink || identity->m_pInstance != instance) return KEEL_RESULT_NOT_FOUND;
+            const auto* type = identity->m_pClass->GetSchemaBinding();
+            if (!ValidClass(type) || !type->m_pszName || !type->m_pszName[0] ||
+                reinterpret_cast<std::uintptr_t>(instance) % static_cast<unsigned>(type->m_nAlignment))
+                return KEEL_RESULT_INCOMPATIBLE;
+            *output = {index, static_cast<std::uint32_t>(identity->GetRefEHandle().ToInt())};
+            return KEEL_RESULT_OK;
+        }
+        return KEEL_RESULT_NOT_FOUND;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
 extern "C" KeelResult KeelCs2_ResolveEntityPointer(void* entity_system, const KeelCs2EntityIdentity* entity,
     const char* class_name, void** output)
 {
