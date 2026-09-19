@@ -85,3 +85,59 @@ extern "C" KeelResult KeelCs2Variant_Build(const KeelCs2VariantValue* value, voi
     }
 }
 extern "C" void KeelCs2Variant_Release(void* value) { delete static_cast<CVariant*>(value); }
+
+extern "C" KeelResult KeelCs2Variant_Read(const void* pointer, KeelCs2VariantSnapshot* output)
+{
+    if (!output || output->size != sizeof(*output)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *output = {}; output->size = sizeof(*output); output->type = UINT32_MAX;
+    if (!pointer) return KEEL_RESULT_INVALID_ARGUMENT;
+    const auto& value = *static_cast<const CVariant*>(pointer);
+    output->native_type = static_cast<uint32_t>(value.m_type);
+    KeelCs2VariantSnapshot result{};
+    result.size = sizeof(result); result.native_type = output->native_type;
+    switch (value.m_type) {
+        case FIELD_VOID: result.type = KEELS2_CS2_VARIANT_VOID; break;
+        case FIELD_CSTRING:
+        case FIELD_STRING: {
+            result.type = KEELS2_CS2_VARIANT_STRING;
+            const char* text = value.m_type == FIELD_CSTRING ? value.m_pszString : value.m_stringt.ToCStr();
+            if (text) {
+                std::size_t length{};
+                while (length <= KEELS2_CS2_VARIANT_MAX_STRING && text[length]) ++length;
+                if (length > KEELS2_CS2_VARIANT_MAX_STRING) return KEEL_RESULT_INCOMPATIBLE;
+                std::memcpy(result.string_value,text,length);
+            }
+            break;
+        }
+        case FIELD_BOOLEAN: {
+            result.type = KEELS2_CS2_VARIANT_BOOL;
+            unsigned char boolean{};
+            std::memcpy(&boolean,&value.m_bool,sizeof(boolean));
+            if (boolean > 1) return KEEL_RESULT_INCOMPATIBLE;
+            result.int_value = boolean; break;
+        }
+        case FIELD_INT32: result.type = KEELS2_CS2_VARIANT_INT32; result.int_value = value.m_int32; break;
+        case FIELD_FLOAT32:
+            result.type = KEELS2_CS2_VARIANT_FLOAT; result.float_value = value.m_float32;
+            if (!std::isfinite(result.float_value)) return KEEL_RESULT_INCOMPATIBLE;
+            break;
+        case FIELD_VECTOR:
+        case FIELD_QANGLE:
+            result.type = value.m_type == FIELD_VECTOR ? KEELS2_CS2_VARIANT_VECTOR : KEELS2_CS2_VARIANT_ANGLES;
+            if (!value.m_pData) return KEEL_RESULT_INCOMPATIBLE;
+            std::memcpy(result.vector_value,value.m_pData,sizeof(result.vector_value));
+            for (float component : result.vector_value) if (!std::isfinite(component)) return KEEL_RESULT_INCOMPATIBLE;
+            break;
+        case FIELD_COLOR32:
+            result.type = KEELS2_CS2_VARIANT_COLOR;
+            if (!value.m_pColor) return KEEL_RESULT_INCOMPATIBLE;
+            for (int i = 0; i < 4; ++i) result.color_value[i] = (*value.m_pColor)[i];
+            break;
+        case FIELD_EHANDLE:
+            result.type = KEELS2_CS2_VARIANT_ENTITY;
+            result.entity_handle = static_cast<uint32_t>(value.m_hEntity.ToInt()); break;
+        default: return KEEL_RESULT_UNSUPPORTED;
+    }
+    *output = result;
+    return KEEL_RESULT_OK;
+}

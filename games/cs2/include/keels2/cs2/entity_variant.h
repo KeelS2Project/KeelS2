@@ -27,6 +27,27 @@ typedef struct KeelCs2VariantValue
     uint32_t entity_handle;
 } KeelCs2VariantValue;
 
+typedef struct KeelCs2VariantSnapshot
+{
+    uint32_t size;
+    uint32_t type;
+    uint32_t native_type;
+    int32_t int_value;
+    float float_value;
+    float vector_value[3];
+    uint8_t color_value[4];
+    uint32_t entity_handle;
+    char string_value[KEELS2_CS2_VARIANT_MAX_STRING + 1];
+} KeelCs2VariantSnapshot;
+
+/* Read only during a native callback while its variant and indirect payloads
+ * are valid. Copies without allocation or engine calls; contains no pointers.
+ * Entity handles are observations, including invalid/stale handles, not leases.
+ * Unsupported types return UNSUPPORTED with only size/native_type populated;
+ * malformed known values return INCOMPATIBLE. Failure clears other fields.
+ * A null native string represents an empty string. Output must not alias input. */
+KEELS2_CS2_KEYVALUES_EXPORT KeelResult KeelCs2Variant_Read(const void* value, KeelCs2VariantSnapshot* output);
+
 /* Internal main-thread bridge. Build copies the selected payload into a pinned
  * SDK CVariant using the engine allocator. It does not resolve entity handles;
  * the calling operation must validate their complete identity and epoch.

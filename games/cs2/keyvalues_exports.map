@@ -1,4 +1,4 @@
 {
-    global: KeelCs2KeyValues_Build; KeelCs2KeyValues_Release; KeelCs2Variant_Build; KeelCs2Variant_Release;
+    global: KeelCs2KeyValues_Build; KeelCs2KeyValues_Release; KeelCs2Variant_Build; KeelCs2Variant_Release; KeelCs2Variant_Read;
     local: *;
 };
