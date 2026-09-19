@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 project(KeelS2ReferenceExamples VERSION 1.0.0 LANGUAGES C CXX)
 find_package(KeelS2 1.0.0 EXACT CONFIG REQUIRED)
-foreach(name IN ITEMS first_plugin pause unload timers commands command_abi convar_api players player_api player_input events entities plugins interfaces hook_observe hook_arguments hook_returns hook_profile)
+foreach(name IN ITEMS first_plugin pause unload timers commands command_abi convar_api players player_api player_input events entities entity_creation plugins interfaces hook_observe hook_arguments hook_returns hook_profile)
     keels2_add_plugin(keel_docs_${name} ${name}.cpp)
     target_link_libraries(keel_docs_${name} PRIVATE KeelS2::SourceSDK)
 endforeach()

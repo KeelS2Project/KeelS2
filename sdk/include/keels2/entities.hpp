@@ -2,233 +2,320 @@
 #define KEELS2_ENTITIES_HPP
 
 #include <keels2/entities.h>
+#include <keels2/entity_construction.h>
 #include <keels2/detail/authoring_status.hpp>
 #include <keels2/player_actions.h>
 #include <keels2/plugin.hpp>
 #include <keels2/schema.hpp>
+#include <Color.h>
 
 #include <atomic>
+#include <cmath>
 #include <memory>
+#include <string>
 #include <utility>
 
 namespace keels2::entities
 {
-
 class Entity final
 {
+    struct Value
+    {
+        std::shared_ptr<keels2::detail::ContextState> context;
+        const KeelEntitiesApi* api{};
+        const KeelEntityConstructionApi* construction{};
+        KeelEntityHandle handle{};
+        KeelEntityInfo info{};
+    };
+    struct State
+    {
+        Value value;
+        std::uint64_t generation{};
+        bool alive{true};
+        keels2::detail::AuthoringStatus status;
+    };
+    struct Snapshot
+    {
+        std::shared_ptr<State> state;
+        Value value;
+        std::uint64_t generation{};
+        bool Current() const noexcept
+        {
+            return state && state->alive && state->generation == generation && value.handle &&
+                value.context && value.context->accepting_resources.load(std::memory_order_acquire) && value.api;
+        }
+    };
 public:
     Entity() = default;
-
     ~Entity()
     {
-        static_cast<void>(Reset());
+        if (state_) { state_->alive = false; static_cast<void>(Release(state_)); }
     }
-
     Entity(const Entity&) = delete;
     Entity& operator=(const Entity&) = delete;
-
-    Entity(Entity&& other) noexcept
+    Entity(Entity&& other) noexcept : state_(std::move(other.state_))
     {
-        MoveFrom(other);
+        empty_status_.Set(other.empty_status_.Result());
+        other.empty_status_.Set(KEEL_RESULT_NOT_READY);
     }
-
     Entity& operator=(Entity&& other) noexcept
     {
         if (this != &other)
         {
-            static_cast<void>(Reset());
-            MoveFrom(other);
+            auto previous = std::move(state_);
+            state_ = std::move(other.state_);
+            empty_status_.Set(other.empty_status_.Result());
+            other.empty_status_.Set(KEEL_RESULT_NOT_READY);
+            if (previous) { previous->alive = false; static_cast<void>(Release(previous)); }
         }
         return *this;
     }
-
-    explicit operator bool() const noexcept
+    explicit operator bool() const noexcept { return Valid(); }
+    bool Valid() const noexcept { return Describe(Capture()) == KEEL_RESULT_OK; }
+    // Pending entities accept copied keys, teleport and one invoked spawn.
+    bool Pending() const noexcept
     {
-        return Valid();
+        const auto held = Capture();
+        auto& status = Status();
+        bool pending{};
+        const auto result = Describe(held, &pending);
+        status.Set(result);
+        return result == KEEL_RESULT_OK && pending;
     }
-
-    bool Valid() const noexcept
-    {
-        if (!LocallyValid() || !api_->describe)
-        {
-            return false;
-        }
-        KeelEntityInfo info{};
-        info.size = sizeof(info);
-        return api_->describe(context_->plugin, handle_, &info) == KEEL_RESULT_OK &&
-            info.size == sizeof(info) && info.reserved == 0 &&
-            info.index == info_.index && info.source2_handle == info_.source2_handle &&
-            info.epoch == info_.epoch;
-    }
-
+    // Pending cancellation requires the game thread. Spawned entities survive Reset.
     KeelResult Reset() noexcept
     {
-        if (!handle_)
-        {
-            return KEEL_RESULT_OK;
-        }
-        if (!context_ ||
-            !context_->accepting_resources.load(std::memory_order_acquire) ||
-            !api_ || !api_->release)
-        {
-            Clear();
-            return KEEL_RESULT_NOT_READY;
-        }
-        const KeelResult result = api_->release(context_->plugin, handle_);
-        if (result == KEEL_RESULT_OK || result == KEEL_RESULT_NOT_FOUND ||
-            result == KEEL_RESULT_NOT_READY)
-        {
-            Clear();
-        }
-        return result;
+        if (state_) return Release(state_);
+        empty_status_.Set(KEEL_RESULT_NOT_READY);
+        return KEEL_RESULT_OK;
     }
-
-    int Index() const noexcept
-    {
-        return LocallyValid() ? info_.index : -1;
-    }
-
+    int Index() const noexcept { const auto held = Capture(); return held.Current() ? held.value.info.index : -1; }
     uint32 Source2Handle() const noexcept
     {
-        return LocallyValid()
-            ? info_.source2_handle
-            : KEELS2_INVALID_SOURCE2_ENTITY_HANDLE;
+        const auto held = Capture();
+        return held.Current() ? held.value.info.source2_handle : KEELS2_INVALID_SOURCE2_ENTITY_HANDLE;
     }
-
-    template <typename Value>
-    bool Read(const schema::Field<Value>& field, Value& value) const noexcept
+    template <typename Type>
+    bool Read(const schema::Field<Type>& field, Type& value) const noexcept
     {
-        static_assert(schema::detail::kSupportedValue<Value>);
-        if constexpr (std::is_same_v<Value, Vector>)
-            value.Init();
-        else
-            value = Value{};
-        if (!LocallyValid() || !field.RawHandle())
-            return status_.Set(KEEL_RESULT_NOT_READY);
-        if (field.context_ != context_)
-            return status_.Set(KEEL_RESULT_INVALID_ARGUMENT);
-        if (!api_->read_field)
-            return status_.Set(KEEL_RESULT_INCOMPATIBLE);
-        return status_.Set(api_->read_field(
-                context_->plugin,
-                handle_,
-                field.RawHandle(),
-                &value,
-                sizeof(value)));
+        static_assert(schema::detail::kSupportedValue<Type>);
+        if constexpr (std::is_same_v<Type, Vector>) value.Init();
+        else value = Type{};
+        const auto held = Capture();
+        auto& status = Status();
+        const auto property = field.RawHandle();
+        if (!held.Current() || !property) return status.Set(KEEL_RESULT_NOT_READY);
+        if (field.context_ != held.value.context) return status.Set(KEEL_RESULT_INVALID_ARGUMENT);
+        if (!held.value.api->read_field) return status.Set(KEEL_RESULT_INCOMPATIBLE);
+        return status.Set(held.value.api->read_field(held.value.context->plugin, held.value.handle, property, &value, sizeof(value)));
     }
-
     KeelResult ApplyImpulse(const Vector& impulse, float damage = 0.0f) const noexcept
     {
-        const KeelPlayerAction action{sizeof(KeelPlayerAction), KEELS2_PLAYER_ACTION_IMPULSE,
-            {impulse.x, impulse.y, impulse.z}, damage};
-        const KeelResult result = ApplyAction(action);
-        status_.Set(result);
-        return result;
+        const KeelPlayerAction action{sizeof(action), KEELS2_PLAYER_ACTION_IMPULSE, {impulse.x, impulse.y, impulse.z}, damage};
+        return ApplyAction(action);
     }
-
     KeelResult Kill() const noexcept
     {
-        const KeelPlayerAction action{sizeof(KeelPlayerAction), KEELS2_PLAYER_ACTION_KILL, {}, 0.0f};
-        const KeelResult result = ApplyAction(action);
-        status_.Set(result);
-        return result;
+        const KeelPlayerAction action{sizeof(action), KEELS2_PLAYER_ACTION_KILL, {}, 0.0f};
+        return ApplyAction(action);
     }
-
-    bool TryApplyImpulse(const Vector& impulse, float damage = 0.0f) const noexcept
-    {
-        return ApplyImpulse(impulse, damage) == KEEL_RESULT_OK;
-    }
-
-    bool TryKill() const noexcept
-    {
-        return Kill() == KEEL_RESULT_OK;
-    }
-
-    KeelResult LastResult() const noexcept
-    {
-        return status_.Result();
-    }
-
-    const char* LastError() const noexcept
-    {
-        return status_.Error();
-    }
-
+    bool TryApplyImpulse(const Vector& impulse, float damage = 0.0f) const noexcept { return ApplyImpulse(impulse, damage) == KEEL_RESULT_OK; }
+    bool TryKill() const noexcept { return Kill() == KEEL_RESULT_OK; }
+    KeelResult LastResult() const noexcept { return Status().Result(); }
+    const char* LastError() const noexcept { return Status().Error(); }
     bool Same(const Entity& other) const noexcept
     {
-        if (!LocallyValid() || !other.LocallyValid() || context_ != other.context_ ||
-            api_ != other.api_ || !api_->equal)
-        {
+        const auto left = Capture(), right = other.Capture();
+        if (!left.Current() || !right.Current() || left.value.context != right.value.context || left.value.api != right.value.api)
             return false;
-        }
+        bool left_pending{}, right_pending{};
+        if (Describe(left,&left_pending) != KEEL_RESULT_OK || Describe(right,&right_pending) != KEEL_RESULT_OK || !left.Current() || !right.Current()) return false;
+        if (left_pending || right_pending) return Describe(left) == KEEL_RESULT_OK && Identity(left.value.info,right.value.info);
         KeelBool equal{};
-        return api_->equal(context_->plugin, handle_, other.handle_, &equal) ==
-                KEEL_RESULT_OK &&
-            equal == KEEL_TRUE;
+        return left.value.api->equal(left.value.context->plugin,left.value.handle,right.value.handle,&equal) == KEEL_RESULT_OK &&
+            equal == KEEL_TRUE && left.Current() && right.Current() && Identity(left.value.info,right.value.info);
     }
-
+    bool SetKey(const char* name, const char* text) const noexcept
+    {
+        KeelEntityKeyValue value{}; value.size = sizeof(value); value.name = name;
+        value.type = KEELS2_ENTITY_KEY_STRING; value.string_value = text;
+        return SetKeyValue(value);
+    }
+    bool SetKey(const char* name, bool number) const noexcept
+    {
+        KeelEntityKeyValue value{}; value.size = sizeof(value); value.name = name;
+        value.type = KEELS2_ENTITY_KEY_BOOL; value.int_value = number ? 1 : 0;
+        return SetKeyValue(value);
+    }
+    bool SetKey(const char* name, std::int32_t number) const noexcept
+    {
+        KeelEntityKeyValue value{}; value.size = sizeof(value); value.name = name;
+        value.type = KEELS2_ENTITY_KEY_INT32; value.int_value = number;
+        return SetKeyValue(value);
+    }
+    bool SetKey(const char* name, float number) const noexcept
+    {
+        KeelEntityKeyValue value{}; value.size = sizeof(value); value.name = name;
+        value.type = KEELS2_ENTITY_KEY_FLOAT; value.float_value = number;
+        return SetKeyValue(value);
+    }
+    bool SetKey(const char* name, const Vector& vector) const noexcept
+    {
+        KeelEntityKeyValue value{}; value.size = sizeof(value); value.name = name;
+        value.type = KEELS2_ENTITY_KEY_VECTOR;
+        value.vector_value[0] = vector.x; value.vector_value[1] = vector.y; value.vector_value[2] = vector.z;
+        return SetKeyValue(value);
+    }
+    bool SetKey(const char* name, const QAngle& angles) const noexcept
+    {
+        KeelEntityKeyValue value{}; value.size = sizeof(value); value.name = name;
+        value.type = KEELS2_ENTITY_KEY_ANGLES;
+        value.vector_value[0] = angles.x; value.vector_value[1] = angles.y; value.vector_value[2] = angles.z;
+        return SetKeyValue(value);
+    }
+    bool SetKey(const char* name, const Color& color) const noexcept
+    {
+        KeelEntityKeyValue value{}; value.size = sizeof(value); value.name = name;
+        value.type = KEELS2_ENTITY_KEY_COLOR;
+        for (int i = 0; i < 4; ++i) value.color_value[i] = color[i];
+        return SetKeyValue(value);
+    }
+    // An invoked spawn consumes construction even on failure; never retry it.
+    bool DispatchSpawn(bool& invoked) const noexcept
+    {
+        invoked = false;
+        const auto held = Capture();
+        auto& status = Status();
+        bool pending{};
+        const auto ready = Describe(held, &pending);
+        if (ready != KEEL_RESULT_OK) return status.Set(ready);
+        if (!pending || !held.value.construction) return status.Set(KEEL_RESULT_NOT_READY);
+        KeelBool called{};
+        const auto result = held.value.construction->spawn(held.value.context->plugin, held.value.handle, &called);
+        invoked = called != KEEL_FALSE;
+        return status.Set(called <= KEEL_TRUE ? result : KEEL_RESULT_INCOMPATIBLE);
+    }
+    bool Teleport(const Vector* position = nullptr, const QAngle* angles = nullptr, const Vector* velocity = nullptr) const noexcept
+    {
+        KeelEntityTeleport request{}; request.size = sizeof(request);
+        if (position) { request.flags |= 1; request.position[0] = position->x; request.position[1] = position->y; request.position[2] = position->z; }
+        if (angles) { request.flags |= 2; request.angles[0] = angles->x; request.angles[1] = angles->y; request.angles[2] = angles->z; }
+        if (velocity) { request.flags |= 4; request.velocity[0] = velocity->x; request.velocity[1] = velocity->y; request.velocity[2] = velocity->z; }
+        const auto held = Capture();
+        auto& status = Status();
+        if (!request.flags) return status.Set(KEEL_RESULT_INVALID_ARGUMENT);
+        for (const auto* vector : {request.position, request.angles, request.velocity})
+            for (unsigned i = 0; i < 3; ++i) if (!std::isfinite(vector[i])) return status.Set(KEEL_RESULT_INVALID_ARGUMENT);
+        bool pending{};
+        const auto ready = Describe(held, &pending);
+        if (ready != KEEL_RESULT_OK) return status.Set(ready);
+        if (pending) return status.Set(held.value.construction->teleport(held.value.context->plugin, held.value.handle, &request));
+        const KeelEntityToolsApi* tools{};
+        const auto query = Tools(held, tools);
+        return status.Set(query == KEEL_RESULT_OK ? tools->teleport(held.value.context->plugin, held.value.handle, &request) : query);
+    }
 private:
     friend class Service;
-
+    static bool Identity(const KeelEntityInfo& left, const KeelEntityInfo& right) noexcept
+    {
+        return right.size == sizeof(right) && !right.reserved && right.index == left.index &&
+            right.source2_handle == left.source2_handle && right.epoch == left.epoch;
+    }
+    Snapshot Capture() const noexcept
+    {
+        const auto held = state_;
+        return held ? Snapshot{held, held->value, held->generation} : Snapshot{};
+    }
+    keels2::detail::AuthoringStatus& Status() const noexcept { return state_ ? state_->status : empty_status_; }
+    static KeelResult Release(std::shared_ptr<State> held) noexcept
+    {
+        const auto old = std::exchange(held->value, Value{});
+        const auto generation = ++held->generation;
+        held->status.Set(KEEL_RESULT_NOT_READY);
+        if (!old.handle) return KEEL_RESULT_OK;
+        if (!old.context || !old.context->accepting_resources.load(std::memory_order_acquire) || !old.api || !old.api->release)
+            return KEEL_RESULT_NOT_READY;
+        const auto result = old.api->release(old.context->plugin, old.handle);
+        // These failures occur before the host releases ownership or calls the engine.
+        if ((result == KEEL_RESULT_WRONG_THREAD || result == KEEL_RESULT_BUSY) && held->generation == generation && held->alive)
+        {
+            held->value = old;
+            held->status.Set(result);
+        }
+        return result;
+    }
+    static KeelResult Describe(const Snapshot& held, bool* pending = nullptr) noexcept
+    {
+        if (pending) *pending = false;
+        if (!held.Current()) return KEEL_RESULT_NOT_READY;
+        KeelEntityInfo info{}; info.size = sizeof(info);
+        const auto& value = held.value;
+        auto result = value.construction ? value.construction->describe(value.context->plugin, value.handle, &info) : KEEL_RESULT_NOT_FOUND;
+        if (value.construction && result == KEEL_RESULT_OK) { if (pending) *pending = true; }
+        else if (result == KEEL_RESULT_NOT_FOUND) result = value.api->describe(value.context->plugin, value.handle, &info);
+        if (result != KEEL_RESULT_OK) return result;
+        return held.Current() && Identity(value.info, info) ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
+    }
+    static bool Text(const char* input, std::size_t maximum, bool empty, std::string& output)
+    {
+        if (!input) return false;
+        std::size_t length{}; while (length <= maximum && input[length]) ++length;
+        if (length > maximum || (!length && !empty)) return false;
+        output.assign(input, length); return true;
+    }
+    bool SetKeyValue(KeelEntityKeyValue value) const noexcept
+    {
+        const auto held = Capture();
+        auto& status = Status();
+        try
+        {
+            std::string name, text;
+            if (!Text(value.name, KEELS2_ENTITY_KEY_MAX_NAME, false, name) ||
+                (value.type == KEELS2_ENTITY_KEY_STRING && !Text(value.string_value, KEELS2_ENTITY_KEY_MAX_STRING, true, text)))
+                return status.Set(KEEL_RESULT_INVALID_ARGUMENT);
+            if (value.type == KEELS2_ENTITY_KEY_FLOAT && !std::isfinite(value.float_value)) return status.Set(KEEL_RESULT_INVALID_ARGUMENT);
+            if (value.type == KEELS2_ENTITY_KEY_VECTOR || value.type == KEELS2_ENTITY_KEY_ANGLES)
+                for (const float number : value.vector_value) if (!std::isfinite(number)) return status.Set(KEEL_RESULT_INVALID_ARGUMENT);
+            value.name = name.c_str(); value.string_value = text.c_str();
+            bool pending{};
+            const auto ready = Describe(held, &pending);
+            if (ready != KEEL_RESULT_OK) return status.Set(ready);
+            if (!pending || !held.value.construction) return status.Set(KEEL_RESULT_NOT_READY);
+            return status.Set(held.value.construction->set(held.value.context->plugin, held.value.handle, &value));
+        }
+        catch (...) { return status.Set(KEEL_RESULT_ENGINE_FAILURE); }
+    }
+    static KeelResult Tools(const Snapshot& held, const KeelEntityToolsApi*& api) noexcept
+    {
+        const auto& context = held.value.context;
+        if (!held.Current() || !context->api || !context->api->query_service) return KEEL_RESULT_NOT_READY;
+        const void* raw{};
+        const auto result = context->api->query_service(context->plugin, KEELS2_ENTITY_TOOLS_SERVICE_NAME, KEELS2_ENTITY_TOOLS_API_VERSION, &raw);
+        if (result != KEEL_RESULT_OK) return result;
+        api = static_cast<const KeelEntityToolsApi*>(raw);
+        if (!api || api->size != sizeof(*api) || api->api_version != KEELS2_ENTITY_TOOLS_API_VERSION || !api->teleport) return KEEL_RESULT_INCOMPATIBLE;
+        return held.Current() ? KEEL_RESULT_OK : KEEL_RESULT_NOT_READY;
+    }
     KeelResult ApplyAction(const KeelPlayerAction& action) const noexcept
     {
-        if (!LocallyValid() || !context_->api || !context_->api->query_service)
-            return KEEL_RESULT_NOT_READY;
-        const void* raw{};
-        const auto result = context_->api->query_service(context_->plugin,
-            KEELS2_PLAYER_ACTIONS_SERVICE_NAME, KEELS2_PLAYER_ACTIONS_API_VERSION, &raw);
-        if (result != KEEL_RESULT_OK)
-            return result;
-        const auto* actions = static_cast<const KeelPlayerActionsApi*>(raw);
-        if (!actions || actions->size != sizeof(KeelPlayerActionsApi) ||
-            actions->api_version != KEELS2_PLAYER_ACTIONS_API_VERSION || !actions->apply)
-            return KEEL_RESULT_INCOMPATIBLE;
-        return actions->apply(context_->plugin, handle_, &action);
+        const auto held = Capture();
+        auto& status = Status();
+        const auto call = [&]() -> KeelResult {
+            if (!held.Current() || !held.value.context->api || !held.value.context->api->query_service) return KEEL_RESULT_NOT_READY;
+            const void* raw{};
+            const auto result = held.value.context->api->query_service(held.value.context->plugin,
+                KEELS2_PLAYER_ACTIONS_SERVICE_NAME, KEELS2_PLAYER_ACTIONS_API_VERSION, &raw);
+            if (result != KEEL_RESULT_OK) return result;
+            const auto* actions = static_cast<const KeelPlayerActionsApi*>(raw);
+            if (!actions || actions->size != sizeof(*actions) || actions->api_version != KEELS2_PLAYER_ACTIONS_API_VERSION || !actions->apply)
+                return KEEL_RESULT_INCOMPATIBLE;
+            if (!held.Current()) return KEEL_RESULT_NOT_READY;
+            return actions->apply(held.value.context->plugin, held.value.handle, &action);
+        };
+        const auto result = call(); status.Set(result); return result;
     }
-
-    bool LocallyValid() const noexcept
-    {
-        return handle_ && context_ &&
-            context_->accepting_resources.load(std::memory_order_acquire) && api_;
-    }
-
-    void Adopt(
-        std::shared_ptr<keels2::detail::ContextState> context,
-        const KeelEntitiesApi* api,
-        KeelEntityHandle handle,
-        const KeelEntityInfo& info) noexcept
-    {
-        context_ = std::move(context);
-        api_ = api;
-        handle_ = handle;
-        info_ = info;
-        status_.Set(KEEL_RESULT_OK);
-    }
-
-    void Clear() noexcept
-    {
-        context_.reset();
-        api_ = nullptr;
-        handle_ = 0;
-        info_ = {};
-        status_.Set(KEEL_RESULT_NOT_READY);
-    }
-
-    void MoveFrom(Entity& other) noexcept
-    {
-        context_ = std::move(other.context_);
-        api_ = std::exchange(other.api_, nullptr);
-        handle_ = std::exchange(other.handle_, 0);
-        info_ = std::exchange(other.info_, KeelEntityInfo{});
-        status_.Set(other.LastResult());
-        other.status_.Set(KEEL_RESULT_NOT_READY);
-    }
-
-    std::shared_ptr<keels2::detail::ContextState> context_;
-    const KeelEntitiesApi* api_{};
-    KeelEntityHandle handle_{};
-    KeelEntityInfo info_{};
-    mutable keels2::detail::AuthoringStatus status_;
+    std::shared_ptr<State> state_;
+    mutable keels2::detail::AuthoringStatus empty_status_;
 };
 
 class Service final
@@ -236,96 +323,115 @@ class Service final
 public:
     KeelResult Connect(const Context& context) noexcept
     {
-        api_ = nullptr;
-        context_.reset();
+        api_ = nullptr; context_.reset();
         const void* raw{};
-        const KeelResult result = context.QueryService(
-            KEELS2_ENTITIES_SERVICE_NAME,
-            KEELS2_ENTITIES_API_VERSION,
-            &raw);
-        if (result != KEEL_RESULT_OK)
-        {
-            return result;
-        }
+        const auto result = context.QueryService(KEELS2_ENTITIES_SERVICE_NAME, KEELS2_ENTITIES_API_VERSION, &raw);
+        if (result != KEEL_RESULT_OK) return result;
         const auto* api = static_cast<const KeelEntitiesApi*>(raw);
-        if (!api || api->size != sizeof(KeelEntitiesApi) ||
-            api->api_version != KEELS2_ENTITIES_API_VERSION || !api->find_by_index ||
-            !api->find_by_source2_handle || !api->release || !api->describe ||
-            !api->equal || !api->read_field)
-        {
+        if (!api || api->size != sizeof(*api) || api->api_version != KEELS2_ENTITIES_API_VERSION ||
+            !api->find_by_index || !api->find_by_source2_handle || !api->release || !api->describe || !api->equal || !api->read_field)
             return KEEL_RESULT_INCOMPATIBLE;
-        }
-        context_ = context.State();
-        api_ = api;
-        return KEEL_RESULT_OK;
+        context_ = context.State(); api_ = api; return KEEL_RESULT_OK;
     }
-
     explicit operator bool() const noexcept
     {
-        return context_ &&
-            context_->accepting_resources.load(std::memory_order_acquire) && api_;
+        return context_ && context_->accepting_resources.load(std::memory_order_acquire) && api_;
     }
-
     KeelResult Find(int index, Entity& output) const noexcept
     {
-        static_cast<void>(output.Reset());
-        if (index < 0)
-        {
-            return KEEL_RESULT_INVALID_ARGUMENT;
-        }
-        if (!*this)
-        {
-            return KEEL_RESULT_NOT_READY;
-        }
-        KeelEntityHandle handle{};
-        const KeelResult result = api_->find_by_index(context_->plugin, index, &handle);
-        return result == KEEL_RESULT_OK
-            ? Adopt(handle, output)
-            : result;
+        const auto context = context_; const auto* api = api_;
+        return Open(context, api, output, false, [=](KeelEntityHandle& handle, const KeelEntityConstructionApi*&) {
+            return index < 0 ? KEEL_RESULT_INVALID_ARGUMENT : api->find_by_index(context->plugin, index, &handle);
+        }, index, KEELS2_INVALID_SOURCE2_ENTITY_HANDLE);
     }
-
-    KeelResult FindSource2(uint32 source2_handle, Entity& output) const noexcept
+    KeelResult FindSource2(uint32 source, Entity& output) const noexcept
     {
-        static_cast<void>(output.Reset());
-        if (source2_handle == KEELS2_INVALID_SOURCE2_ENTITY_HANDLE)
-        {
-            return KEEL_RESULT_INVALID_ARGUMENT;
-        }
-        if (!*this)
-        {
-            return KEEL_RESULT_NOT_READY;
-        }
-        KeelEntityHandle handle{};
-        const KeelResult result = api_->find_by_source2_handle(
-            context_->plugin,
-            source2_handle,
-            &handle);
-        return result == KEEL_RESULT_OK
-            ? Adopt(handle, output)
-            : result;
+        const auto context = context_; const auto* api = api_;
+        return Open(context, api, output, false, [=](KeelEntityHandle& handle, const KeelEntityConstructionApi*&) {
+            return source == KEELS2_INVALID_SOURCE2_ENTITY_HANDLE ? KEEL_RESULT_INVALID_ARGUMENT : api->find_by_source2_handle(context->plugin, source, &handle);
+        }, -1, source);
     }
-
+    KeelResult Create(const char* classname, Entity& output) const noexcept
+    {
+        const auto context = context_; const auto* api = api_;
+        std::string name;
+        try
+        {
+            if (!Entity::Text(classname, KEELS2_ENTITY_KEY_MAX_NAME, false, name)) return KEEL_RESULT_INVALID_ARGUMENT;
+            for (const auto c : name)
+                if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        return Open(context, api, output, true, [&](KeelEntityHandle& handle, const KeelEntityConstructionApi*& construction) {
+            const auto query = Construction(context, construction);
+            return query == KEEL_RESULT_OK ? construction->create(context->plugin, name.c_str(), &handle) : query;
+        });
+    }
+    KeelResult ConstructionReady() const noexcept
+    {
+        const auto context = context_;
+        if (!*this) return KEEL_RESULT_NOT_READY;
+        const KeelEntityConstructionApi* construction{};
+        const auto query = Construction(context, construction);
+        return query == KEEL_RESULT_OK ? construction->ready(context->plugin) : query;
+    }
 private:
-    KeelResult Adopt(KeelEntityHandle handle, Entity& output) const noexcept
+    static KeelResult Construction(const std::shared_ptr<keels2::detail::ContextState>& context, const KeelEntityConstructionApi*& api) noexcept
     {
-        KeelEntityInfo info{};
-        info.size = sizeof(info);
-        const KeelResult result = api_->describe(context_->plugin, handle, &info);
-        if (result != KEEL_RESULT_OK || info.size != sizeof(info) || info.index < 0 ||
-            info.source2_handle == KEELS2_INVALID_SOURCE2_ENTITY_HANDLE ||
-            info.reserved != 0 || !info.epoch)
-        {
-            static_cast<void>(api_->release(context_->plugin, handle));
-            return result == KEEL_RESULT_OK ? KEEL_RESULT_INCOMPATIBLE : result;
-        }
-        output.Adopt(context_, api_, handle, info);
+        if (!context || !context->accepting_resources.load(std::memory_order_acquire) || !context->api || !context->api->query_service) return KEEL_RESULT_NOT_READY;
+        const void* raw{};
+        const auto result = context->api->query_service(context->plugin, KEELS2_ENTITY_CONSTRUCTION_SERVICE_NAME, KEELS2_ENTITY_CONSTRUCTION_API_VERSION, &raw);
+        if (result != KEEL_RESULT_OK) return result;
+        api = static_cast<const KeelEntityConstructionApi*>(raw);
+        if (!api || api->size != sizeof(*api) || api->api_version != KEELS2_ENTITY_CONSTRUCTION_API_VERSION ||
+            !api->ready || !api->create || !api->describe || !api->set || !api->teleport || !api->spawn || !api->observe || !api->visit)
+            return KEEL_RESULT_INCOMPATIBLE;
         return KEEL_RESULT_OK;
     }
-
+    template <typename Factory>
+    static KeelResult Open(const std::shared_ptr<keels2::detail::ContextState>& context, const KeelEntitiesApi* api,
+        Entity& output, bool created, Factory factory, int index = -1, uint32 source = KEELS2_INVALID_SOURCE2_ENTITY_HANDLE) noexcept
+    {
+        std::shared_ptr<Entity::State> held;
+        try
+        {
+            if (!output.state_) output.state_ = std::make_shared<Entity::State>();
+            held = output.state_;
+        }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        const auto generation = held->generation + 1;
+        const auto released = Entity::Release(held);
+        if (!held->alive || held->generation != generation) return KEEL_RESULT_NOT_READY;
+        if (released == KEEL_RESULT_WRONG_THREAD || released == KEEL_RESULT_BUSY) return released;
+        const auto fail = [&](KeelResult result) {
+            if (held->generation == generation) held->status.Set(result);
+            return result;
+        };
+        if (!context || !context->accepting_resources.load(std::memory_order_acquire) || !api) return fail(KEEL_RESULT_NOT_READY);
+        struct Candidate
+        {
+            std::shared_ptr<keels2::detail::ContextState> context;
+            const KeelEntitiesApi* api;
+            KeelEntityHandle handle{};
+            ~Candidate() { if (handle) api->release(context->plugin, handle); }
+        } candidate{context, api};
+        const KeelEntityConstructionApi* construction{};
+        auto result = factory(candidate.handle, construction);
+        if (result != KEEL_RESULT_OK) return fail(result);
+        if (!held->alive || held->generation != generation) return KEEL_RESULT_NOT_READY;
+        if (!candidate.handle) return fail(KEEL_RESULT_INCOMPATIBLE);
+        KeelEntityInfo info{}; info.size = sizeof(info);
+        result = created ? construction->describe(context->plugin, candidate.handle, &info) : api->describe(context->plugin, candidate.handle, &info);
+        if (result != KEEL_RESULT_OK) return fail(result);
+        if (!held->alive || held->generation != generation || !context->accepting_resources.load(std::memory_order_acquire)) return KEEL_RESULT_NOT_READY;
+        if (info.size != sizeof(info) || info.reserved || info.index < 0 || info.source2_handle == KEELS2_INVALID_SOURCE2_ENTITY_HANDLE || !info.epoch ||
+            (index >= 0 && info.index != index) || (source != KEELS2_INVALID_SOURCE2_ENTITY_HANDLE && info.source2_handle != source))
+            return fail(KEEL_RESULT_INCOMPATIBLE);
+        held->value = {context, api, construction, std::exchange(candidate.handle, 0), info};
+        return fail(KEEL_RESULT_OK);
+    }
     std::shared_ptr<keels2::detail::ContextState> context_;
     const KeelEntitiesApi* api_{};
 };
-
 }
-
 #endif

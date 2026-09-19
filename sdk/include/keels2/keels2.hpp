@@ -2173,40 +2173,33 @@ protected:
 
     bool FindEntity(int index, Entity& output) noexcept
     {
-        std::scoped_lock lock(schema_entities_mutex_);
-        static_cast<void>(output.Reset());
-        if (!context_)
-        {
-            return status_.Set(KEEL_RESULT_NOT_READY);
-        }
-        if (!entities_service_)
-        {
-            const KeelResult connected = entities_service_.Connect(context_);
-            if (connected != KEEL_RESULT_OK)
-            {
-                return status_.Set(connected);
-            }
-        }
-        return status_.Set(entities_service_.Find(index, output));
+        entities::Service service;
+        const auto result = ConnectEntities(service);
+        if (result != KEEL_RESULT_OK) { static_cast<void>(output.Reset()); return status_.Set(result); }
+        return status_.Set(service.Find(index, output));
     }
 
     bool FindEntity(const CEntityHandle& handle, Entity& output) noexcept
     {
-        std::scoped_lock lock(schema_entities_mutex_);
-        static_cast<void>(output.Reset());
-        if (!context_)
-        {
-            return status_.Set(KEEL_RESULT_NOT_READY);
-        }
-        if (!entities_service_)
-        {
-            const KeelResult connected = entities_service_.Connect(context_);
-            if (connected != KEEL_RESULT_OK)
-            {
-                return status_.Set(connected);
-            }
-        }
-        return status_.Set(entities_service_.FindSource2(static_cast<uint32>(handle.ToInt()), output));
+        entities::Service service;
+        const auto result = ConnectEntities(service);
+        if (result != KEEL_RESULT_OK) { static_cast<void>(output.Reset()); return status_.Set(result); }
+        return status_.Set(service.FindSource2(static_cast<uint32>(handle.ToInt()), output));
+    }
+
+    bool EntityConstructionAvailable() noexcept
+    {
+        entities::Service service;
+        const auto result = ConnectEntities(service);
+        return status_.Set(result == KEEL_RESULT_OK ? service.ConstructionReady() : result);
+    }
+
+    bool CreateEntity(const char* classname, Entity& output) noexcept
+    {
+        entities::Service service;
+        const auto result = ConnectEntities(service);
+        if (result != KEEL_RESULT_OK) return status_.Set(result);
+        return status_.Set(service.Create(classname, output));
     }
 
 private:
@@ -2215,6 +2208,19 @@ private:
     friend class keels2::detail::GameEventBinding;
     template <typename Type>
     friend class keels2::detail::AuthoringAdapter;
+
+    KeelResult ConnectEntities(entities::Service& service) noexcept
+    {
+        std::scoped_lock lock(schema_entities_mutex_);
+        if (!context_) return KEEL_RESULT_NOT_READY;
+        if (!entities_service_)
+        {
+            const auto result = entities_service_.Connect(context_);
+            if (result != KEEL_RESULT_OK) return result;
+        }
+        service = entities_service_;
+        return KEEL_RESULT_OK;
+    }
 
     enum class TextDestination
     {
