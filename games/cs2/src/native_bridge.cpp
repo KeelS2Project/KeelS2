@@ -1793,6 +1793,120 @@ extern "C" KeelResult KeelCs2_WeaponMatches(void* system, const KeelCs2EntityIde
     catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
 }
 
+namespace
+{
+CEntityIdentity* CreatedIdentity(CEntitySystem* system, const KeelCs2EntityIdentity& entity,
+    bool require_pre_spawn) noexcept
+{
+    if (!system || entity.index < 0 || entity.index >= MAX_TOTAL_ENTITIES ||
+        entity.source2_handle == INVALID_EHANDLE_INDEX) return nullptr;
+    const CEntityHandle handle(entity.source2_handle);
+    if (handle.GetEntryIndex() != entity.index) return nullptr;
+    auto* chunk = system->m_EntityList.m_pIdentityChunks[static_cast<std::size_t>(entity.index) / MAX_ENTITIES_IN_LIST];
+    if (!chunk) return nullptr;
+    auto* identity = &chunk[static_cast<std::size_t>(entity.index) % MAX_ENTITIES_IN_LIST];
+    constexpr std::uint32_t rejected = EF_IS_INVALID_EHANDLE | EF_DELETE_IN_PROGRESS |
+        EF_MARKED_FOR_DELETE | EF_IS_CONSTRUCTION_IN_PROGRESS;
+    if (identity->GetEntityIndex().Get() != entity.index ||
+        static_cast<std::uint32_t>(identity->GetRefEHandle().ToInt()) != entity.source2_handle ||
+        !identity->m_pInstance || !identity->m_pClass ||
+        reinterpret_cast<std::uintptr_t>(identity->m_pInstance) % alignof(CEntityInstance) ||
+        (static_cast<std::uint32_t>(identity->m_flags) & rejected) ||
+        (require_pre_spawn && !(identity->m_flags & EF_IS_PRE_SPAWN)) ||
+        identity->m_pInstance->m_pEntity != identity) return nullptr;
+    return identity;
+}
+KeelResult CheckCreatedClass(CEntityIdentity* identity, void* base)
+{
+    if (!identity) return KEEL_RESULT_NOT_FOUND;
+    auto* type = identity->m_pClass->GetSchemaBinding();
+    auto* required = static_cast<CSchemaClassInfo*>(base);
+    StatRequire(ValidClass(type) && ValidClass(required) && required->m_pszName &&
+        std::strcmp(required->m_pszName,"CBaseEntity") == 0 && StatBase(type,required) == 0);
+    const auto instance = reinterpret_cast<std::uintptr_t>(identity->m_pInstance);
+    StatRequire(instance % type->m_nAlignment == 0 && static_cast<std::uint32_t>(type->m_nSize) >= sizeof(CEntityInstance) &&
+        static_cast<std::uint32_t>(type->m_nSize)-1 <= UINTPTR_MAX-instance);
+    return KEEL_RESULT_OK;
+}
+KeelResult DispatchCreatedEntity(void* system, const KeelCs2EntityIdentity* entity, void* base,
+    const KeelCs2EntityConstructionBindings* bindings, KeelBool* invoked, bool spawn)
+{
+    if (invoked) *invoked = KEEL_FALSE;
+    if (!system || !entity || (spawn && !base) || !bindings || !bindings->create || !bindings->spawn || !bindings->remove || !invoked)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    try {
+        auto* identity = CreatedIdentity(static_cast<CEntitySystem*>(system),*entity,spawn);
+        const auto result = spawn ? CheckCreatedClass(identity,base) : identity ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
+        if (result != KEEL_RESULT_OK) return result;
+        auto* instance = identity->m_pInstance;
+        *invoked = KEEL_TRUE;
+        if (spawn) NativeActionFunction<void (*)(void*,const void*)>(bindings->spawn)(instance,nullptr);
+        else NativeActionFunction<void (*)(void*)>(bindings->remove)(instance);
+        return KEEL_RESULT_OK;
+    } catch (const StatFailure& failure) { return failure.result; }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+}
+extern "C" KeelResult KeelCs2_CreateEntity(const KeelCs2EntityConstructionBindings* bindings,
+    const char* class_name, void** instance)
+{
+    if (instance) *instance = nullptr;
+    if (!bindings || !bindings->create || !bindings->spawn || !bindings->remove || !class_name || !*class_name || !instance)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    std::array<char,128> copy{};
+    std::size_t length{};
+    while (length < copy.size() && class_name[length]) {
+        const auto c = static_cast<unsigned char>(class_name[length]);
+        if (!(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') && c != '_')
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        copy[length++] = static_cast<char>(c);
+    }
+    if (length == copy.size()) return KEEL_RESULT_INVALID_ARGUMENT;
+    try {
+        *instance = NativeActionFunction<void* (*)(const char*,int)>(bindings->create)(copy.data(),-1);
+        return *instance ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
+    } catch (...) { *instance = nullptr; return KEEL_RESULT_ENGINE_FAILURE; }
+}
+extern "C" KeelResult KeelCs2_CaptureCreatedEntity(void* system, const void* instance,
+    KeelCs2EntityIdentity* output)
+{
+    if (output) *output = {};
+    if (!system || !instance || !output) return KEEL_RESULT_INVALID_ARGUMENT;
+    try {
+        auto* registry = static_cast<CEntitySystem*>(system);
+        for (std::size_t chunk_index = 0; chunk_index < std::size(registry->m_EntityList.m_pIdentityChunks); ++chunk_index) {
+            auto* chunk = registry->m_EntityList.m_pIdentityChunks[chunk_index];
+            if (!chunk) continue;
+            for (std::size_t offset = 0; offset < MAX_ENTITIES_IN_LIST; ++offset) {
+                auto* candidate = &chunk[offset];
+                if (candidate->m_pInstance != instance) continue;
+                const KeelCs2EntityIdentity entity{static_cast<std::int32_t>(chunk_index*MAX_ENTITIES_IN_LIST+offset),
+                    static_cast<std::uint32_t>(candidate->GetRefEHandle().ToInt())};
+                if (!CreatedIdentity(registry,entity,false)) return KEEL_RESULT_NOT_FOUND;
+                *output = entity;
+                return KEEL_RESULT_OK;
+            }
+        }
+        return KEEL_RESULT_NOT_FOUND;
+    } catch (const StatFailure& failure) { return failure.result; }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+extern "C" KeelResult KeelCs2_ValidateCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
+    void* base, KeelBool require_pre_spawn)
+{
+    if (!system || !entity || !base || (require_pre_spawn != KEEL_FALSE && require_pre_spawn != KEEL_TRUE))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    try { return CheckCreatedClass(CreatedIdentity(static_cast<CEntitySystem*>(system),*entity,require_pre_spawn != KEEL_FALSE),base); }
+    catch (const StatFailure& failure) { return failure.result; }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+extern "C" KeelResult KeelCs2_SpawnCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
+    void* base, const KeelCs2EntityConstructionBindings* bindings, KeelBool* invoked)
+{ return DispatchCreatedEntity(system,entity,base,bindings,invoked,true); }
+extern "C" KeelResult KeelCs2_RemoveCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
+    const KeelCs2EntityConstructionBindings* bindings, KeelBool* invoked)
+{ return DispatchCreatedEntity(system,entity,nullptr,bindings,invoked,false); }
+
 extern "C" KeelResult KeelCs2_ResolveEntityToolBase(void* system, const char* module, std::uint32_t kind, void** output)
 {
     if (output) *output = nullptr;

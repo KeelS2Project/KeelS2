@@ -28,6 +28,13 @@ extern "C" {
 
 typedef void (*KeelCs2GameEventCallback)(void* event, const char* name, void* user_data);
 
+typedef struct KeelCs2EntityConstructionBindings
+{
+    void* create;
+    void* spawn;
+    void* remove;
+} KeelCs2EntityConstructionBindings;
+
 typedef struct KeelCs2EntityToolBindings
 {
     void* set_model;
@@ -195,6 +202,27 @@ KeelResult KeelCs2_ValidateEntity(
     void* entity_system,
     const KeelCs2EntityIdentity* entity);
 KeelResult KeelCs2_CaptureEntity(void* entity_system, const void* instance, KeelCs2EntityIdentity* output);
+/* Internal construction primitives. The adapter must retain its map epoch and
+ * reacquire the entity system after factory callbacks, before capturing the
+ * returned address. The factory result is opaque and may already be dangling.
+ * Capture scans registered identities without dereferencing that address.
+ * Capture also permits an already-spawned factory result, so cancellation can
+ * clean it up. Spawn separately requires a pre-spawn CBaseEntity. Cancellation
+ * accepts any registered CEntityInstance, including unsupported factory types.
+ * Only the construction owner may invoke these with a captured identity. */
+KeelResult KeelCs2_CreateEntity(const KeelCs2EntityConstructionBindings* bindings,
+    const char* class_name, void** instance);
+KeelResult KeelCs2_CaptureCreatedEntity(void* system, const void* instance,
+    KeelCs2EntityIdentity* output);
+KeelResult KeelCs2_ValidateCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
+    void* base_class, KeelBool require_pre_spawn);
+/* Invoked becomes true immediately before entering the engine and remains
+ * true if the engine throws. Callers must not retry a dispatched spawn or
+ * cancellation. No borrowed entity is accessed after the engine call. */
+KeelResult KeelCs2_SpawnCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
+    void* base_class, const KeelCs2EntityConstructionBindings* bindings, KeelBool* invoked);
+KeelResult KeelCs2_RemoveCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
+    const KeelCs2EntityConstructionBindings* bindings, KeelBool* invoked);
 KeelResult KeelCs2_ResolveEntityPointer(void* entity_system, const KeelCs2EntityIdentity* entity,
     const char* class_name, void** output);
 KeelResult KeelCs2_ReadEntityField(

@@ -475,6 +475,7 @@ add_library(keels2_game_cs2 SHARED
     games/cs2/src/player_management.cpp
     games/cs2/src/entity_writes.cpp
     games/cs2/src/entity_tools.cpp
+    games/cs2/src/entity_construction.cpp
     games/cs2/src/round_control.cpp
     games/cs2/src/player_statistics.cpp
 )
@@ -1473,6 +1474,11 @@ if(BUILD_TESTING)
     target_include_directories(keels2_round_control_profile PRIVATE games/cs2/include platform/include sdk/include)
     keels2_enable_warnings(keels2_round_control_profile)
     add_test(NAME round_control_profile COMMAND keels2_round_control_profile)
+
+    add_executable(keels2_entity_construction_profile tests/entity_construction_profile.cpp games/cs2/src/entity_construction.cpp)
+    target_include_directories(keels2_entity_construction_profile PRIVATE games/cs2/include platform/include sdk/include)
+    keels2_enable_warnings(keels2_entity_construction_profile)
+    add_test(NAME entity_construction_profile COMMAND keels2_entity_construction_profile)
 
     add_executable(keels2_entity_tools_profile tests/entity_tools_profile.cpp games/cs2/src/entity_tools.cpp)
     target_include_directories(keels2_entity_tools_profile PRIVATE games/cs2/include platform/include sdk/include)
