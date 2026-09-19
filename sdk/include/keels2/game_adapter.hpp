@@ -314,6 +314,8 @@ struct GameAdapterEntityConstructionApi
     // Invoked consumes the token even on failure; an invoked spawn is never retried.
     KeelResult (*spawn)(GameAdapter*, std::uint64_t, KeelBool*) noexcept;
     KeelResult (*cancel)(GameAdapter*, std::uint64_t) noexcept;
+    // Read-only observation may nest during a pending spawn. The callback may
+    // close handles, but must not mutate or retain the borrowed entity pointer.
     KeelResult (*visit)(GameAdapter*, std::uint64_t, const char*, KeelEntityAccessCallback, void*) noexcept;
 };
 using GameAdapterQueryEntityConstructionFn = KeelResult (*)(std::uint32_t, GameAdapterEntityConstructionApi*) noexcept;

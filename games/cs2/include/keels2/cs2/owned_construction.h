@@ -60,6 +60,7 @@ private:
     struct Operation {
         OwnedConstructions& store;
         std::shared_ptr<Record> record;
+        bool was_busy{};
         Operation(OwnedConstructions& owner, std::shared_ptr<Record> value);
         ~Operation();
     };

@@ -57,6 +57,7 @@ public:
     const std::filesystem::path& Path() const noexcept;
 
 private:
+    friend struct SchemaEntityServiceTest;
     platform::DynamicLibrary library_;
     GameAdapterDestroyFn destroy_{};
     GameAdapterCommandCallerFn command_caller_{};

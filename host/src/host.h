@@ -136,6 +136,7 @@ public:
     bool CommandDispatchOpen() const noexcept;
 
 private:
+    friend struct SchemaEntityServiceTest;
     friend class FactoryService;
     friend class KeelHookService;
     friend class LifecycleService;

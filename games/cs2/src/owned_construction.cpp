@@ -26,11 +26,11 @@ KeelCs2EntityKeyValue OwnedConstructions::Key::View() const noexcept
     auto result = value; result.name = name.c_str(); result.string_value = text.c_str(); return result;
 }
 OwnedConstructions::Operation::Operation(OwnedConstructions& owner, std::shared_ptr<Record> value)
-    : store(owner), record(std::move(value)) { ++store.depth_; record->busy = true; }
+    : store(owner), record(std::move(value)), was_busy(record->busy) { ++store.depth_; record->busy = true; }
 OwnedConstructions::Operation::~Operation()
 {
-    record->busy = false;
-    if (record->closed) static_cast<void>(store.Finish(record));
+    record->busy = was_busy;
+    if (record->closed && !was_busy) static_cast<void>(store.Finish(record));
     --store.depth_;
 }
 std::shared_ptr<OwnedConstructions::Record> OwnedConstructions::Find(std::uint64_t token) const noexcept
@@ -207,8 +207,11 @@ KeelResult OwnedConstructions::Visit(std::uint64_t token, const char* class_name
     try {
         std::string name;
         if (!callback || !CopyText(class_name,255,name) || name.empty()) return KEEL_RESULT_INVALID_ARGUMENT;
-        std::shared_ptr<Record> record; auto result = Begin(token,record);
+        auto result = backend_.Ready();
         if (result != KEEL_RESULT_OK) return result;
+        auto record = Find(token);
+        if (!record || !record->created || record->consumed) return KEEL_RESULT_NOT_FOUND;
+        if (resetting_ || depth_ >= 8) return KEEL_RESULT_BUSY;
         Operation operation(*this,record);
         result = backend_.Validate(record->identity);
         if (result != KEEL_RESULT_OK || record->closed) return record->closed ? KEEL_RESULT_NOT_FOUND : result;

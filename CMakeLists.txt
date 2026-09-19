@@ -419,6 +419,7 @@ add_library(keels2_host SHARED
     host/src/published_service_registry.cpp
     host/src/plugin_manager.cpp
     host/src/schema_entity_service.cpp
+    host/src/entity_construction_service.cpp
     host/src/service_name_validation.cpp
     host/src/source2_callbacks_service.cpp
     host/src/source2_runtime_service.cpp
@@ -558,6 +559,16 @@ if(BUILD_TESTING)
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/live/run-keels2-09-live-gate.py"
             --self-test
     )
+
+    add_executable(keels2_entity_construction_service_test
+        tests/entity_construction_service.cpp ${KEELS2_HOST_SOURCE_CONTRACT})
+    target_compile_definitions(keels2_entity_construction_service_test PRIVATE KEELS2_HOST_VERSION="${PROJECT_VERSION}")
+    target_include_directories(keels2_entity_construction_service_test PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/generated" bootstrap/include host/src platform/include sdk/include)
+    target_link_libraries(keels2_entity_construction_service_test PRIVATE ${KEELS2_HOST_LINK_CONTRACT})
+    keels2_enable_warnings(keels2_entity_construction_service_test)
+    add_test(NAME entity_construction_service COMMAND keels2_entity_construction_service_test)
+    set_tests_properties(entity_construction_service PROPERTIES TIMEOUT 30)
 
     add_executable(keels2_game_adapter_loader_test
         tests/game_adapter_loader.cpp

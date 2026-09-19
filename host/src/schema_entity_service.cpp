@@ -38,6 +38,9 @@ SchemaEntityService::SchemaEntityService(Host& host, GameAdapter& adapter)
     entity_capture_api_ = {sizeof(KeelEntityCaptureApi), KEELS2_ENTITY_CAPTURE_API_VERSION, &CaptureEntityEntry};
     entity_access_api_ = {sizeof(KeelEntityAccessApi), KEELS2_ENTITY_ACCESS_API_VERSION, &VisitEntitiesEntry};
     entity_tools_api_ = {sizeof(KeelEntityToolsApi),KEELS2_ENTITY_TOOLS_API_VERSION,&ToolCapabilitiesEntry,&TeleportEntry,&SetModelEntry,&RemoveEntry};
+    entity_construction_api_ = {sizeof(KeelEntityConstructionApi),KEELS2_ENTITY_CONSTRUCTION_API_VERSION,
+        &ConstructionReadyEntry,&CreateEntityEntry,&DescribeConstructionEntry,&SetConstructionEntry,
+        &TeleportConstructionEntry,&SpawnConstructionEntry,&ObserveConstructionEntry,&VisitConstructionEntry};
     entity_writes_api_ = {sizeof(KeelEntityWritesApi), KEELS2_ENTITY_WRITES_API_VERSION, &WriteCapabilitiesEntry, &WriteFieldEntry};
     round_control_api_ = {sizeof(KeelRoundControlApi), KEELS2_ROUND_CONTROL_API_VERSION, &RoundCapabilitiesEntry, &TerminateRoundEntry};
     player_statistics_api_ = {sizeof(KeelPlayerStatisticsApi), KEELS2_PLAYER_STATISTICS_API_VERSION,
@@ -144,7 +147,7 @@ KeelResult SchemaEntityService::WeaponMatches(KeelPluginHandle plugin, KeelEntit
     {
         std::scoped_lock registry_lock(registry_mutex_);
         const auto found = entities_.find(pawn);
-        if (found == entities_.end() || found->second.owner != plugin) return KEEL_RESULT_NOT_FOUND;
+        if (found == entities_.end() || !EntityAccessible(found->second, plugin)) return KEEL_RESULT_NOT_FOUND;
         identity = found->second.entity;
     }
     ++owner->active_native_operations; ++hook_data_depth_;
@@ -233,7 +236,7 @@ KeelResult SchemaEntityService::VisitEntities(KeelPluginHandle plugin, const Kee
             if (spec.size != sizeof(spec) || spec.reserved || !spec.entity || !ValidSchemaName(spec.class_name))
                 return KEEL_RESULT_INVALID_ARGUMENT;
             const auto found = entities_.find(spec.entity);
-            if (found == entities_.end() || found->second.owner != plugin) return KEEL_RESULT_NOT_FOUND;
+            if (found == entities_.end() || !EntityAccessible(found->second, plugin)) return KEEL_RESULT_NOT_FOUND;
             names[i] = spec.class_name;
             requests[i] = {found->second.entity, names[i].c_str()};
         }
@@ -286,7 +289,7 @@ KeelResult SchemaEntityService::PlayerAction(KeelPluginHandle plugin, KeelEntity
     {
         std::scoped_lock lock(registry_mutex_);
         const auto record = entities_.find(entity);
-        if (record == entities_.end() || record->second.owner != plugin)
+        if (record == entities_.end() || !EntityAccessible(record->second, plugin))
             return KEEL_RESULT_NOT_FOUND;
         identity = record->second.entity;
     }
@@ -364,7 +367,7 @@ KeelResult SchemaEntityService::ManagePlayer(KeelPluginHandle plugin, KeelEntity
     {
         std::scoped_lock lock(registry_mutex_);
         const auto record = entities_.find(entity);
-        if (record == entities_.end() || record->second.owner != plugin)
+        if (record == entities_.end() || !EntityAccessible(record->second, plugin))
             return KEEL_RESULT_NOT_FOUND;
         identity = record->second.entity;
     }
@@ -446,7 +449,7 @@ KeelResult SchemaEntityService::AccessPlayerStat(KeelPluginHandle plugin, KeelEn
     {
         std::scoped_lock lock(registry_mutex_);
         const auto found = entities_.find(entity);
-        if (found == entities_.end() || found->second.owner != plugin) return KEEL_RESULT_NOT_FOUND;
+        if (found == entities_.end() || !EntityAccessible(found->second, plugin)) return KEEL_RESULT_NOT_FOUND;
         identity = found->second.entity;
     }
     std::string error;
@@ -572,7 +575,7 @@ KeelResult SchemaEntityService::EntityTool(KeelPluginHandle plugin, KeelEntityHa
     {
         std::scoped_lock lock(registry_mutex_);
         const auto found = entities_.find(entity);
-        if (found == entities_.end() || found->second.owner != plugin) return KEEL_RESULT_NOT_FOUND;
+        if (found == entities_.end() || !EntityAccessible(found->second, plugin)) return KEEL_RESULT_NOT_FOUND;
         identity = found->second.entity;
     }
     std::string error;
@@ -628,7 +631,7 @@ KeelResult SchemaEntityService::WriteField(KeelPluginHandle plugin, KeelEntityHa
         std::scoped_lock lock(registry_mutex_);
         const auto object = entities_.find(entity);
         const auto property = fields_.find(field);
-        if (object == entities_.end() || property == fields_.end() || object->second.owner != plugin || property->second.owner != plugin)
+        if (object == entities_.end() || property == fields_.end() || !EntityAccessible(object->second, plugin) || property->second.owner != plugin)
             return KEEL_RESULT_NOT_FOUND;
         identity = object->second.entity; resolved = property->second.field;
     }
@@ -660,31 +663,58 @@ KeelResult SchemaEntityService::WriteField(KeelPluginHandle plugin, KeelEntityHa
 
 KeelResult SchemaEntityService::ReleasePlugin(KeelPluginHandle plugin)
 {
-    if (!plugin)
+    if (!plugin) return KEEL_RESULT_INVALID_ARGUMENT;
+    std::scoped_lock state_lock(host_.state_mutex_);
+    auto* owner = host_.PluginByHandle(plugin);
+    if (owner && owner->active_native_operations == UINT32_MAX) return KEEL_RESULT_BUSY;
+    std::vector<std::shared_ptr<Construction>> pending;
     {
-        return KEEL_RESULT_INVALID_ARGUMENT;
+        std::scoped_lock lock(registry_mutex_);
+        for (const auto& [handle,record] : entities_) {
+            static_cast<void>(handle);
+            const auto& state = record.construction;
+            if (record.owner == plugin && record.construction_owner && state && (state->initializing || state->token)) {
+                if (state->thread != std::this_thread::get_id()) return KEEL_RESULT_WRONG_THREAD;
+                pending.push_back(state);
+            }
+        }
+        // Invalidate all observers before the first cancellation callback.
+        for (const auto& state : pending) state->closed.store(true,std::memory_order_release);
+        std::erase_if(fields_, [plugin](const auto& entry) { return entry.second.owner == plugin; });
+        std::erase_if(entities_, [plugin](const auto& entry) { return entry.second.owner == plugin; });
     }
-    std::scoped_lock lock(registry_mutex_);
-    std::erase_if(fields_, [plugin](const auto& entry) {
-        return entry.second.owner == plugin;
-    });
-    std::erase_if(entities_, [plugin](const auto& entry) {
-        return entry.second.owner == plugin;
-    });
-    return KEEL_RESULT_OK;
+    KeelResult result = KEEL_RESULT_OK;
+    for (const auto& state : pending) {
+        const auto current = CancelConstruction(state);
+        if (result == KEEL_RESULT_OK) result = current;
+    }
+    return result;
 }
 
 bool SchemaEntityService::Shutdown()
 {
-    std::scoped_lock lock(registry_mutex_);
-    if (shutting_down_.exchange(true, std::memory_order_acq_rel))
+    std::scoped_lock state_lock(host_.state_mutex_);
+    std::vector<std::shared_ptr<Construction>> pending;
     {
-        return true;
+        std::scoped_lock lock(registry_mutex_);
+        if (shutting_down_.load(std::memory_order_acquire)) return true;
+        for (const auto& [handle,record] : entities_) {
+            static_cast<void>(handle);
+            const auto& state = record.construction;
+            if (record.construction_owner && state && (state->initializing || state->token)) {
+                if (state->thread != std::this_thread::get_id()) return false;
+                const auto* owner = host_.PluginByHandle(state->owner);
+                if (owner && owner->active_native_operations == UINT32_MAX) return false;
+                pending.push_back(state);
+            }
+        }
+        shutting_down_.store(true,std::memory_order_release);
+        for (const auto& state : pending) state->closed.store(true,std::memory_order_release);
+        fields_.clear(); entities_.clear(); field_cache_.clear();
     }
-    fields_.clear();
-    entities_.clear();
-    field_cache_.clear();
-    return true;
+    bool complete = true;
+    for (const auto& state : pending) if (CancelConstruction(state) != KEEL_RESULT_OK) complete = false;
+    return complete;
 }
 
 KeelResult SchemaEntityService::ResolveFieldEntry(
@@ -1092,18 +1122,32 @@ KeelResult SchemaEntityService::ReleaseEntity(
     KeelPluginHandle plugin,
     KeelEntityHandle entity)
 {
-    if (!plugin || !entity)
+    if (!plugin || !entity) return KEEL_RESULT_INVALID_ARGUMENT;
     {
-        return KEEL_RESULT_INVALID_ARGUMENT;
+        std::scoped_lock lock(registry_mutex_);
+        const auto record = entities_.find(entity);
+        if (record == entities_.end() || record->second.owner != plugin) return KEEL_RESULT_NOT_FOUND;
+        const auto& state = record->second.construction;
+        // Ordinary handles and observers have no engine cleanup. Keep their
+        // release independent of the host lock, including from worker threads.
+        if (!record->second.construction_owner || !state || (!state->initializing && !state->token)) {
+            entities_.erase(record); return KEEL_RESULT_OK;
+        }
+        if (state->thread != std::this_thread::get_id()) return KEEL_RESULT_WRONG_THREAD;
     }
-    std::scoped_lock lock(registry_mutex_);
-    const auto record = entities_.find(entity);
-    if (record == entities_.end() || record->second.owner != plugin)
+    std::scoped_lock state_lock(host_.state_mutex_);
+    std::shared_ptr<Construction> pending;
     {
-        return KEEL_RESULT_NOT_FOUND;
+        std::scoped_lock lock(registry_mutex_);
+        const auto record = entities_.find(entity);
+        if (record == entities_.end() || record->second.owner != plugin) return KEEL_RESULT_NOT_FOUND;
+        auto* owner = host_.PluginByHandle(plugin);
+        if (owner && owner->active_native_operations == UINT32_MAX) return KEEL_RESULT_BUSY;
+        pending = record->second.construction;
+        pending->closed.store(true,std::memory_order_release);
+        entities_.erase(record);
     }
-    entities_.erase(record);
-    return KEEL_RESULT_OK;
+    return CancelConstruction(pending);
 }
 
 KeelResult SchemaEntityService::DescribeEntity(
@@ -1131,7 +1175,7 @@ KeelResult SchemaEntityService::DescribeEntity(
     {
         std::scoped_lock lock(registry_mutex_);
         const auto record = entities_.find(entity);
-        if (record == entities_.end() || record->second.owner != plugin)
+        if (record == entities_.end() || !EntityAccessible(record->second, plugin))
         {
             return KEEL_RESULT_NOT_FOUND;
         }
@@ -1183,7 +1227,7 @@ KeelResult SchemaEntityService::EqualEntity(
         const auto left_record = entities_.find(left);
         const auto right_record = entities_.find(right);
         if (left_record == entities_.end() || right_record == entities_.end() ||
-            left_record->second.owner != plugin || right_record->second.owner != plugin)
+            !EntityAccessible(left_record->second, plugin) || !EntityAccessible(right_record->second, plugin))
         {
             return KEEL_RESULT_NOT_FOUND;
         }
@@ -1236,7 +1280,7 @@ KeelResult SchemaEntityService::ReadEntityField(
         const auto entity_record = entities_.find(entity);
         const auto field_record = fields_.find(field);
         if (entity_record == entities_.end() || field_record == fields_.end() ||
-            entity_record->second.owner != plugin || field_record->second.owner != plugin ||
+            !EntityAccessible(entity_record->second, plugin) || field_record->second.owner != plugin ||
             !field_record->second.field)
         {
             return KEEL_RESULT_NOT_FOUND;

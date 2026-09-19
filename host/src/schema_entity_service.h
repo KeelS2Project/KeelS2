@@ -4,6 +4,7 @@
 #include "game_adapter.h"
 
 #include <keels2/entities.h>
+#include <keels2/entity_construction.h>
 #include <keels2/schema.h>
 
 #include <atomic>
@@ -12,6 +13,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <thread>
 
 namespace keels2::host
 {
@@ -32,6 +34,7 @@ public:
     const KeelPlayerManagementApi& PlayerManagementApi() const noexcept;
     const KeelEntityWritesApi& EntityWritesApi() const noexcept;
     const KeelEntityToolsApi& EntityToolsApi() const noexcept;
+    const KeelEntityConstructionApi& EntityConstructionApi() const noexcept;
     const KeelEntityAccessApi& EntityAccessApi() const noexcept;
     const KeelEntityCaptureApi& EntityCaptureApi() const noexcept;
     const KeelEntityHookDataApi& EntityHookDataApi() const noexcept;
@@ -87,7 +90,36 @@ private:
     {
         KeelPluginHandle owner{};
         GameEntityIdentity entity;
+        struct Construction
+        {
+            std::atomic<bool> closed{};
+            std::uint64_t token{};
+            KeelPluginHandle owner{};
+            std::thread::id thread;
+            bool initializing{true}, busy{};
+        };
+        std::shared_ptr<Construction> construction{};
+        bool construction_owner{};
     };
+    using Construction = EntityRecord::Construction;
+    class ConstructionOperation;
+    static bool EntityAccessible(const EntityRecord& record, KeelPluginHandle plugin) noexcept;
+    static KeelResult ConstructionReadyEntry(KeelPluginHandle);
+    static KeelResult CreateEntityEntry(KeelPluginHandle, const char*, KeelEntityHandle*);
+    static KeelResult DescribeConstructionEntry(KeelPluginHandle, KeelEntityHandle, KeelEntityInfo*);
+    static KeelResult SetConstructionEntry(KeelPluginHandle, KeelEntityHandle, const KeelEntityKeyValue*);
+    static KeelResult TeleportConstructionEntry(KeelPluginHandle, KeelEntityHandle, const KeelEntityTeleport*);
+    static KeelResult SpawnConstructionEntry(KeelPluginHandle, KeelEntityHandle, KeelBool*);
+    static KeelResult ObserveConstructionEntry(KeelPluginHandle, std::uint32_t, KeelEntityHandle*);
+    static KeelResult VisitConstructionEntry(KeelPluginHandle, KeelEntityHandle, const char*, KeelEntityAccessCallback, void*);
+    KeelResult ConstructionReady(KeelPluginHandle);
+    KeelResult CreateEntity(KeelPluginHandle, const char*, KeelEntityHandle*);
+    KeelResult DescribeConstruction(KeelPluginHandle, KeelEntityHandle, KeelEntityInfo*);
+    KeelResult ChangeConstruction(KeelPluginHandle, KeelEntityHandle, const KeelEntityKeyValue*, const KeelEntityTeleport*, KeelBool*);
+    KeelResult ObserveConstruction(KeelPluginHandle, std::uint32_t, KeelEntityHandle*);
+    KeelResult VisitConstruction(KeelPluginHandle, KeelEntityHandle, const char*, KeelEntityAccessCallback, void*);
+    void PruneConstructions(KeelPluginHandle);
+    KeelResult CancelConstruction(const std::shared_ptr<Construction>&);
 
     static KeelResult ResolveFieldEntry(
         KeelPluginHandle plugin,
@@ -180,6 +212,8 @@ private:
     KeelPlayerManagementApi player_management_api_{};
     KeelEntityWritesApi entity_writes_api_{};
     KeelEntityToolsApi entity_tools_api_{};
+    KeelEntityConstructionApi entity_construction_api_{};
+    unsigned construction_depth_{};
     unsigned entity_tools_depth_ = 0;
     KeelEntityAccessApi entity_access_api_{};
     KeelEntityCaptureApi entity_capture_api_{};

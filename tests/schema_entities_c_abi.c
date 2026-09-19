@@ -1,4 +1,5 @@
 #include <keels2/entities.h>
+#include <keels2/entity_construction.h>
 #include <keels2/entity_tools.h>
 #include <keels2/entity_access.h>
 #include <keels2/entity_hook_data.h>
@@ -50,6 +51,12 @@ _Static_assert(sizeof(KeelEntityTeleport) == 44, "teleport ABI");
 _Static_assert(offsetof(KeelEntityTeleport, velocity) == 32, "teleport velocity ABI");
 _Static_assert(sizeof(KeelEntityToolsApi) == 40, "entity tools API ABI");
 _Static_assert(offsetof(KeelEntityToolsApi, remove) == 32, "entity remove ABI");
+
+_Static_assert(sizeof(KeelEntityConstructionApi) == 72, "construction API ABI");
+_Static_assert(offsetof(KeelEntityConstructionApi, create) == 16, "construction create ABI");
+_Static_assert(offsetof(KeelEntityConstructionApi, visit) == 64, "construction visit ABI");
+_Static_assert(sizeof(KeelEntityKeyValue) == 48, "keyvalue ABI");
+_Static_assert(offsetof(KeelEntityKeyValue, string_value) == 16, "keyvalue string ABI");
 
 int main(void)
 {

@@ -3,6 +3,7 @@
 #include <keels2/convar_observe.h>
 #include <keels2/cs2/cvar_abi.h>
 #include <keels2/entities.h>
+#include <keels2/entity_construction.h>
 #include <keels2/game_adapter.hpp>
 #include <keels2/keelhook.hpp>
 #include <keels2/lifecycle.h>
@@ -112,6 +113,10 @@ static_assert(sizeof(KeelSchemaFieldInfo) == 64);
 static_assert(sizeof(KeelSchemaApi) == 32);
 static_assert(sizeof(KeelEntityInfo) == 24);
 static_assert(sizeof(KeelEntitiesApi) == 56);
+static_assert(sizeof(KeelEntityConstructionApi) == 72);
+static_assert(std::is_standard_layout_v<KeelEntityConstructionApi>);
+static_assert(sizeof(KeelEntityKeyValue) == 48);
+static_assert(std::is_standard_layout_v<KeelEntityKeyValue>);
 static_assert(sizeof(KeelHookScalar) == 16);
 static_assert(sizeof(KeelHookValue) == 24);
 static_assert(sizeof(KeelHookAggregateField) == 24);

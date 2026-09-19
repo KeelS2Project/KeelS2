@@ -301,12 +301,20 @@ bool Host::CompleteStartup()
 
 bool Host::Stop()
 {
-    std::unique_lock lifecycle_lock(lifecycle_mutex_);
+    // Engine cleanup can reenter Stop on this thread. A lifecycle transition
+    // already in progress retains the host; its caller can retry afterwards.
+    std::unique_lock lifecycle_lock(lifecycle_mutex_, std::try_to_lock);
+    if (!lifecycle_lock.owns_lock()) return false;
     std::unique_lock state_lock(state_mutex_);
     if (state_ == HostState::stopped)
     {
         return true;
     }
+    // A native call can request shutdown from inside command dispatch. Retain
+    // before waiting for dispatch, otherwise it would wait for its own stack.
+    if (std::any_of(plugins_.begin(), plugins_.end(), [](const auto& plugin) {
+            return plugin->active_native_operations != 0;
+        })) return false;
     if (state_ == HostState::running)
     {
         state_ = HostState::stopping;
@@ -1217,6 +1225,13 @@ KeelResult Host::QueryService(
         if (version != KEELS2_ENTITY_ACCESS_API_VERSION) return KEEL_RESULT_INCOMPATIBLE;
         if (!schema_entities_) schema_entities_ = std::make_unique<SchemaEntityService>(*this, *adapter_);
         *service = &schema_entities_->EntityAccessApi();
+        return KEEL_RESULT_OK;
+    }
+    if (std::strcmp(name, KEELS2_ENTITY_CONSTRUCTION_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_ENTITY_CONSTRUCTION_API_VERSION) return KEEL_RESULT_INCOMPATIBLE;
+        if (!schema_entities_) schema_entities_ = std::make_unique<SchemaEntityService>(*this, *adapter_);
+        *service = &schema_entities_->EntityConstructionApi();
         return KEEL_RESULT_OK;
     }
     if (std::strcmp(name, KEELS2_ENTITY_TOOLS_SERVICE_NAME) == 0)

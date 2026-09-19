@@ -232,5 +232,39 @@ int RunNativeConstructionChecks()
     }
     reset();
     if (KeelFixtureKeyValuesMemoryCount()) return 1233;
+    // Read-only pre-spawn observation nests without permitting mutation or
+    // early deletion, including close/reset from the innermost callback.
+    for (unsigned close_mode : {0u,1u,2u}) for (unsigned spawn_mode : {0u,3u}) {
+        reset(); Store store(backend); std::uint64_t token{}; KeelBool invoked{};
+        if (store.Create("prop_dynamic",token,identity) != KEEL_RESULT_OK) return 1234;
+        struct Context {
+            Store& store; std::uint64_t token; unsigned close_mode, depth{}, calls{}; bool valid{true};
+            static KeelResult Visit(void* data, void* const* pointers, std::uint32_t count) {
+                auto& c = *static_cast<Context*>(data); ++c.depth; ++c.calls;
+                c.valid = c.valid && count == 1 && pointers[0] == EntityInstance() && !g_native_removes;
+                const auto nested = c.store.Visit(c.token,"CCSPlayerPawn",&Visit,&c);
+                c.valid = c.valid && nested == (c.depth == 7 ? KEEL_RESULT_BUSY : KEEL_RESULT_OK);
+                if (c.depth == 7) {
+                    if (c.close_mode == 1) c.valid = c.store.Cancel(c.token) == KEEL_RESULT_OK && c.valid;
+                    if (c.close_mode == 2) c.store.Reset();
+                }
+                c.valid = c.valid && !g_native_removes && Identity()->m_pInstance;
+                --c.depth; return KEEL_RESULT_OK;
+            }
+        } context{store,token,close_mode};
+        g_native_mode = spawn_mode;
+        g_native_spawn_callback = [&] {
+            context.valid = store.Visit(token,"CCSPlayerPawn",&Context::Visit,&context) == KEEL_RESULT_OK && context.valid;
+            KeelBool nested{};
+            context.valid = context.valid && store.Spawn(token,nested) == (close_mode ? KEEL_RESULT_NOT_FOUND : KEEL_RESULT_BUSY) && !nested;
+            KeelCs2EntityKeyValue value{}; value.size = sizeof(value); value.name = "spawnflags"; value.type = KEELS2_CS2_KEY_INT32;
+            context.valid = context.valid && store.Set(token,value) == (close_mode ? KEEL_RESULT_NOT_FOUND : KEEL_RESULT_BUSY);
+            context.valid = context.valid && !g_native_removes;
+        };
+        if (store.Spawn(token,invoked) != (spawn_mode ? KEEL_RESULT_ENGINE_FAILURE : KEEL_RESULT_OK) || !invoked ||
+            !context.valid || context.calls != 7 || store.Count() || g_native_removes != (spawn_mode ? 1u : 0u)) return 1235;
+    }
+    reset();
+    if (KeelFixtureKeyValuesMemoryCount()) return 1236;
     return 0;
 }
