@@ -9,6 +9,7 @@ bool CallbacksPlugin::Load()
         LogError("could not listen for round_start");
         return false;
     }
+
     LogMessage("ready for Source 2 callbacks");
     return true;
 }
@@ -49,6 +50,7 @@ bool CallbacksPlugin::OnClientConnect(
         " xuid=" + std::to_string(xuid) +
         " network_id=" + (network_id ? network_id : "") +
         " accept=1";
+
     LogMessage(message.c_str());
     return true;
 }
@@ -59,6 +61,7 @@ bool CallbacksPlugin::OnClientCommand(CPlayerSlot slot, const CCommand& command)
         "client-command decision: slot=" + std::to_string(slot.Get()) +
         " command=" + (command.ArgC() > 0 ? command[0] : "") +
         " accept=1";
+
     LogMessage(message.c_str());
     return true;
 }

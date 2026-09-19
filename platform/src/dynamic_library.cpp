@@ -31,6 +31,7 @@ static std::string WindowsError(DWORD code)
     );
 
     std::string result = length && message ? std::string(message, length) : "Windows error " + std::to_string(code);
+
     if (message)
     {
         LocalFree(message);
@@ -39,6 +40,7 @@ static std::string WindowsError(DWORD code)
     {
         result.pop_back();
     }
+
     return result;
 }
 
@@ -55,6 +57,7 @@ DynamicLibrary& DynamicLibrary::operator=(DynamicLibrary&& other) noexcept
         Close();
         handle_ = std::exchange(other.handle_, nullptr);
     }
+
     return *this;
 }
 
@@ -69,6 +72,7 @@ bool DynamicLibrary::Open(const std::filesystem::path& path, std::string& error)
 
 #if defined(_WIN32)
     handle_ = reinterpret_cast<void*>(LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH));
+
     if (!handle_)
     {
         error = WindowsError(GetLastError());
@@ -77,6 +81,7 @@ bool DynamicLibrary::Open(const std::filesystem::path& path, std::string& error)
 #else
     dlerror();
     handle_ = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+
     if (!handle_)
     {
         const char* message = dlerror();
@@ -111,45 +116,57 @@ bool DynamicLibrary::OpenWithDependencies(const std::filesystem::path& path,
     Close();
     std::error_code filesystem_error;
     const bool present = std::filesystem::is_directory(dependencies, filesystem_error);
+
     if (filesystem_error && filesystem_error != std::errc::no_such_file_or_directory)
     {
         error = "cannot inspect plugin dependency directory: " + filesystem_error.message();
         return false;
     }
+
     if (!present)
     {
         return Open(path, error);
     }
+
     const auto absolute_directory = std::filesystem::absolute(dependencies, filesystem_error);
+
     if (filesystem_error)
     {
         error = filesystem_error.message();
         return false;
     }
+
     const auto absolute_path = std::filesystem::absolute(path, filesystem_error);
+
     if (filesystem_error)
     {
         error = filesystem_error.message();
         return false;
     }
+
     const DLL_DIRECTORY_COOKIE cookie = AddDllDirectory(absolute_directory.c_str());
+
     if (!cookie)
     {
         error = WindowsError(GetLastError());
         return false;
     }
+
     // The cookie exists only during eager import resolution. Libraries with
     // delayed/manual imports must resolve those through their own contract.
     const HMODULE module = LoadLibraryExW(absolute_path.c_str(), nullptr,
         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+
     const DWORD result = module ? ERROR_SUCCESS : GetLastError();
     RemoveDllDirectory(cookie);
     handle_ = reinterpret_cast<void*>(module);
+
     if (!handle_)
     {
         error = WindowsError(result);
         return false;
     }
+
     error.clear();
     return true;
 #else
@@ -191,6 +208,7 @@ bool ModulePathFromAddress(const void* address, std::filesystem::path& path, std
 
 #if defined(_WIN32)
     HMODULE module{};
+
     if (!GetModuleHandleExW(
             GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
             reinterpret_cast<LPCWSTR>(address),
@@ -202,20 +220,24 @@ bool ModulePathFromAddress(const void* address, std::filesystem::path& path, std
 
     std::wstring buffer(32768, L'\0');
     const DWORD length = GetModuleFileNameW(module, buffer.data(), static_cast<DWORD>(buffer.size()));
+
     if (!length || length == buffer.size())
     {
         error = WindowsError(GetLastError());
         return false;
     }
+
     buffer.resize(length);
     path = std::filesystem::path(buffer);
 #else
     Dl_info info{};
+
     if (!dladdr(address, &info) || !info.dli_fname)
     {
         error = "dladdr could not resolve the module path";
         return false;
     }
+
     path = std::filesystem::path(info.dli_fname);
 #endif
 
@@ -233,6 +255,7 @@ void* ModuleSymbolFromAddress(const void* address, const char* name, std::string
 
 #if defined(_WIN32)
     HMODULE module{};
+
     if (!GetModuleHandleExW(
             GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
             reinterpret_cast<LPCWSTR>(address),
@@ -241,17 +264,21 @@ void* ModuleSymbolFromAddress(const void* address, const char* name, std::string
         error = WindowsError(GetLastError());
         return nullptr;
     }
+
     const FARPROC function = GetProcAddress(module, name);
+
     if (!function)
     {
         error = WindowsError(GetLastError());
         return nullptr;
     }
+
     static_assert(sizeof(function) == sizeof(void*));
     void* result{};
     std::memcpy(&result, &function, sizeof(result));
 #else
     Dl_info info{};
+
     if (!dladdr(address, &info) || !info.dli_fname)
     {
         error = "dladdr could not resolve the module";
@@ -261,12 +288,14 @@ void* ModuleSymbolFromAddress(const void* address, const char* name, std::string
     dlerror();
     void* module = dlopen(info.dli_fname, RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD);
     bool close_module = module != nullptr;
+
     if (!module)
     {
         dlerror();
         module = dlopen(nullptr, RTLD_NOW | RTLD_LOCAL);
         close_module = module != nullptr;
     }
+
     if (!module)
     {
         const char* message = dlerror();
@@ -277,10 +306,12 @@ void* ModuleSymbolFromAddress(const void* address, const char* name, std::string
     dlerror();
     void* result = dlsym(module, name);
     const char* message = dlerror();
+
     if (close_module)
     {
         dlclose(module);
     }
+
     if (message || !result)
     {
         error = message ? message : "module symbol is unavailable";

@@ -30,6 +30,7 @@ extern "C" KeelBool KeelPlugin_Query(const KeelHostQuery* query, KeelPluginInfo*
     {
         return KEEL_FALSE;
     }
+
     info->size = sizeof(KeelPluginInfo);
     info->abi_version = KEELS2_PLUGIN_ABI_VERSION;
     info->name = kName;
@@ -45,6 +46,7 @@ extern "C" KeelBool KeelPlugin_Load(const KeelHostApi* api, KeelPluginHandle plu
     {
         return KEEL_FALSE;
     }
+
     const KeelCommandSpec command{
         sizeof(KeelCommandSpec),
         kCommand,
@@ -54,10 +56,12 @@ extern "C" KeelBool KeelPlugin_Load(const KeelHostApi* api, KeelPluginHandle plu
         nullptr
     };
     KeelCommandHandle handle{};
+
     if (api->register_command(plugin, &command, &handle) != KEEL_RESULT_OK)
     {
         return KEEL_FALSE;
     }
+
     g_api = api;
     g_plugin = plugin;
     return KEEL_TRUE;
@@ -69,6 +73,7 @@ extern "C" void KeelPlugin_Unload(KeelPluginHandle plugin)
     {
         g_api->log(plugin, KEEL_LOG_INFO, kUnloadMessage);
     }
+
     g_api = nullptr;
     g_plugin = 0;
 }

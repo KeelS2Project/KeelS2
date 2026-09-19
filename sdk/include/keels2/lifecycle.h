@@ -110,10 +110,12 @@ typedef struct KeelLifecycleApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*subscribe)(
         KeelPluginHandle plugin,
         const KeelLifecycleSubscriptionSpec* spec,
         KeelLifecycleSubscriptionHandle* subscription);
+
     KeelResult (*unsubscribe)(
         KeelPluginHandle plugin,
         KeelLifecycleSubscriptionHandle subscription);

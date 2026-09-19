@@ -18,6 +18,7 @@ namespace keels2::host
 {
 
 class Host;
+
 class KeelHookService;
 
 class LifecycleService final
@@ -43,18 +44,22 @@ private:
         KeelPluginHandle plugin,
         const KeelLifecycleSubscriptionSpec* spec,
         KeelLifecycleSubscriptionHandle* subscription);
+
     static KeelResult UnsubscribeEntry(
         KeelPluginHandle plugin,
         KeelLifecycleSubscriptionHandle subscription);
+
     static void DispatchEntry(const KeelLifecycleEvent& event, void* user_data);
 
     KeelResult Subscribe(
         KeelPluginHandle plugin,
         const KeelLifecycleSubscriptionSpec* spec,
         KeelLifecycleSubscriptionHandle* subscription);
+
     KeelResult Unsubscribe(
         KeelPluginHandle plugin,
         KeelLifecycleSubscriptionHandle subscription);
+
     void Dispatch(const KeelLifecycleEvent& event);
 
     static bool ValidEvent(KeelLifecycleEventType event) noexcept;

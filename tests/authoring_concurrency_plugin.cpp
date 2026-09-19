@@ -42,12 +42,15 @@ public:
     void OnGameFrame(bool, bool, bool) override
     {
         g_callback_count.fetch_add(1, std::memory_order_acq_rel);
+
         if (!g_block_armed.exchange(false, std::memory_order_acq_rel))
         {
             return;
         }
+
         g_block_entered.store(true, std::memory_order_release);
         g_block_entered.notify_all();
+
         while (!g_block_release.load(std::memory_order_acquire))
         {
             g_block_release.wait(false, std::memory_order_acquire);

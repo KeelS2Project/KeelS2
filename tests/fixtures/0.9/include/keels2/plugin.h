@@ -108,9 +108,13 @@ typedef struct KeelHostApi
 {
     uint32_t size;
     uint32_t abi_version;
+
     void (*log)(KeelPluginHandle plugin, KeelLogLevel level, const char* message);
+
     KeelResult (*register_command)(KeelPluginHandle plugin, const KeelCommandSpec* spec, KeelCommandHandle* command);
+
     KeelResult (*unregister_command)(KeelPluginHandle plugin, KeelCommandHandle command);
+
     KeelResult (*query_service)(
         KeelPluginHandle plugin,
         const char* name,
@@ -119,16 +123,20 @@ typedef struct KeelHostApi
 } KeelHostApi;
 
 typedef KeelBool (*KeelPluginQueryFn)(const KeelHostQuery* query, KeelPluginInfo* info);
+
 typedef KeelBool (*KeelPluginManifestFn)(
     const KeelHostQuery* query,
     KeelPluginManifest* manifest);
+
 typedef KeelBool (*KeelPluginLoadFn)(const KeelHostApi* api, KeelPluginHandle plugin);
+
 typedef void (*KeelPluginUnloadFn)(KeelPluginHandle plugin);
 
 KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Query(const KeelHostQuery* query, KeelPluginInfo* info);
 KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Manifest(
     const KeelHostQuery* query,
     KeelPluginManifest* manifest);
+
 KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(const KeelHostApi* api, KeelPluginHandle plugin);
 KEELS2_PLUGIN_EXPORT void KeelPlugin_Unload(KeelPluginHandle plugin);
 

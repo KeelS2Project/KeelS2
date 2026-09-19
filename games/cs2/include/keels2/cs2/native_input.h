@@ -12,11 +12,14 @@ public:
     virtual KeelResult InputCurrent(std::uint64_t expected, void*&, std::uint64_t&) noexcept = 0;
     virtual KeelCs2EntityInputBindings InputBindings() const noexcept = 0;
 };
+
 class NativeInputBackend final
 {
 public:
     explicit NativeInputBackend(InputEnvironment& environment) : environment_(environment) {}
+
     KeelResult Dispatch(const host::GameEntityInputRequest&, KeelBool& invoked);
+
 private:
     InputEnvironment& environment_;
 };

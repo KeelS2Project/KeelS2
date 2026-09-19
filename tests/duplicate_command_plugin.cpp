@@ -17,6 +17,7 @@ extern "C" KeelBool KeelPlugin_Query(const KeelHostQuery* query, KeelPluginInfo*
     {
         return KEEL_FALSE;
     }
+
     info->size = sizeof(KeelPluginInfo);
     info->abi_version = KEELS2_PLUGIN_ABI_VERSION;
     info->name = "Duplicate Command Test";
@@ -32,6 +33,7 @@ extern "C" KeelBool KeelPlugin_Load(const KeelHostApi* api, KeelPluginHandle plu
     {
         return KEEL_FALSE;
     }
+
     const KeelCommandSpec command{
         sizeof(KeelCommandSpec),
         "keel_test",
@@ -41,10 +43,12 @@ extern "C" KeelBool KeelPlugin_Load(const KeelHostApi* api, KeelPluginHandle plu
         nullptr
     };
     KeelCommandHandle handle{};
+
     if (api->register_command(plugin, &command, &handle) != KEEL_RESULT_ALREADY_EXISTS)
     {
         return KEEL_FALSE;
     }
+
     api->log(plugin, KEEL_LOG_INFO, "duplicate command rejection passed");
     return KEEL_TRUE;
 }

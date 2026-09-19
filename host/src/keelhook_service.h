@@ -59,12 +59,14 @@ public:
     bool OnCurrentTarget(KeelPluginHandle plugin) const;
     std::vector<TargetSnapshot> Snapshots() const;
     bool Shutdown();
+
     static KeelResult DeferInternal(KeelHookFrame*, void (*cleanup)(void*), void*) noexcept;
 
 private:
     static KeelResult InvokeEntry(KeelPluginHandle plugin, KeelHookTargetHandle target,
         std::uint32_t flags, const KeelHookValue* arguments, std::uint32_t argument_count,
         KeelHookValue* result);
+
     void Log(KeelLogLevel level, const std::string& message);
 
     class Implementation;

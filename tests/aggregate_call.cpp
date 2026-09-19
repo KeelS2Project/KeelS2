@@ -21,20 +21,24 @@ struct AggregateDescriptors
     {
         coordinates = dcNewAggr(2, sizeof(Coordinates));
         aggregate = dcNewAggr(2, sizeof(Aggregate));
+
         if (!coordinates || !aggregate)
         {
             return;
         }
+
         dcAggrField(
             coordinates,
             DC_SIGCHAR_INT,
             static_cast<DCint>(offsetof(Coordinates, integer)),
             1);
+
         dcAggrField(
             coordinates,
             DC_SIGCHAR_FLOAT,
             static_cast<DCint>(offsetof(Coordinates, fractional)),
             1);
+
         dcCloseAggr(coordinates);
         dcAggrField(
             aggregate,
@@ -42,11 +46,13 @@ struct AggregateDescriptors
             static_cast<DCint>(offsetof(Aggregate, coordinates)),
             1,
             coordinates);
+
         dcAggrField(
             aggregate,
             DC_SIGCHAR_ULONGLONG,
             static_cast<DCint>(offsetof(Aggregate, marker)),
             1);
+
         dcCloseAggr(aggregate);
     }
 
@@ -56,6 +62,7 @@ struct AggregateDescriptors
         {
             dcFreeAggr(aggregate);
         }
+
         if (coordinates)
         {
             dcFreeAggr(coordinates);
@@ -129,6 +136,7 @@ DCsigchar MethodDispatch(DCCallback*, DCArgs* arguments, DCValue* result, void* 
     dcbArgAggr(arguments, &value);
     DCCallVM* machine = dcNewCallVM(512);
     Aggregate output{};
+
     if (!machine)
     {
         state.failed = true;
@@ -143,6 +151,7 @@ DCsigchar MethodDispatch(DCCallback*, DCArgs* arguments, DCValue* result, void* 
         state.failed = dcGetError(machine) != DC_ERROR_NONE;
         dcFree(machine);
     }
+
     output.coordinates.integer += 1000;
     output.coordinates.fractional += 2000.0F;
     output.marker += 3000;
@@ -155,25 +164,30 @@ DCsigchar MethodDispatch(DCCallback*, DCArgs* arguments, DCValue* result, void* 
 int main()
 {
     AggregateDescriptors descriptors;
+
     if (!descriptors)
     {
         return 1;
     }
+
     const Aggregate input{{4, 5.0F}, 6};
 
     DCCallVM* machine = dcNewCallVM(512);
+
     if (!machine)
     {
         return 2;
     }
+
     Aggregate direct{};
     dcMode(machine, DC_CALL_C_DEFAULT);
     dcBeginCallAggr(machine, descriptors.aggregate);
     dcArgAggr(machine, descriptors.aggregate, &input);
     dcCallAggr(machine, Address(&FreeTarget), descriptors.aggregate, &direct);
-    const bool direct_ok = dcGetError(machine) == DC_ERROR_NONE &&
-        Equal(direct, Aggregate{{5, 7.0F}, 9});
+    const bool direct_ok = dcGetError(machine) == DC_ERROR_NONE && Equal(direct, Aggregate{{5, 7.0F}, 9});
+
     dcFree(machine);
+
     if (!direct_ok)
     {
         return 3;
@@ -185,25 +199,30 @@ int main()
         &FreeDispatch,
         nullptr,
         free_aggregates.data());
+
     if (!free_callback)
     {
         return 4;
     }
+
     using FreeFunction = Aggregate (*)(Aggregate);
     const Aggregate free_result = Callable<FreeFunction>(free_callback)(input);
     dcbFreeCallback(free_callback);
+
     if (!Equal(free_result, Aggregate{{14, 25.0F}, 36}))
     {
         return 5;
     }
 
     void* target = KeelHookVirtualFixtureFirst();
+
     if (!Equal(
             KeelHookVirtualFixtureCallAggregate(target, input),
             Aggregate{{104, 6.0F}, 106}))
     {
         return 6;
     }
+
     void*** object = static_cast<void***>(target);
     void** original_table = *object;
     MethodState state{original_table[2], descriptors.aggregate, false};
@@ -213,6 +232,7 @@ int main()
         &MethodDispatch,
         &state,
         method_aggregates.data());
+
     if (!method_callback)
     {
         return 7;
@@ -223,12 +243,15 @@ int main()
     constexpr std::size_t header_count = 2;
 #endif
     std::array<void*, header_count + 3> shadow_storage{};
+
     for (std::size_t index{}; index < header_count; ++index)
     {
         const auto source = static_cast<std::ptrdiff_t>(index) -
             static_cast<std::ptrdiff_t>(header_count);
+
         shadow_storage[index] = original_table[source];
     }
+
     void** shadow_table = shadow_storage.data() + header_count;
     shadow_table[0] = original_table[0];
     shadow_table[1] = original_table[1];
@@ -237,6 +260,7 @@ int main()
     const Aggregate method_result = KeelHookVirtualFixtureCallAggregate(target, input);
     *object = original_table;
     dcbFreeCallback(method_callback);
+
     if (state.failed || !Equal(method_result, Aggregate{{1104, 2006.0F}, 3106}) ||
         !Equal(
             KeelHookVirtualFixtureCallAggregate(target, input),
@@ -244,5 +268,6 @@ int main()
     {
         return 8;
     }
+
     return 0;
 }

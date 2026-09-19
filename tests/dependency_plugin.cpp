@@ -38,6 +38,7 @@ void Log(const char* action)
     {
         const std::string message = std::string("[Dependency Test] ") + action + " " +
             KEELS2_DEPENDENCY_NAME;
+
         g_host->log(g_plugin, KEEL_LOG_INFO, message.c_str());
     }
 }
@@ -54,6 +55,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Query(
     {
         return KEEL_FALSE;
     }
+
     *info = {
         sizeof(KeelPluginInfo),
         KEELS2_PLUGIN_ABI_VERSION,
@@ -76,6 +78,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Manifest(
     {
         return KEEL_FALSE;
     }
+
     static const KeelPluginDependency dependency{
         sizeof(KeelPluginDependency),
         KEELS2_DEPENDENCY_REQUIREMENT,
@@ -102,6 +105,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     g_host = api;
     g_plugin = plugin;
     Log("load");
@@ -114,6 +118,7 @@ extern "C" KEELS2_PLUGIN_EXPORT void KeelPlugin_Unload(KeelPluginHandle plugin)
     {
         Log("unload");
     }
+
     g_host = nullptr;
     g_plugin = 0;
 }

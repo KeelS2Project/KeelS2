@@ -90,11 +90,13 @@ struct FreeOwner
         target = call.TargetHandle();
         no_instance = call.Instance<void>() == nullptr;
         observed_left = left;
+
         if (phase == keels2::kh::Phase::Pre)
         {
             right += 2;
             return keels2::kh::Action::Continue;
         }
+
         const auto result = call.Result();
         observed_result = result.value_or(-1);
         return call.SetResult(900)
@@ -300,6 +302,7 @@ KeelResult ResolveLease(KeelHookTargetHandle* output)
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     std::scoped_lock lock(g_lease_backend.mutex);
     ++g_lease_backend.resolve_calls;
     g_lease_backend.lease = true;
@@ -328,14 +331,17 @@ KeelResult ResolveVirtualTarget(
 KeelResult ReleaseTarget(KeelPluginHandle, KeelHookTargetHandle target)
 {
     std::scoped_lock lock(g_lease_backend.mutex);
+
     if (target != 41 || !g_lease_backend.lease)
     {
         return KEEL_RESULT_NOT_FOUND;
     }
+
     if (!g_lease_backend.callbacks.empty())
     {
         return KEEL_RESULT_BUSY;
     }
+
     g_lease_backend.lease = false;
     ++g_lease_backend.release_calls;
     return KEEL_RESULT_OK;
@@ -349,15 +355,18 @@ KeelResult AddCallback(
 {
     std::scoped_lock lock(g_lease_backend.mutex);
     ++g_lease_backend.add_calls;
+
     if (target != 41 || !g_lease_backend.lease || !spec || !spec->callback || !output)
     {
         return KEEL_RESULT_NOT_FOUND;
     }
+
     if (g_lease_backend.fail_callback)
     {
         g_lease_backend.fail_callback = false;
         return KEEL_RESULT_ENGINE_FAILURE;
     }
+
     const KeelHookCallbackHandle handle = g_lease_backend.next_callback++;
     g_lease_backend.callbacks.emplace(handle, *spec);
     *output = handle;
@@ -370,16 +379,20 @@ KeelResult RemoveCallback(KeelPluginHandle, KeelHookCallbackHandle callback)
     {
         g_lease_backend.remove_entered.store(true, std::memory_order_release);
         g_lease_backend.remove_entered.notify_all();
+
         while (!g_lease_backend.late_done.load(std::memory_order_acquire))
         {
             g_lease_backend.late_done.wait(false, std::memory_order_acquire);
         }
     }
+
     std::scoped_lock lock(g_lease_backend.mutex);
+
     if (g_lease_backend.callbacks.erase(callback) != 1)
     {
         return KEEL_RESULT_NOT_FOUND;
     }
+
     ++g_lease_backend.remove_calls;
     return KEEL_RESULT_OK;
 }
@@ -446,6 +459,7 @@ KeelResult MockQuerySource2(
     {
         return KEEL_RESULT_NOT_FOUND;
     }
+
     *output = {
         sizeof(KeelSource2InterfaceInfo),
         KEELS2_SOURCE2_CAPABILITY_SERVER,
@@ -488,28 +502,35 @@ KeelResult MockQueryService(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     *output = nullptr;
+
     if (!name)
     {
         return KEEL_RESULT_NOT_FOUND;
     }
+
     if (std::strcmp(name, KEELS2_SOURCE2_SERVICE_NAME) == 0)
     {
         if (version != KEELS2_SOURCE2_API_VERSION)
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         *output = &g_source2_api;
         return KEEL_RESULT_OK;
     }
+
     if (std::strcmp(name, KEELHOOK_SERVICE_NAME) != 0)
     {
         return KEEL_RESULT_NOT_FOUND;
     }
+
     if (version != KEELHOOK_API_VERSION)
     {
         return KEEL_RESULT_INCOMPATIBLE;
     }
+
     *output = &g_lease_api;
     return KEEL_RESULT_OK;
 }
@@ -550,20 +571,25 @@ public:
     bool Load(keels2::Context& context) override
     {
         keels2::kh::Service service;
+
         if (service.Connect(context) != KEEL_RESULT_OK)
         {
             return false;
         }
+
         const auto direct = keels2::kh::TargetSpec::Address(
             KeelHookVirtualFixtureFirst());
+
         {
             keels2::kh::Target target;
+
             if (service.Resolve<std::int32_t(std::int32_t)>(direct, target) !=
                     KEEL_RESULT_OK || target.Handle() != 41)
             {
                 return false;
             }
         }
+
         if (g_lease_backend.release_calls != 1 || g_lease_backend.lease)
         {
             return false;
@@ -572,6 +598,7 @@ public:
         {
             keels2::kh::Target target;
             keels2::kh::Callback callback;
+
             if (service.Resolve<std::int32_t(std::int32_t)>(direct, target) !=
                     KEEL_RESULT_OK ||
                 service.AddCallback<
@@ -586,6 +613,7 @@ public:
                 return false;
             }
         }
+
         if (g_lease_backend.remove_calls != 1 ||
             g_lease_backend.release_calls != 2 || g_lease_backend.lease)
         {
@@ -596,6 +624,7 @@ public:
         {
             keels2::kh::Target target;
             keels2::kh::Callback callback;
+
             if (service.Resolve<std::int32_t(std::int32_t)>(direct, target) !=
                     KEEL_RESULT_OK ||
                 service.AddCallback<
@@ -610,6 +639,7 @@ public:
                 return false;
             }
         }
+
         if (g_lease_backend.release_calls != 3 || g_lease_backend.lease)
         {
             return false;
@@ -617,8 +647,10 @@ public:
 
         auto* instance = static_cast<KeelHookVirtualFixtureInterface*>(
             KeelHookVirtualFixtureFirst());
+
         g_lease_backend.fail_callback = true;
         keels2::kh::Hook failed;
+
         if (service.AddVirtualHook<
                 &KeelHookVirtualFixtureInterface::First,
                 &LeasePlugin::OnCall>(
@@ -658,6 +690,7 @@ private:
         const std::uint32_t releases = g_lease_backend.release_calls;
         keels2::kh::Hook first;
         keels2::kh::Hook second;
+
         if (service.AddVirtualHook<
                 &KeelHookVirtualFixtureInterface::First,
                 &LeasePlugin::OnCall>(
@@ -682,14 +715,17 @@ private:
         {
             return false;
         }
+
         keels2::kh::Hook* early = reverse ? &second : &first;
         keels2::kh::Hook* late = reverse ? &first : &second;
+
         if (early->Reset() != KEEL_RESULT_OK || *early || !*late ||
             g_lease_backend.callbacks.size() != 1 ||
             g_lease_backend.release_calls != releases)
         {
             return false;
         }
+
         if (service.AddVirtualHook<
                 &KeelHookVirtualFixtureInterface::First,
                 &LeasePlugin::OnCall>(
@@ -705,6 +741,7 @@ private:
         {
             return false;
         }
+
         return true;
     }
 };
@@ -725,6 +762,7 @@ public:
     bool Load() override
     {
         auto* server = GetSource2Server<IServerGameDLL>();
+
         if (!server || !HookPre(
                 server,
                 &IServerGameDLL::GameFrame,
@@ -732,15 +770,19 @@ public:
         {
             return false;
         }
+
         KeelHookCallbackSpec registered{};
         {
             std::scoped_lock lock(g_lease_backend.mutex);
+
             if (g_lease_backend.callbacks.size() != 1)
             {
                 return false;
             }
+
             registered = g_lease_backend.callbacks.begin()->second;
         }
+
         std::array arguments{
             Pointer(server),
             Boolean(true),
@@ -748,23 +790,27 @@ public:
             Boolean(false)
         };
         KeelHookFrame frame = Frame(KH_PHASE_PRE, arguments, Void());
+
         if (registered.callback(&frame, registered.user_data) != KH_ACTION_CONTINUE ||
             initial_calls_ != 1)
         {
             return false;
         }
+
         g_lease_backend.block_remove.store(true, std::memory_order_release);
         g_late_hook_worker = std::thread([this, server] {
             while (!g_lease_backend.remove_entered.load(std::memory_order_acquire))
             {
                 g_lease_backend.remove_entered.wait(false, std::memory_order_acquire);
             }
+
             g_late_hook_result.store(
                 HookPre(
                     server,
                     &IServerGameDLL::GameFrame,
                     &FailedHookPlugin::OnLateFrame),
                 std::memory_order_release);
+
             g_lease_backend.late_done.store(true, std::memory_order_release);
             g_lease_backend.late_done.notify_all();
         });
@@ -797,51 +843,61 @@ using FreeDispatch = keels2::kh::detail::TypedCallback<
     false,
     &FreeOwner::OnCall,
     FreeOwner>;
+
 using ObserverDispatch = keels2::kh::detail::TypedCallback<
     void(bool),
     false,
     &ObserverOwner::Observe,
     ObserverOwner>;
+
 using PluginResultDispatch = keels2::kh::detail::TypedCallback<
     void(bool),
     false,
     &PluginResultOwner::Observe,
     PluginResultOwner>;
+
 using MethodDispatch = keels2::kh::detail::TypedCallback<
     std::int32_t(std::int32_t),
     true,
     &MethodOwner::OnSecond,
     MethodOwner>;
+
 using ReferenceDispatch = keels2::kh::detail::TypedCallback<
     void(const std::int32_t&),
     false,
     &ReferenceOwner::Observe,
     ReferenceOwner>;
+
 using ReferenceResultDispatch = keels2::kh::detail::TypedCallback<
     std::int32_t&(bool),
     false,
     &ReferenceResultOwner::Observe,
     ReferenceResultOwner>;
+
 using SlotDispatch = keels2::kh::detail::TypedCallback<
     void(CPlayerSlot),
     false,
     &SlotOwner::Observe,
     SlotOwner>;
+
 using NativeIntegerDispatch = keels2::kh::detail::TypedCallback<
     void(int64, uint64),
     false,
     &NativeIntegerOwner::Observe,
     NativeIntegerOwner>;
+
 using ClientConnectDispatch = keels2::kh::detail::TypedCallback<
     keels2::kh::MethodSignature<&IServerGameClients::ClientConnect>,
     true,
     &ValveOwner::OnClientConnect,
     ValveOwner>;
+
 using ClientCommandDispatch = keels2::kh::detail::TypedCallback<
     keels2::kh::MethodSignature<&IServerGameClients::ClientCommand>,
     true,
     &ValveOwner::OnClientCommand,
     ValveOwner>;
+
 using ClientDisconnectDispatch = keels2::kh::detail::TypedCallback<
     keels2::kh::MethodSignature<&IServerGameClients::ClientDisconnect>,
     true,
@@ -853,6 +909,7 @@ bool CheckFreeDispatch()
     FreeOwner owner;
     std::array arguments{Int32(11), Int32(20)};
     KeelHookFrame frame = Frame(KH_PHASE_PRE, arguments, Int32(0));
+
     if (FreeDispatch::Dispatch(&frame, &owner) != KH_ACTION_CONTINUE ||
         owner.calls != 1 || owner.phase != keels2::kh::Phase::Pre ||
         owner.original_called || !owner.no_instance || owner.target != 73 ||
@@ -864,6 +921,7 @@ bool CheckFreeDispatch()
     frame.phase = KH_PHASE_POST;
     frame.flags = KH_FRAME_ORIGINAL_CALLED;
     frame.result.scalar.int32 = 44;
+
     if (FreeDispatch::Dispatch(&frame, &owner) != KH_ACTION_OVERRIDE ||
         owner.calls != 2 || owner.phase != keels2::kh::Phase::Post ||
         !owner.original_called || owner.observed_result != 44 ||
@@ -878,6 +936,7 @@ bool CheckFreeDispatch()
         KH_PHASE_PRE,
         observer_arguments,
         Void());
+
     if (ObserverDispatch::Dispatch(&observer_frame, &observer) != KH_ACTION_CONTINUE ||
         observer.calls != 1 || !observer.observed)
     {
@@ -885,17 +944,21 @@ bool CheckFreeDispatch()
     }
 
     PluginResultOwner result_owner;
+
     if (PluginResultDispatch::Dispatch(&observer_frame, &result_owner) !=
             KH_ACTION_CONTINUE)
     {
         return false;
     }
+
     result_owner.result = plugin_override;
+
     if (PluginResultDispatch::Dispatch(&observer_frame, &result_owner) !=
             KH_ACTION_OVERRIDE)
     {
         return false;
     }
+
     result_owner.result = plugin_supersede;
     return PluginResultDispatch::Dispatch(&observer_frame, &result_owner) ==
         KH_ACTION_SUPERSEDE;
@@ -910,6 +973,7 @@ bool CheckMethodAndReferences()
         KH_PHASE_PRE,
         method_arguments,
         Int32(0));
+
     if (MethodDispatch::Dispatch(&method_frame, &method_owner) != KH_ACTION_CONTINUE ||
         method_owner.calls != 1 || method_owner.instance != raw_instance ||
         method_arguments[1].scalar.int32 != 12)
@@ -924,6 +988,7 @@ bool CheckMethodAndReferences()
         KH_PHASE_PRE,
         reference_arguments,
         Void());
+
     if (ReferenceDispatch::Dispatch(&reference_frame, &reference_owner) !=
             KH_ACTION_CONTINUE ||
         reference_owner.calls != 1 || reference_owner.address != &referenced)
@@ -937,6 +1002,7 @@ bool CheckMethodAndReferences()
         KH_PHASE_POST,
         result_arguments,
         Pointer(&referenced));
+
     if (ReferenceResultDispatch::Dispatch(&result_frame, &result_owner) !=
             KH_ACTION_OVERRIDE ||
         result_owner.calls != 1 || !result_owner.selected ||
@@ -949,6 +1015,7 @@ bool CheckMethodAndReferences()
     SlotOwner slot_owner;
     std::array slot_arguments{Int32(4)};
     KeelHookFrame slot_frame = Frame(KH_PHASE_PRE, slot_arguments, Void());
+
     if (SlotDispatch::Dispatch(&slot_frame, &slot_owner) != KH_ACTION_CONTINUE ||
         slot_owner.calls != 1 || slot_owner.observed != 4 ||
         slot_arguments[0].scalar.int32 != 5)
@@ -971,6 +1038,7 @@ bool CheckMalformedFrames()
     FreeOwner owner;
     std::array arguments{Int32(1), Int32(2)};
     KeelHookFrame valid = Frame(KH_PHASE_PRE, arguments, Int32(0));
+
     if (FreeDispatch::Dispatch(nullptr, &owner) != KH_ACTION_CONTINUE ||
         FreeDispatch::Dispatch(&valid, nullptr) != KH_ACTION_CONTINUE)
     {
@@ -985,52 +1053,67 @@ bool CheckMalformedFrames()
 
     KeelHookFrame malformed = valid;
     malformed.size = 0;
+
     if (!check(malformed))
     {
         return false;
     }
+
     malformed = valid;
     malformed.phase = KH_PHASE_BOTH;
+
     if (!check(malformed))
     {
         return false;
     }
+
     malformed = valid;
     malformed.argument_count = 1;
+
     if (!check(malformed))
     {
         return false;
     }
+
     malformed = valid;
     malformed.arguments = nullptr;
+
     if (!check(malformed))
     {
         return false;
     }
+
     malformed = valid;
     malformed.flags = 4;
+
     if (!check(malformed))
     {
         return false;
     }
+
     malformed = valid;
     malformed.result.type = KH_VALUE_UINT32;
+
     if (!check(malformed))
     {
         return false;
     }
+
     malformed = valid;
     std::array wrong_type{arguments[0], arguments[1]};
     wrong_type[0].type = KH_VALUE_UINT32;
     malformed.arguments = wrong_type.data();
+
     if (!check(malformed))
     {
         return false;
     }
+
     malformed = valid;
     std::array reserved{arguments[0], arguments[1]};
     reserved[0].reserved = 1;
     malformed.arguments = reserved.data();
+
     if (!check(malformed))
     {
         return false;
@@ -1039,6 +1122,7 @@ bool CheckMalformedFrames()
     MethodOwner method_owner;
     std::array method_arguments{Pointer(nullptr), Int32(1)};
     KeelHookFrame method_frame = Frame(KH_PHASE_PRE, method_arguments, Int32(0));
+
     if (MethodDispatch::Dispatch(&method_frame, &method_owner) != KH_ACTION_CONTINUE ||
         method_owner.calls != 0)
     {
@@ -1051,6 +1135,7 @@ bool CheckMalformedFrames()
         KH_PHASE_PRE,
         reference_arguments,
         Void());
+
     return ReferenceDispatch::Dispatch(&reference_frame, &reference_owner) ==
             KH_ACTION_CONTINUE &&
         reference_owner.calls == 0;
@@ -1061,10 +1146,12 @@ bool CheckValveDispatch()
     ValveOwner owner;
     auto* clients = reinterpret_cast<IServerGameClients*>(
         KeelHookVirtualFixtureFirst());
+
     const char name[] = "Player";
     const char network_id[] = "STEAM_1:0:7";
     auto* rejection = reinterpret_cast<CBufferString*>(
         static_cast<std::uintptr_t>(0x1000));
+
     std::array connect_arguments{
         Pointer(clients),
         Int32(3),
@@ -1078,6 +1165,7 @@ bool CheckValveDispatch()
         KH_PHASE_PRE,
         connect_arguments,
         Boolean(false));
+
     if (ClientConnectDispatch::Dispatch(&connect_frame, &owner) != KH_ACTION_CONTINUE ||
         owner.connect_calls != 1 || owner.instance != clients || owner.connect_slot != 3 ||
         owner.connect_name != name || owner.connect_xuid != 55 ||
@@ -1100,6 +1188,7 @@ bool CheckValveDispatch()
         KH_PHASE_PRE,
         command_values,
         Void());
+
     if (ClientCommandDispatch::Dispatch(&command_frame, &owner) != KH_ACTION_CONTINUE ||
         owner.command_calls != 1 || owner.command_slot != 6 ||
         owner.observed_command != &command)
@@ -1120,6 +1209,7 @@ bool CheckValveDispatch()
         KH_PHASE_PRE,
         disconnect_arguments,
         Void());
+
     return ClientDisconnectDispatch::Dispatch(&disconnect_frame, &owner) ==
             KH_ACTION_CONTINUE &&
         owner.disconnect_calls == 1 && owner.disconnect_slot == 8 &&
@@ -1131,17 +1221,23 @@ bool CheckVirtualIndexes()
 {
     const auto first = keels2::kh::VirtualIndex<
         &KeelHookVirtualFixtureInterface::First>();
+
     const auto second = keels2::kh::VirtualIndex<
         &KeelHookVirtualFixtureInterface::Second>();
+
     const auto aggregate = keels2::kh::VirtualIndex<
         &KeelHookVirtualFixtureInterface::Aggregate>();
+
     const auto game_frame = keels2::kh::VirtualIndex<&IServerGameDLL::GameFrame>();
     const auto client_connect = keels2::kh::VirtualIndex<
         &IServerGameClients::ClientConnect>();
+
     const auto client_command = keels2::kh::VirtualIndex<
         &IServerGameClients::ClientCommand>();
+
     const auto client_disconnect = keels2::kh::VirtualIndex<
         &IServerGameClients::ClientDisconnect>();
+
     using AdjustedMethod = std::int32_t (KeelHookVirtualFixtureMultiple::*)(std::int32_t);
     AdjustedMethod adjusted_method = static_cast<AdjustedMethod>(
         &KeelHookVirtualFixtureSecondary::Adjusted);
@@ -1153,6 +1249,7 @@ bool CheckVirtualIndexes()
         adjusted_representation.data(),
         &adjusted_method,
         sizeof(void*) + sizeof(std::int32_t));
+
     std::memcpy(
         &adjusted_method,
         adjusted_representation.data(),
@@ -1166,6 +1263,7 @@ bool CheckVirtualIndexes()
         "test",
         expected_adjustment,
         8);
+
     return first && *first == 0 && second && *second == 1 && aggregate && *aggregate == 2 &&
         game_frame && *game_frame == 19 && client_connect && *client_connect == 12 &&
         client_command && *client_command == 17 &&
@@ -1184,46 +1282,57 @@ int main()
     {
         return 1;
     }
+
     if (!CheckMethodAndReferences())
     {
         return 2;
     }
+
     if (!CheckMalformedFrames())
     {
         return 3;
     }
+
     if (!CheckValveDispatch())
     {
         return 4;
     }
+
     if (!CheckVirtualIndexes())
     {
         return 5;
     }
+
     if (keels2::detail::AbiPluginAdapter<LeasePlugin>::Load(
             &g_lease_host,
             19) != KEEL_TRUE)
     {
         return 6;
     }
+
     keels2::detail::AbiPluginAdapter<LeasePlugin>::Unload(19);
+
     if (g_lease_backend.lease || !g_lease_backend.callbacks.empty() ||
         g_lease_backend.release_calls != 6 || g_lease_backend.remove_calls != 7)
     {
         return 7;
     }
+
     ResetLeaseBackend();
     g_late_hook_result.store(false, std::memory_order_release);
+
     if (keels2::detail::AuthoringAdapter<FailedHookPlugin>::Load(
             &g_lease_host,
             23) != KEEL_FALSE)
     {
         return 8;
     }
+
     if (g_late_hook_worker.joinable())
     {
         g_late_hook_worker.join();
     }
+
     if (g_late_hook_result.load(std::memory_order_acquire) ||
         !g_lease_backend.remove_entered.load(std::memory_order_acquire) ||
         !g_lease_backend.late_done.load(std::memory_order_acquire) ||
@@ -1233,5 +1342,6 @@ int main()
     {
         return 9;
     }
+
     return 0;
 }

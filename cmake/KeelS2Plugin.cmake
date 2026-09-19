@@ -4,6 +4,7 @@ function(keels2_add_plugin target)
     if(ARGC LESS 2)
         message(FATAL_ERROR "keels2_add_plugin requires a target and at least one source")
     endif()
+
     if(NOT TARGET KeelS2::SDK)
         message(FATAL_ERROR "KeelS2::SDK is unavailable")
     endif()

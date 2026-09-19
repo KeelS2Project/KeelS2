@@ -33,11 +33,13 @@ public:
     PublishedServiceRegistry& operator=(const PublishedServiceRegistry&) = delete;
 
     const KeelServicesApi& Api() const noexcept;
+
     KeelResult Query(
         KeelPluginHandle consumer,
         const char* name,
         std::uint32_t version,
         const void** service);
+
     bool HasLeasedPublication(KeelPluginHandle provider, std::string& consumer) const;
     KeelResult ReleasePlugin(KeelPluginHandle plugin);
     std::vector<Snapshot> Snapshots() const;
@@ -71,9 +73,11 @@ private:
         KeelPluginHandle plugin,
         const KeelServiceSpec* spec,
         KeelServiceHandle* publication);
+
     static KeelResult WithdrawEntry(
         KeelPluginHandle plugin,
         KeelServiceHandle publication);
+
     static KeelResult ReleaseEntry(
         KeelPluginHandle plugin,
         const char* name,
@@ -83,11 +87,14 @@ private:
         KeelPluginHandle plugin,
         const KeelServiceSpec* spec,
         KeelServiceHandle* publication);
+
     KeelResult Withdraw(KeelPluginHandle plugin, KeelServiceHandle publication);
+
     KeelResult Release(
         KeelPluginHandle plugin,
         const char* name,
         std::uint32_t version);
+
     Host& host_;
     KeelServicesApi api_{};
     KeelServiceHandle next_publication_{1};

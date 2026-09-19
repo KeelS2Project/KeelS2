@@ -113,22 +113,27 @@ bool ReadCaptureRequest(
     const std::filesystem::path& path,
     CaptureRequest& request,
     Report& report);
+
 bool ReadBindings(
     const std::filesystem::path& path,
     std::vector<ModuleInput>& bindings,
     Report& report);
+
 bool ReadProfile(
     const std::filesystem::path& path,
     Profile& profile,
     Report& report);
+
 bool WriteProfile(
     const std::filesystem::path& path,
     const Profile& profile,
     std::string& error);
+
 bool Capture(
     const CaptureRequest& request,
     Profile& profile,
     Report& report);
+
 Report Compare(const Profile& accepted, const Profile& candidate);
 Report Validate(const Profile& profile, const std::vector<ModuleInput>& bindings);
 

@@ -29,6 +29,7 @@ public:
             LogError("schema field resolution or command registration failed");
             return false;
         }
+
         LogMessage("schema field resolution passed");
         return true;
     }
@@ -36,10 +37,12 @@ public:
     void Unload() override
     {
         bool candidates_invalid = true;
+
         for (const auto& candidate : candidates_)
         {
             candidates_invalid = candidates_invalid && !candidate.Valid();
         }
+
         LogMessage(!health_ && !retained_ && candidates_invalid
             ? "schema and entity views invalidated before unload"
             : "schema or entity view remained active during unload");
@@ -57,10 +60,12 @@ public:
             LogMessage("level shutdown observed");
             return;
         }
+
         int32 health;
         LogMessage(!retained_.Valid() && !retained_.Read(health_, health)
             ? "map epoch invalidation passed"
             : "map epoch invalidation failed");
+
         retained_.Reset();
         expect_map_invalidation_ = false;
     }
@@ -73,31 +78,37 @@ private:
             LogError("usage: keel_schema_entity_live [snapshot|capture|stale|replacement|world]");
             return;
         }
+
         if (strcmp(command[1], "snapshot") == 0)
         {
             Snapshot();
             return;
         }
+
         if (strcmp(command[1], "capture") == 0)
         {
             Capture();
             return;
         }
+
         if (strcmp(command[1], "stale") == 0)
         {
             Stale();
             return;
         }
+
         if (strcmp(command[1], "replacement") == 0)
         {
             Replacement();
             return;
         }
+
         if (strcmp(command[1], "world") == 0)
         {
             World();
             return;
         }
+
         LogError("unknown schema and entity live acceptance stage");
     }
 
@@ -108,6 +119,7 @@ private:
         original_index_ = -1;
         original_handle_ = KEELS2_INVALID_SOURCE2_ENTITY_HANDLE;
         expect_map_invalidation_ = false;
+
         for (int index = 0; index < 4096; index++)
         {
             keels2::Entity entity;
@@ -115,24 +127,29 @@ private:
                 ? entity.Source2Handle()
                 : KEELS2_INVALID_SOURCE2_ENTITY_HANDLE;
         }
+
         LogMessage("entity snapshot captured");
     }
 
     void Capture()
     {
         candidates_.clear();
+
         for (int index = 0; index < 4096; index++)
         {
             keels2::Entity entity;
             int32 health;
+
             if (!FindEntity(index, entity) ||
                 entity.Source2Handle() == snapshot_[index] ||
                 !entity.Read(health_, health) || health != 100)
             {
                 continue;
             }
+
             keels2::Entity same;
             const uint32 source2_handle = entity.Source2Handle();
+
             if (!FindEntity(CEntityHandle(source2_handle), same) || !entity.Same(same) ||
                 same.Index() != index)
             {
@@ -140,13 +157,16 @@ private:
                 LogError("created entity handle lookup failed");
                 return;
             }
+
             candidates_.push_back(std::move(entity));
         }
+
         if (!candidates_.empty())
         {
             LogMessage("entity creation, lookup, and typed read passed");
             return;
         }
+
         LogMessage("waiting for a newly created player entity");
     }
 
@@ -154,10 +174,12 @@ private:
     {
         int destroyed_index = -1;
         uint32 destroyed_handle = KEELS2_INVALID_SOURCE2_ENTITY_HANDLE;
+
         for (auto& candidate : candidates_)
         {
             int32 health;
             keels2::Entity missing;
+
             if (!candidate.Valid() && !candidate.Read(health_, health) &&
                 !candidate.Same(candidate) &&
                 !FindEntity(CEntityHandle(candidate.Source2Handle()), missing))
@@ -167,6 +189,7 @@ private:
                 break;
             }
         }
+
         if (destroyed_index >= 0 &&
             destroyed_handle != KEELS2_INVALID_SOURCE2_ENTITY_HANDLE)
         {
@@ -176,6 +199,7 @@ private:
             LogMessage("entity destruction invalidation passed");
             return;
         }
+
         LogMessage("waiting for retained entity destruction");
     }
 
@@ -186,10 +210,12 @@ private:
             LogError("replacement requested before entity capture");
             return;
         }
+
         for (int index = 0; index < 4096; index++)
         {
             keels2::Entity replacement;
             int32 health;
+
             if (!FindEntity(index, replacement) ||
                 replacement.Source2Handle() == snapshot_[index] ||
                 replacement.Source2Handle() == original_handle_ ||
@@ -197,28 +223,34 @@ private:
             {
                 continue;
             }
+
             keels2::Entity same;
+
             if (!FindEntity(CEntityHandle(replacement.Source2Handle()), same) ||
                 !replacement.Same(same) || !FindEntity(index, retained_))
             {
                 LogError("replacement entity handle lookup failed");
                 return;
             }
+
             expect_map_invalidation_ = true;
             LogMessage("replacement entity validation passed");
             return;
         }
+
         LogMessage("waiting for replacement entity");
     }
 
     void World()
     {
         int32 health;
+
         if (FindEntity(0, retained_) && retained_.Read(health_, health))
         {
             LogMessage("post-reload world lookup and typed read passed");
             return;
         }
+
         LogMessage("waiting for post-reload world entity");
     }
 

@@ -46,10 +46,12 @@ std::vector<unsigned char> Image(
     WriteLittleEndian<std::uint32_t>(bytes, 68, 5);
     WriteLittleEndian<std::uint64_t>(bytes, 72, 256);
     WriteLittleEndian<std::uint64_t>(bytes, 96, 128);
+
     for (const auto& [offset, payload] : payloads)
     {
         std::copy(payload.begin(), payload.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
     }
+
     return bytes;
 }
 
@@ -70,10 +72,12 @@ std::vector<unsigned char> PeImage(
     WriteLittleEndian<std::uint32_t>(bytes, section + 16, 256);
     WriteLittleEndian<std::uint32_t>(bytes, section + 20, 512);
     WriteLittleEndian<std::uint32_t>(bytes, section + 36, 0x60000020);
+
     for (const auto& [offset, payload] : payloads)
     {
         std::copy(payload.begin(), payload.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
     }
+
     return bytes;
 }
 
@@ -125,15 +129,18 @@ bool BaselineMatches(const std::filesystem::path& path)
 {
     review::Profile profile;
     review::Report report;
+
     if (!review::ReadProfile(path, profile, report) ||
         profile.status != review::ProfileStatus::accepted || profile.modules.size() != 1 ||
         profile.interfaces.size() != 4 || profile.slots.size() != 15)
     {
         return false;
     }
+
     const auto* compiled = keels2::cs2::FindCompatibilityProfile(
         profile.modules[0].fingerprint,
         profile.platform.c_str());
+
     if (!compiled || profile.version != compiled->game_version ||
         profile.modules[0].role != "server" ||
         profile.modules[0].name != compiled->server_module ||
@@ -141,10 +148,12 @@ bool BaselineMatches(const std::filesystem::path& path)
     {
         return false;
     }
+
     if (profile.patterns.size() != compiled->target_count)
     {
         return false;
     }
+
     for (std::uint32_t index{}; index < compiled->target_count; ++index)
     {
         const auto& target = compiled->targets[index];
@@ -154,16 +163,19 @@ bool BaselineMatches(const std::filesystem::path& path)
             [&](const review::Pattern& value) {
                 return value.key == target.name;
             });
+
         if (pattern == profile.patterns.end())
         {
             return false;
         }
+
         const auto module = std::find_if(
             profile.modules.begin(),
             profile.modules.end(),
             [&](const review::Module& value) {
                 return value.role == pattern->module;
             });
+
         if (module == profile.modules.end() || module->name != target.module ||
             pattern->expression != target.pattern || pattern->occurrence != target.occurrence ||
             pattern->match_count != 1)
@@ -171,6 +183,7 @@ bool BaselineMatches(const std::filesystem::path& path)
             return false;
         }
     }
+
     const auto slot = [&](const char* interface_key, const char* method) -> const review::Slot* {
         const auto found = std::find_if(profile.slots.begin(), profile.slots.end(), [&](const review::Slot& value) {
             return value.interface_key == interface_key && value.method == method;
@@ -184,6 +197,7 @@ bool BaselineMatches(const std::filesystem::path& path)
             [&](const review::Interface& value) {
                 return value.key == key && value.name == name && value.module == "server";
             });
+
         return found != profile.interfaces.end();
     };
     const auto slot_matches = [&](const char* interface_key, const char* method, std::uint32_t index) {
@@ -219,6 +233,7 @@ int main(int argc, char** argv)
     {
         return 1;
     }
+
     for (int argument = 2; argument < argc; ++argument)
     {
         if (!BaselineMatches(argv[argument]))
@@ -226,18 +241,22 @@ int main(int argc, char** argv)
             return 2;
         }
     }
+
     const std::filesystem::path root = argv[1];
     std::error_code filesystem_error;
     std::filesystem::remove_all(root, filesystem_error);
+
     if (!std::filesystem::create_directories(root, filesystem_error) || filesystem_error)
     {
         return 3;
     }
+
     const auto signature = std::vector<unsigned char>{0xde, 0xad, 0x11, 0xef};
     const std::filesystem::path server = root / "server.so";
     const std::filesystem::path engine = root / "engine.so";
     const auto server_image = Image({{300, signature}});
     const auto engine_image = Image({{330, {0xaa, 0xbb, 0xcc, 0xdd}}});
+
     if (!Write(server, server_image) || !Write(engine, engine_image))
     {
         return 4;
@@ -245,6 +264,7 @@ int main(int argc, char** argv)
 
     review::Profile candidate;
     review::Report capture_report;
+
     if (!review::Capture(Request(server, engine), candidate, capture_report) ||
         !capture_report.Ok() || !capture_report.review_required ||
         candidate.status != review::ProfileStatus::candidate_untrusted ||
@@ -254,6 +274,7 @@ int main(int argc, char** argv)
     {
         return 5;
     }
+
     if (keels2::cs2::FindCompatibilityProfile(
             candidate.modules[0].fingerprint,
             candidate.platform.c_str()))
@@ -263,6 +284,7 @@ int main(int argc, char** argv)
 
     const std::vector<review::ModuleInput> bindings{{"server", server}, {"engine", engine}};
     const review::Report validation = review::Validate(candidate, bindings);
+
     if (!validation.Ok() || !validation.review_required ||
         !HasCode(validation, "pattern-validated") ||
         !HasCode(validation, "human-review-required"))
@@ -272,13 +294,16 @@ int main(int argc, char** argv)
 
     const std::filesystem::path candidate_path = root / "candidate.tsv";
     std::string write_error;
+
     if (!review::WriteProfile(candidate_path, candidate, write_error) ||
         review::WriteProfile(candidate_path, candidate, write_error))
     {
         return 7;
     }
+
     review::Profile round_trip;
     review::Report read_report;
+
     if (!review::ReadProfile(candidate_path, round_trip, read_report) ||
         round_trip.patterns[0].selected_file_offset != 300)
     {
@@ -288,16 +313,19 @@ int main(int argc, char** argv)
     review::Profile accepted = candidate;
     accepted.status = review::ProfileStatus::accepted;
     const review::Report unchanged = review::Compare(accepted, candidate);
+
     if (!unchanged.Ok() || unchanged.changes != 0 || !unchanged.review_required ||
         !HasCode(unchanged, "no-observed-differences"))
     {
         return 9;
     }
+
     review::Profile changed = candidate;
     changed.version = "fixture-later";
     changed.interfaces[0].name = "Source2Server002";
     changed.slots[0].index = 4;
     const review::Report differences = review::Compare(accepted, changed);
+
     if (!differences.Ok() || differences.changes != 3 ||
         !HasCode(differences, "version-changed") ||
         !HasCode(differences, "interface-changed") ||
@@ -308,11 +336,14 @@ int main(int argc, char** argv)
 
     auto tampered = server_image;
     tampered[301] ^= 0xff;
+
     if (!Write(server, tampered))
     {
         return 11;
     }
+
     const review::Report tampered_report = review::Validate(candidate, bindings);
+
     if (tampered_report.Ok() || !HasCode(tampered_report, "module-stale-or-tampered"))
     {
         return 12;
@@ -320,12 +351,15 @@ int main(int argc, char** argv)
 
     auto ambiguous = server_image;
     std::copy(signature.begin(), signature.end(), ambiguous.begin() + 320);
+
     if (!Write(server, ambiguous))
     {
         return 13;
     }
+
     review::Profile ambiguous_profile;
     review::Report ambiguous_report;
+
     if (review::Capture(Request(server, engine), ambiguous_profile, ambiguous_report) ||
         !HasCode(ambiguous_report, "pattern-resolution"))
     {
@@ -336,15 +370,18 @@ int main(int argc, char** argv)
     {
         return 15;
     }
+
     review::Profile cross_module = candidate;
     cross_module.patterns[0].module = "engine";
     const review::Report cross_module_report = review::Validate(cross_module, bindings);
+
     if (cross_module_report.Ok() || !HasCode(cross_module_report, "pattern-resolution"))
     {
         return 16;
     }
 
     const std::filesystem::path duplicate_request = root / "duplicate-request.tsv";
+
     if (!Write(
             duplicate_request,
             "keels2-compatibility-request\t1\n"
@@ -354,8 +391,10 @@ int main(int argc, char** argv)
     {
         return 17;
     }
+
     review::CaptureRequest duplicate;
     review::Report duplicate_report;
+
     if (review::ReadCaptureRequest(duplicate_request, duplicate, duplicate_report) ||
         !HasCode(duplicate_report, "duplicate-record"))
     {
@@ -363,6 +402,7 @@ int main(int argc, char** argv)
     }
 
     const std::filesystem::path invalid_trust = root / "invalid-trust.tsv";
+
     if (!Write(
             invalid_trust,
             "keels2-compatibility-profile\t1\n"
@@ -372,8 +412,10 @@ int main(int argc, char** argv)
     {
         return 19;
     }
+
     review::Profile invalid;
     review::Report invalid_report;
+
     if (review::ReadProfile(invalid_trust, invalid, invalid_report) ||
         !HasCode(invalid_report, "profile-trust"))
     {
@@ -384,10 +426,12 @@ int main(int argc, char** argv)
     const std::string corpus{
         std::istreambuf_iterator<char>(corpus_stream),
         std::istreambuf_iterator<char>()};
+
     if (corpus.empty())
     {
         return 26;
     }
+
     std::uint64_t fuzz_state = 0x43533250726f6669ull;
     const auto next_fuzz = [&] {
         fuzz_state ^= fuzz_state << 13;
@@ -396,10 +440,12 @@ int main(int argc, char** argv)
         return fuzz_state;
     };
     const std::filesystem::path mutated_path = root / "mutated.tsv";
+
     for (std::size_t iteration{}; iteration < 2048; ++iteration)
     {
         std::string mutated = corpus;
         const std::size_t operations = 1 + static_cast<std::size_t>(next_fuzz() % 16u);
+
         for (std::size_t operation{}; operation < operations; ++operation)
         {
             if (mutated.empty() || (next_fuzz() & 3u) == 0)
@@ -407,6 +453,7 @@ int main(int argc, char** argv)
                 const std::size_t position = mutated.empty()
                     ? 0
                     : static_cast<std::size_t>(next_fuzz() % (mutated.size() + 1));
+
                 mutated.insert(
                     mutated.begin() + static_cast<std::ptrdiff_t>(position),
                     static_cast<char>(next_fuzz() & 0x7fu));
@@ -421,10 +468,12 @@ int main(int argc, char** argv)
                     static_cast<char>(next_fuzz() & 0x7fu);
             }
         }
+
         if (!Write(mutated_path, mutated))
         {
             return 27;
         }
+
         review::Profile fuzz_profile;
         review::CaptureRequest fuzz_request;
         std::vector<review::ModuleInput> fuzz_bindings;
@@ -433,8 +482,10 @@ int main(int argc, char** argv)
         review::Report fuzz_binding_report;
         static_cast<void>(review::ReadProfile(
             mutated_path, fuzz_profile, fuzz_profile_report));
+
         static_cast<void>(review::ReadCaptureRequest(
             mutated_path, fuzz_request, fuzz_request_report));
+
         static_cast<void>(review::ReadBindings(
             mutated_path, fuzz_bindings, fuzz_binding_report));
     }
@@ -443,33 +494,40 @@ int main(int argc, char** argv)
     const std::filesystem::path pe_engine = root / "engine.dll";
     const auto pe_server_image = PeImage({{560, signature}});
     const auto pe_engine_image = PeImage({{600, {0xaa, 0xbb, 0xcc, 0xdd}}});
+
     if (!Write(pe_server, pe_server_image) || !Write(pe_engine, pe_engine_image))
     {
         return 21;
     }
+
     review::Profile pe_candidate;
     review::Report pe_capture;
+
     if (!review::Capture(Request(pe_server, pe_engine, "win64"), pe_candidate, pe_capture) ||
         !pe_capture.Ok() || pe_candidate.patterns.size() != 1 ||
         pe_candidate.patterns[0].selected_file_offset != 560)
     {
         return 22;
     }
-    const review::Report pe_validation = review::Validate(
-        pe_candidate,
-        {{"server", pe_server}, {"engine", pe_engine}});
+
+    const review::Report pe_validation = review::Validate(pe_candidate, {{"server", pe_server}, {"engine", pe_engine}});
+
     if (!pe_validation.Ok() || !HasCode(pe_validation, "pattern-validated"))
     {
         return 23;
     }
+
     auto wrong_architecture = pe_server_image;
     WriteLittleEndian<std::uint16_t>(wrong_architecture, 68, 0x014c);
+
     if (!Write(pe_server, wrong_architecture))
     {
         return 24;
     }
+
     review::Profile wrong_architecture_candidate;
     review::Report wrong_architecture_report;
+
     if (review::Capture(
             Request(pe_server, pe_engine, "win64"),
             wrong_architecture_candidate,

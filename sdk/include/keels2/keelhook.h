@@ -88,6 +88,7 @@ typedef union KeelHookScalar
     void* pointer;
     float float32;
     double float64;
+
     struct
     {
         void* data;
@@ -124,8 +125,11 @@ struct KeelHookAggregate
 };
 
 typedef KeelBool (*KeelHookObjectDefaultConstruct)(void* destination);
+
 typedef KeelBool (*KeelHookObjectCopyConstruct)(void* destination, const void* source);
+
 typedef KeelBool (*KeelHookObjectCopyAssign)(void* destination, const void* source);
+
 typedef void (*KeelHookObjectDestroy)(void* value);
 
 typedef struct KeelHookObject
@@ -238,18 +242,23 @@ typedef struct KeelHookApiV3
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*resolve_target)(
         KeelPluginHandle plugin,
         const KeelHookTargetSpec* spec,
         const KeelHookPrototypeV4* prototype,
         KeelHookTargetHandle* target);
+
     KeelResult (*release_target)(KeelPluginHandle plugin, KeelHookTargetHandle target);
+
     KeelResult (*add_callback)(
         KeelPluginHandle plugin,
         KeelHookTargetHandle target,
         const KeelHookCallbackSpec* spec,
         KeelHookCallbackHandle* callback);
+
     KeelResult (*remove_callback)(KeelPluginHandle plugin, KeelHookCallbackHandle callback);
+
     KeelResult (*resolve_virtual_target)(
         KeelPluginHandle plugin,
         const KeelHookVirtualTargetSpecV4* spec,
@@ -261,25 +270,33 @@ typedef struct KeelHookApiV4
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*resolve_target)(
         KeelPluginHandle plugin,
         const KeelHookTargetSpec* spec,
         const KeelHookPrototypeV4* prototype,
         KeelHookTargetHandle* target);
+
     KeelResult (*release_target)(KeelPluginHandle plugin, KeelHookTargetHandle target);
+
     KeelResult (*add_callback)(
         KeelPluginHandle plugin,
         KeelHookTargetHandle target,
         const KeelHookCallbackSpec* spec,
         KeelHookCallbackHandle* callback);
+
     KeelResult (*remove_callback)(KeelPluginHandle plugin, KeelHookCallbackHandle callback);
+
     KeelResult (*resolve_virtual_target)(
         KeelPluginHandle plugin,
         const KeelHookVirtualTargetSpecV4* spec,
         const KeelHookPrototypeV4* prototype,
         KeelHookTargetHandle* target);
+
     KeelResult (*call_original)(KeelPluginHandle plugin, KeelHookFrame* frame);
+
     KeelResult (*recall)(KeelPluginHandle plugin, KeelHookFrame* frame);
+
     KeelResult (*set_callback_enabled)(
         KeelPluginHandle plugin,
         KeelHookCallbackHandle callback,
@@ -290,25 +307,33 @@ typedef struct KeelHookApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*resolve_target)(
         KeelPluginHandle plugin,
         const KeelHookTargetSpec* spec,
         const KeelHookPrototype* prototype,
         KeelHookTargetHandle* target);
+
     KeelResult (*release_target)(KeelPluginHandle plugin, KeelHookTargetHandle target);
+
     KeelResult (*add_callback)(
         KeelPluginHandle plugin,
         KeelHookTargetHandle target,
         const KeelHookCallbackSpec* spec,
         KeelHookCallbackHandle* callback);
+
     KeelResult (*remove_callback)(KeelPluginHandle plugin, KeelHookCallbackHandle callback);
+
     KeelResult (*resolve_virtual_target)(
         KeelPluginHandle plugin,
         const KeelHookVirtualTargetSpec* spec,
         const KeelHookPrototype* prototype,
         KeelHookTargetHandle* target);
+
     KeelResult (*call_original)(KeelPluginHandle plugin, KeelHookFrame* frame);
+
     KeelResult (*recall)(KeelPluginHandle plugin, KeelHookFrame* frame);
+
     KeelResult (*set_callback_enabled)(
         KeelPluginHandle plugin,
         KeelHookCallbackHandle callback,

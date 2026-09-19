@@ -20,6 +20,7 @@ GameAdapter* Create(const GameAdapterHostApi* host)
     {
         return nullptr;
     }
+
     return new (std::nothrow) SyntheticAdapter(*host);
 }
 

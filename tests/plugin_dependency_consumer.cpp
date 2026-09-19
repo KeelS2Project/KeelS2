@@ -6,4 +6,8 @@
 #define IMPORT
 #endif
 extern "C" IMPORT int KeelDependencyValue();
-extern "C" EXPORT int KeelDependencyConsumer() { return KeelDependencyValue() + 1; }
+
+extern "C" EXPORT int KeelDependencyConsumer()
+{
+    return KeelDependencyValue() + 1;
+}

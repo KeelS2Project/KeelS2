@@ -48,30 +48,40 @@ bool Accessible(const void* address, std::size_t size, bool write)
             size);
 #else
     const auto begin = reinterpret_cast<std::uintptr_t>(address);
+
     if (size > std::numeric_limits<std::uintptr_t>::max() - begin)
     {
         return false;
     }
+
     const auto end = begin + size;
+
     for (auto cursor = begin; cursor < end;)
     {
         const auto info = safetyhook::vm_query(reinterpret_cast<std::uint8_t*>(cursor));
+
         if (!info || info->is_free || !info->access.read || (write && !info->access.write))
         {
             return false;
         }
+
         const auto region = reinterpret_cast<std::uintptr_t>(info->address);
+
         if (info->size > std::numeric_limits<std::uintptr_t>::max() - region)
         {
             return false;
         }
+
         const auto next = region + info->size;
+
         if (cursor < region || next <= cursor)
         {
             return false;
         }
+
         cursor = next < end ? next : end;
     }
+
     return true;
 #endif
 }
@@ -84,23 +94,28 @@ VtableHookResult Exchange(void** location, void* expected, void* desired, bool p
     }
 
     std::uint32_t old_protection{};
+
     if (protect)
     {
         auto info = safetyhook::vm_query(reinterpret_cast<std::uint8_t*>(location));
+
         if (!info || info->is_free || !info->access.read)
         {
             return VtableHookResult::invalid;
         }
+
         auto access = info->access;
         access.write = true;
         const auto changed = safetyhook::vm_protect(
             reinterpret_cast<std::uint8_t*>(location),
             sizeof(void*),
             access);
+
         if (!changed)
         {
             return VtableHookResult::protection_failure;
         }
+
         old_protection = *changed;
     }
 
@@ -118,6 +133,7 @@ VtableHookResult Exchange(void** location, void* expected, void* desired, bool p
             reinterpret_cast<std::uint8_t*>(location),
             sizeof(void*),
             old_protection);
+
         if (!restored)
         {
             if (exchanged)
@@ -128,14 +144,17 @@ VtableHookResult Exchange(void** location, void* expected, void* desired, bool p
                     expected,
                     std::memory_order_acq_rel,
                     std::memory_order_acquire);
+
                 static_cast<void>(safetyhook::vm_protect(
                     reinterpret_cast<std::uint8_t*>(location),
                     sizeof(void*),
                     old_protection));
             }
+
             return VtableHookResult::protection_failure;
         }
     }
+
     return exchanged ? VtableHookResult::ok : VtableHookResult::conflict;
 }
 
@@ -155,29 +174,37 @@ VtableHookResult ResolveVtableSlot(
 {
     slot = nullptr;
     target = nullptr;
+
     if (!instance || !Aligned(instance) || !Accessible(instance, sizeof(void*), false) ||
         index > std::numeric_limits<std::size_t>::max() / sizeof(void*))
     {
         return VtableHookResult::invalid;
     }
+
     auto** table = static_cast<void**>(Load(static_cast<void**>(instance)));
+
     if (!table || reinterpret_cast<std::uintptr_t>(table) >
             std::numeric_limits<std::uintptr_t>::max() - index * sizeof(void*))
     {
         return VtableHookResult::invalid;
     }
+
     slot = table + index;
+
     if (!Aligned(slot) || !Accessible(slot, sizeof(void*), false))
     {
         slot = nullptr;
         return VtableHookResult::invalid;
     }
+
     target = Load(slot);
+
     if (!target)
     {
         slot = nullptr;
         return VtableHookResult::invalid;
     }
+
     return VtableHookResult::ok;
 }
 
@@ -192,15 +219,19 @@ VtableHookResult SharedVtableHook::Create(
     std::unique_ptr<SharedVtableHook>& output)
 {
     output.reset();
+
     if (!slot || !replacement || !Aligned(slot) || !Accessible(slot, sizeof(void*), false))
     {
         return VtableHookResult::invalid;
     }
+
     void* original = Load(slot);
+
     if (!original)
     {
         return VtableHookResult::invalid;
     }
+
     output.reset(new SharedVtableHook(slot, original, replacement));
     return VtableHookResult::ok;
 }
@@ -216,11 +247,14 @@ VtableHookResult SharedVtableHook::Enable() noexcept
     {
         return VtableHookResult::ok;
     }
+
     const auto result = Exchange(slot_, original_, replacement_, true);
+
     if (result == VtableHookResult::ok)
     {
         enabled_ = true;
     }
+
     return result;
 }
 
@@ -230,11 +264,14 @@ VtableHookResult SharedVtableHook::Disable() noexcept
     {
         return VtableHookResult::ok;
     }
+
     const auto result = Exchange(slot_, replacement_, original_, true);
+
     if (result == VtableHookResult::ok)
     {
         enabled_ = false;
     }
+
     return result;
 }
 
@@ -274,36 +311,47 @@ VtableHookResult InstanceVtable::Create(
     std::shared_ptr<InstanceVtable>& output)
 {
     output.reset();
+
     if (!instance || entry_count == 0 || !Aligned(instance) ||
         !Accessible(instance, sizeof(void*), true))
     {
         return VtableHookResult::invalid;
     }
+
     auto** original = static_cast<void**>(Load(static_cast<void**>(instance)));
     const std::size_t header_count = HeaderCount();
+
     if (!original || reinterpret_cast<std::uintptr_t>(original) < header_count * sizeof(void*))
     {
         return VtableHookResult::invalid;
     }
+
     if (entry_count > std::numeric_limits<std::size_t>::max() - header_count)
     {
         return VtableHookResult::invalid;
     }
+
     const std::size_t total = entry_count + header_count;
+
     if (total > std::numeric_limits<std::size_t>::max() / sizeof(void*))
     {
         return VtableHookResult::invalid;
     }
+
     void** begin = original - header_count;
+
     if (!Aligned(begin) || !Accessible(begin, total * sizeof(void*), false))
     {
         return VtableHookResult::invalid;
     }
+
     auto storage = std::unique_ptr<void*[]>(new (std::nothrow) void*[total]);
+
     if (!storage)
     {
         return VtableHookResult::protection_failure;
     }
+
     std::memcpy(storage.get(), begin, total * sizeof(void*));
     auto created = std::shared_ptr<InstanceVtable>(new InstanceVtable(
         instance,
@@ -311,10 +359,12 @@ VtableHookResult InstanceVtable::Create(
         entry_count,
         header_count,
         std::move(storage)));
+
     if (!created->replacements_)
     {
         return VtableHookResult::protection_failure;
     }
+
     output = std::move(created);
     return VtableHookResult::ok;
 }
@@ -330,19 +380,24 @@ InstanceVtable::~InstanceVtable()
 VtableHookResult InstanceVtable::Enable(std::size_t index, void* replacement) noexcept
 {
     std::scoped_lock lock(mutex_);
+
     if (index >= entry_count_ || !replacement || replacements_[index])
     {
         return VtableHookResult::invalid;
     }
+
     if (!Accessible(instance_, sizeof(void*), true))
     {
         return VtableHookResult::invalid;
     }
+
     auto** object = static_cast<void**>(instance_);
+
     if (enabled_count_ == 0)
     {
         shadow_[index] = replacement;
         const auto applied = Exchange(object, original_, shadow_, false);
+
         if (applied != VtableHookResult::ok)
         {
             shadow_[index] = original_[index];
@@ -355,12 +410,15 @@ VtableHookResult InstanceVtable::Enable(std::size_t index, void* replacement) no
         {
             return VtableHookResult::conflict;
         }
+
         const auto replaced = Exchange(&shadow_[index], original_[index], replacement, false);
+
         if (replaced != VtableHookResult::ok)
         {
             return replaced;
         }
     }
+
     replacements_[index] = replacement;
     ++enabled_count_;
     return VtableHookResult::ok;
@@ -369,33 +427,42 @@ VtableHookResult InstanceVtable::Enable(std::size_t index, void* replacement) no
 VtableHookResult InstanceVtable::Disable(std::size_t index, void* replacement) noexcept
 {
     std::scoped_lock lock(mutex_);
+
     if (index >= entry_count_ || !replacement || replacements_[index] != replacement)
     {
         return VtableHookResult::invalid;
     }
+
     if (!Accessible(instance_, sizeof(void*), true))
     {
         return VtableHookResult::invalid;
     }
+
     auto** object = static_cast<void**>(instance_);
+
     if (Load(object) != shadow_)
     {
         return VtableHookResult::conflict;
     }
+
     const auto restored = Exchange(&shadow_[index], replacement, original_[index], false);
+
     if (restored != VtableHookResult::ok)
     {
         return restored;
     }
+
     if (enabled_count_ == 1)
     {
         const auto removed = Exchange(object, shadow_, original_, false);
+
         if (removed != VtableHookResult::ok)
         {
             static_cast<void>(Exchange(&shadow_[index], original_[index], replacement, false));
             return removed;
         }
     }
+
     replacements_[index] = nullptr;
     --enabled_count_;
     return VtableHookResult::ok;
@@ -404,25 +471,31 @@ VtableHookResult InstanceVtable::Disable(std::size_t index, void* replacement) n
 VtableHookResult InstanceVtable::Restore() noexcept
 {
     std::scoped_lock lock(mutex_);
+
     if (enabled_count_ == 0)
     {
         return VtableHookResult::ok;
     }
+
     if (!Accessible(instance_, sizeof(void*), true))
     {
         return VtableHookResult::invalid;
     }
+
     auto** object = static_cast<void**>(instance_);
     const auto restored = Exchange(object, shadow_, original_, false);
+
     if (restored != VtableHookResult::ok)
     {
         return restored;
     }
+
     for (std::size_t index{}; index < entry_count_; ++index)
     {
         shadow_[index] = original_[index];
         replacements_[index] = nullptr;
     }
+
     enabled_count_ = 0;
     return VtableHookResult::ok;
 }
@@ -442,10 +515,12 @@ bool InstanceVtable::Empty() const noexcept
 bool InstanceVtable::Intact() const noexcept
 {
     std::scoped_lock lock(mutex_);
+
     if (!Accessible(instance_, sizeof(void*), false))
     {
         return false;
     }
+
     auto** object = static_cast<void**>(instance_);
     return Load(object) == (enabled_count_ == 0 ? original_ : shadow_);
 }

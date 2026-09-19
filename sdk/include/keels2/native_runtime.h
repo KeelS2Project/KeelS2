@@ -14,9 +14,13 @@ typedef struct KeelNativeRuntimeApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*check_game_thread)(KeelPluginHandle plugin);
+
     KeelResult (*client_console_print)(KeelPluginHandle plugin, int32_t slot, const char* text);
+
     KeelResult (*client_chat_print)(KeelPluginHandle plugin, int32_t slot, const char* text);
+
     KeelResult (*broadcast_chat)(KeelPluginHandle plugin, const char* text);
 } KeelNativeRuntimeApi;
 

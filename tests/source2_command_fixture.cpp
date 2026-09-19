@@ -15,11 +15,14 @@ int UtlVectorMemory_CalcNewAllocationCount(
     {
         return ((requested + grow_size - 1) / grow_size) * grow_size;
     }
+
     int result = allocation_count > 0 ? allocation_count : 1;
+
     while (result < requested)
     {
         result *= 2;
     }
+
     return result;
 }
 
@@ -30,6 +33,7 @@ void* UtlVectorMemory_Alloc(void* memory, bool reallocate, int new_size, int)
         std::free(memory);
         return nullptr;
     }
+
     return reallocate ? std::realloc(memory, static_cast<std::size_t>(new_size))
                       : std::malloc(static_cast<std::size_t>(new_size));
 }
@@ -50,33 +54,41 @@ CCommand::CCommand(int argument_count, const char** arguments)
 {
     char* argument_buffer = m_ArgvBuffer.Base();
     char* command_buffer = m_ArgSBuffer.Base();
+
     for (int index{}; index < argument_count; ++index)
     {
         m_Args.AddToTail(argument_buffer);
         const auto length = static_cast<int>(std::strlen(arguments[index]));
         std::memcpy(argument_buffer, arguments[index], static_cast<std::size_t>(length + 1));
+
         if (index == 0)
         {
             m_nArgv0Size = length;
         }
+
         argument_buffer += length + 1;
 
         const bool quoted = std::strchr(arguments[index], ' ') != nullptr;
+
         if (quoted)
         {
             *command_buffer++ = '"';
         }
+
         std::memcpy(command_buffer, arguments[index], static_cast<std::size_t>(length));
         command_buffer += length;
+
         if (quoted)
         {
             *command_buffer++ = '"';
         }
+
         if (index + 1 != argument_count)
         {
             *command_buffer++ = ' ';
         }
     }
+
     *command_buffer = '\0';
 }
 

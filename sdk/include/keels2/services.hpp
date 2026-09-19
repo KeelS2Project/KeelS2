@@ -21,17 +21,21 @@ public:
             KEELS2_SERVICES_SERVICE_NAME,
             KEELS2_SERVICES_API_VERSION,
             &value);
+
         if (result != KEEL_RESULT_OK)
         {
             return result;
         }
+
         const auto* api = static_cast<const KeelServicesApi*>(value);
+
         if (!api || api->size != sizeof(KeelServicesApi) ||
             api->api_version != KEELS2_SERVICES_API_VERSION || !api->publish ||
             !api->withdraw || !api->release)
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         api_ = api;
         return KEEL_RESULT_OK;
     }
@@ -52,6 +56,7 @@ public:
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         const KeelServiceSpec spec{sizeof(KeelServiceSpec), version, name, value};
         return api_->publish(context_->plugin, &spec, &publication);
     }

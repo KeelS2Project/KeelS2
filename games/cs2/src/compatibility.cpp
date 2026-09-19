@@ -76,6 +76,7 @@ constexpr CompatibilityProfile Profile(
     const char* schema_module = schema_entities
         ? (platform_name[0] == 'w' ? "schemasystem.dll" : "libschemasystem.so")
         : nullptr;
+
     return {
         id,
         game_version,
@@ -336,6 +337,7 @@ const CompatibilityProfile* FindCompatibilityProfile(
     {
         return nullptr;
     }
+
     for (const auto& profile : profiles)
     {
         if (profile.server == server && std::strcmp(profile.platform, platform_name) == 0)
@@ -343,6 +345,7 @@ const CompatibilityProfile* FindCompatibilityProfile(
             return &profile;
         }
     }
+
     return nullptr;
 }
 
@@ -358,6 +361,7 @@ const CompatibilityProfile& FixtureCompatibilityProfile(const char* platform_nam
             "keels2_bootstrap_integration",
             "keels2_bootstrap_integration",
             true);
+
         profile.schema_module = "keels2_schema_entity_fixture.so";
         profile.game_resource_module = "keels2_schema_entity_fixture.so";
         profile.entity_system_module = "keels2_schema_entity_fixture.so";
@@ -375,6 +379,7 @@ const CompatibilityProfile& FixtureCompatibilityProfile(const char* platform_nam
             "keels2_bootstrap_integration.exe",
             "keels2_bootstrap_integration.exe",
             true);
+
         profile.schema_module = "keels2_schema_entity_fixture.dll";
         profile.game_resource_module = "keels2_schema_entity_fixture.dll";
         profile.entity_system_module = "keels2_schema_entity_fixture.dll";

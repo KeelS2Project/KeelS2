@@ -119,7 +119,9 @@ typedef struct KeelHostStartInfo
 } KeelHostStartInfo;
 
 typedef uint32_t (*KeelHostStartFn)(const KeelHostStartInfo* info);
+
 typedef uint32_t (*KeelHostCompleteStartupFn)(void);
+
 typedef uint32_t (*KeelHostStopFn)(void);
 
 #ifdef __cplusplus

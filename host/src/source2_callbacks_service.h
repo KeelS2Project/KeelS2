@@ -19,6 +19,7 @@ namespace keels2::host
 {
 
 class Host;
+
 class KeelHookService;
 
 class Source2CallbacksService final
@@ -42,18 +43,22 @@ private:
         KeelPluginHandle plugin,
         const KeelSource2SubscriptionSpec* spec,
         KeelSource2SubscriptionHandle* subscription);
+
     static KeelResult UnsubscribeEntry(
         KeelPluginHandle plugin,
         KeelSource2SubscriptionHandle subscription);
+
     static KeelBool DispatchEntry(KeelSource2CallbackEvent& event, void* user_data);
 
     KeelResult Subscribe(
         KeelPluginHandle plugin,
         const KeelSource2SubscriptionSpec* spec,
         KeelSource2SubscriptionHandle* subscription);
+
     KeelResult Unsubscribe(
         KeelPluginHandle plugin,
         KeelSource2SubscriptionHandle subscription);
+
     KeelBool Dispatch(KeelSource2CallbackEvent& event);
 
     static bool ValidType(KeelSource2CallbackType type) noexcept;

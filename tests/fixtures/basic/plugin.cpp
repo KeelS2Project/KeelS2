@@ -18,6 +18,7 @@ void BasicPlugin::Unload()
 void BasicPlugin::TestCommand(const CCommandContext& context, const CCommand& command)
 {
     static_cast<void>(context);
+
     if (command.ArgC() == 2 &&
         std::strcmp(command[1], "unregister") == 0)
     {
@@ -29,8 +30,10 @@ void BasicPlugin::TestCommand(const CCommandContext& context, const CCommand& co
         {
             LogError("Could not unregister the keel_test command.");
         }
+
         return;
     }
+
     LogMessage("KeelS2 1.0.0 is active. The basic native plugin is responding.");
 }
 

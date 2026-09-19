@@ -24,6 +24,7 @@ bool ValidPluginName(const char* name) noexcept;
 bool ParseSemanticVersion(
     std::string_view version,
     std::array<std::uint32_t, 3>& output) noexcept;
+
 bool ValidatePluginManifest(
     const KeelPluginManifest& manifest,
     std::vector<ValidatedPluginDependency>& dependencies) noexcept;

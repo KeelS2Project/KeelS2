@@ -1,10 +1,12 @@
 cmake_minimum_required(VERSION 3.25)
 project(KeelS2ReferenceExamples VERSION 1.0.0 LANGUAGES C CXX)
 find_package(KeelS2 1.0.0 EXACT CONFIG REQUIRED)
+
 foreach(name IN ITEMS first_plugin pause unload timers commands command_abi convar_api players player_api player_input events entities entity_creation plugins interfaces hook_observe hook_arguments hook_returns hook_profile)
     keels2_add_plugin(keel_docs_${name} ${name}.cpp)
     target_link_libraries(keel_docs_${name} PRIVATE KeelS2::SourceSDK)
 endforeach()
+
 target_sources(keel_docs_hook_arguments PRIVATE hook_target.cpp)
 target_sources(keel_docs_hook_returns PRIVATE hook_target.cpp)
 keels2_add_plugin(keel_docs_hook_control hook_control.cpp hook_control_target.cpp)
@@ -26,6 +28,7 @@ add_executable(keel_docs_command_views command_views.cpp)
 target_link_libraries(keel_docs_command_views PRIVATE KeelS2::SDK)
 add_test(NAME command_views_cpp COMMAND keel_docs_command_views)
 file(GLOB abi_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/../../tests/*_c_abi.c")
+
 foreach(source IN LISTS abi_sources)
     get_filename_component(name "${source}" NAME_WE)
     string(REGEX REPLACE "_c_abi$" "" name "${name}")
@@ -34,6 +37,7 @@ foreach(source IN LISTS abi_sources)
     set_target_properties(keel_docs_${name}_abi PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES)
     add_test(NAME ${name}_abi COMMAND keel_docs_${name}_abi)
 endforeach()
+
 add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../../tests/fixtures/adapter" "${CMAKE_CURRENT_BINARY_DIR}/adapter")
 
 foreach(priority IN ITEMS 20 10)
@@ -45,13 +49,17 @@ endforeach()
 
 get_property(reference_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 set(reference_modules "")
+
 foreach(target IN LISTS reference_targets)
     get_target_property(kind ${target} TYPE)
+
     if(kind STREQUAL "MODULE_LIBRARY" OR kind STREQUAL "SHARED_LIBRARY")
         string(APPEND reference_modules "$<TARGET_FILE:${target}>\n")
     endif()
 endforeach()
+
 foreach(target IN ITEMS keels2_stub keels2_sample)
     string(APPEND reference_modules "$<TARGET_FILE:${target}>\n")
 endforeach()
+
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/reference-modules-$<CONFIG>.txt" CONTENT "${reference_modules}")

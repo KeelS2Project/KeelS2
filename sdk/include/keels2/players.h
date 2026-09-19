@@ -46,8 +46,11 @@ typedef struct KeelPlayersApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*get_player)(KeelPluginHandle plugin, int32_t slot, KeelPlayerInfo* player);
+
     KeelResult (*get_next_player)(KeelPluginHandle plugin, int32_t after_slot, KeelPlayerInfo* player);
+
     KeelResult (*validate_connection)(KeelPluginHandle plugin,
         const KeelPlayerConnection* connection, KeelPlayerInfo* player);
 } KeelPlayersApi;

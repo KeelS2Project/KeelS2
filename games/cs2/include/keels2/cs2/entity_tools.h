@@ -5,6 +5,7 @@
 namespace keels2::cs2 {
 KeelResult ResolveEntityTools(const platform::LoadedModule& module, const std::string& profile,
     KeelCs2EntityToolBindings& bindings, std::string& error);
+
 KeelResult ResolveEntityToolClass(const platform::LoadedModule& module, const char* name,
     const KeelCs2EntityToolBindings& bindings, KeelCs2EntityToolClass& target, std::string& error);
 }

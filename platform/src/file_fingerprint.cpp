@@ -11,6 +11,7 @@ namespace keels2::platform
 bool FingerprintFile(const std::filesystem::path& path, FileFingerprint& fingerprint, std::string& error)
 {
     std::ifstream stream(path, std::ios::binary);
+
     if (!stream)
     {
         error = "could not open the file";
@@ -26,11 +27,13 @@ bool FingerprintFile(const std::filesystem::path& path, FileFingerprint& fingerp
     {
         stream.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
         const std::streamsize count = stream.gcount();
+
         for (std::streamsize index = 0; index < count; ++index)
         {
             result.fnv1a64 ^= static_cast<unsigned char>(buffer[static_cast<std::size_t>(index)]);
             result.fnv1a64 *= prime;
         }
+
         result.size += static_cast<std::uint64_t>(count);
     }
 
@@ -44,11 +47,13 @@ bool FingerprintFile(const std::filesystem::path& path, FileFingerprint& fingerp
     error.clear();
     return true;
 }
+
 std::string FormatFingerprint(const FileFingerprint& fingerprint)
 {
     std::ostringstream stream;
     stream << "size=" << fingerprint.size << " fnv1a64="
            << std::hex << std::setw(16) << std::setfill('0') << fingerprint.fnv1a64;
+
     return stream.str();
 }
 

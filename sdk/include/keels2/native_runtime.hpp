@@ -18,16 +18,20 @@ public:
         const void* service{};
         const KeelResult result = context.QueryService(
             KEELS2_NATIVE_RUNTIME_SERVICE_NAME, KEELS2_NATIVE_RUNTIME_API_VERSION, &service);
+
         if (result != KEEL_RESULT_OK)
         {
             return result;
         }
+
         const auto* api = static_cast<const KeelNativeRuntimeApi*>(service);
+
         if (!api || api->size != sizeof(*api) || api->api_version != KEELS2_NATIVE_RUNTIME_API_VERSION ||
             !api->check_game_thread || !api->client_console_print || !api->client_chat_print || !api->broadcast_chat)
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         context_ = context.State();
         api_ = api;
         return KEEL_RESULT_OK;

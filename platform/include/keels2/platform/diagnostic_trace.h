@@ -6,10 +6,7 @@
 namespace keels2::platform
 {
 
-void AppendShutdownTrace(
-    std::string_view event,
-    std::string_view detail = {}) noexcept;
-
+void AppendShutdownTrace(std::string_view event, std::string_view detail = {}) noexcept;
 }
 
 #endif

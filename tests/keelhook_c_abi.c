@@ -42,12 +42,15 @@ static int CheckValues(void)
     const KeelHookAggregate sample = {
         sizeof(KeelHookAggregate), sizeof(struct Sample), 2, 0, sample_fields
     };
+
     struct Sample storage = {{7, 2.5f}, {10, 20}};
+
     struct Sample copied;
     KeelHookValue value = {0};
     KeelHookValue scalar = {0};
     scalar.type = KH_VALUE_INT32;
     scalar.scalar.int32 = 7;
+
     if (scalar.reserved != 0 || scalar.scalar.int32 != 7)
     {
         return 0;
@@ -63,6 +66,7 @@ static int CheckValues(void)
     {
         return 0;
     }
+
     memcpy(&copied, value.scalar.aggregate.data, sizeof(copied));
     copied.coordinates.x += scalar.scalar.int32;
     memcpy(value.scalar.aggregate.data, &copied, sizeof(copied));
@@ -83,6 +87,7 @@ static KeelBool DefaultConstruct(void* destination)
     {
         return KEEL_FALSE;
     }
+
     *(int*)destination = 0;
     return KEEL_TRUE;
 }
@@ -93,6 +98,7 @@ static KeelBool CopyConstruct(void* destination, const void* source)
     {
         return KEEL_FALSE;
     }
+
     *(int*)destination = *(const int*)source;
     return KEEL_TRUE;
 }
@@ -120,12 +126,15 @@ static int CheckObject(const KeelHookObject* object)
     value.type = KH_VALUE_AGGREGATE;
     value.scalar.aggregate.data = &storage;
     value.scalar.aggregate.size = object->byte_size;
+
     if (!object->default_construct(value.scalar.aggregate.data))
     {
         return 0;
     }
+
     value.scalar.aggregate.reserved = KH_VALUE_OBJECT_CONSTRUCTED;
     valid = object->copy_assign(value.scalar.aggregate.data, &source) && storage == 17;
+
     if (object->copy_construct(&copied, value.scalar.aggregate.data))
     {
         valid = valid && copied == 17;
@@ -135,6 +144,7 @@ static int CheckObject(const KeelHookObject* object)
     {
         valid = 0;
     }
+
     object->destroy(value.scalar.aggregate.data);
     value.scalar.aggregate.reserved = 0;
     return valid;

@@ -45,6 +45,7 @@ public:
         const bool listening = ListenForGameEvent(
             "round_start",
             &LiveCallbacksPlugin::OnRoundStart);
+
         LogMessage(Marker(listening ? "loaded" : "listener registration failed").c_str());
         return listening;
     }
@@ -66,6 +67,7 @@ public:
         const std::string state = key_values && prerequisite_registry
             ? "LevelInit context=complete"
             : "LevelInit context=partial";
+
         LogMessage(Marker(state).c_str());
     }
 
@@ -85,6 +87,7 @@ public:
         const bool real = xuid != 0 && network_id && std::strcmp(network_id, "BOT") != 0;
         const bool reject = real && KEELS2_LIVE_CALLBACK_REJECTION != 0 &&
             g_reject_next_real.exchange(false, std::memory_order_acq_rel);
+
         std::string message =
             "ClientConnect priority=" + std::to_string(CallbackPriority()) +
             " slot=" + std::to_string(slot.Get()) +
@@ -93,7 +96,9 @@ public:
             " network_id=" + (network_id ? network_id : "") +
             " unknown=" + (unknown ? "1" : "0") +
             " decision=" + (reject ? "reject" : "accept");
+
         LogMessage(Marker(message).c_str());
+
         if (reject && rejection_message)
         {
 #if KEELS2_LIVE_CALLBACK_REJECTION == 1
@@ -102,6 +107,7 @@ public:
             rejection_message->Insert(0, "KeelS2 0.5E later tie rejection");
 #endif
         }
+
         return !reject;
     }
 
@@ -111,14 +117,17 @@ public:
         const char* argument = command.ArgC() > 1 ? command[1] : "";
         const bool blocked_probe = std::strcmp(verb, "jointeam") == 0 &&
             std::strcmp(argument, "2") == 0;
+
         const bool block = KEELS2_LIVE_CALLBACK_REJECTION == 1 &&
             blocked_probe;
+
         const std::string message =
             "ClientCommand priority=" + std::to_string(CallbackPriority()) +
             " verb=" + verb +
             " argument=" + argument +
             " slot=" + std::to_string(slot.Get()) +
             " decision=" + (block ? "reject" : "accept");
+
         LogMessage(Marker(message).c_str());
         return !block;
     }

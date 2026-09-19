@@ -5,6 +5,7 @@
 namespace keels2::cs2 {
 using EntityOutputFunction = void (*)(void* output, void* activator, void* caller,
     void* variant, float delay, void* context, void* connections);
+
 KeelResult ResolveEntityOutput(const platform::LoadedModule& module, const std::string& profile,
     void*& function, std::string& error);
 }

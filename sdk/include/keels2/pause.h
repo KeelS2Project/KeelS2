@@ -16,6 +16,7 @@ typedef struct KeelPauseApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*set_prepare_callback)(
         KeelPluginHandle plugin, KeelPreparePauseCallback callback, void* user_data);
 } KeelPauseApi;

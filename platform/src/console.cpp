@@ -28,6 +28,7 @@ void WriteEngineConsole(const char* message)
 #else
         void* const tier0 = dlopen("libtier0.so", RTLD_NOW | RTLD_NOLOAD);
         void* const symbol = tier0 ? dlsym(tier0, "Msg") : nullptr;
+
         if (tier0)
         {
             dlclose(tier0);

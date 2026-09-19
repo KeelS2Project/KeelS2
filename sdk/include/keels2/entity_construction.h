@@ -31,6 +31,7 @@ typedef struct KeelEntityConstructionApi
      * replace earlier values case-insensitively. Selected numeric values must
      * be finite; booleans are 0/1. The declared key/string bounds apply. */
     KeelResult (*set)(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelEntityKeyValue* value);
+
     KeelResult (*teleport)(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelEntityTeleport* request);
     /* Owner-only. Invoked consumes construction even on failure; never retry
      * an invoked spawn. A hook may block spawn, causing pending cancellation. */

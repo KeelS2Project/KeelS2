@@ -308,25 +308,32 @@ static_assert(keels2::kh::MethodPrototype<std::int32_t(float)>::arguments[1] == 
 static_assert(keels2::kh::Prototype<AbiPair(AbiPair)>::value.return_type == KH_VALUE_AGGREGATE);
 static_assert(
     keels2::kh::Prototype<AbiPair(AbiPair)>::value.return_aggregate->byte_size == sizeof(AbiPair));
+
 static_assert(
     keels2::kh::Prototype<AbiPair(AbiPair)>::value.argument_aggregates[0]->field_count == 2);
+
 static_assert(keels2::kh::Prototype<AbiPair(AbiPair)>::value.fixed_argument_count == 1);
 static_assert(keels2::kh::ManagedObject<AbiObject>);
 static_assert(keels2::kh::Prototype<AbiObject(AbiObject)>::value.return_aggregate == nullptr);
 static_assert(
     keels2::kh::Prototype<AbiObject(AbiObject)>::value.return_object->byte_size ==
     sizeof(AbiObject));
+
 static_assert(
     keels2::kh::Prototype<AbiObject(AbiObject)>::value.argument_objects[0] ==
     keels2::kh::Prototype<AbiObject(AbiObject)>::value.return_object);
+
 static_assert(keels2::kh::Prototype<std::int32_t&(bool)>::value.return_type == KH_VALUE_POINTER);
 static_assert(keels2::kh::VafmtPrototype<std::int32_t(std::int32_t)>::value.argument_count == 2);
 static_assert(
     keels2::kh::VafmtPrototype<std::int32_t(std::int32_t)>::arguments[1] == KH_VALUE_POINTER);
+
 static_assert(
     keels2::kh::VafmtPrototype<std::int32_t(std::int32_t)>::value.flags == KH_PROTOTYPE_VAFMT);
+
 static_assert(
     keels2::kh::MethodVafmtPrototype<std::int32_t(std::int32_t)>::value.argument_count == 3);
+
 static_assert(
     keels2::kh::MethodVafmtPrototype<std::int32_t(std::int32_t)>::arguments[0] ==
     KH_VALUE_POINTER);

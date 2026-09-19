@@ -38,7 +38,9 @@ namespace source2
 {
 
 class Service;
+
 class Runtime;
+
 class NativeRuntime;
 
 }
@@ -98,10 +100,12 @@ inline void AppendLogText(
     std::size_t size)
 {
     std::size_t length{};
+
     while (length < size && text[length] != '\0')
     {
         ++length;
     }
+
     if (length)
     {
         output.append(text, length);
@@ -116,10 +120,12 @@ bool AppendLogNumber(std::string& output, Value value)
         buffer,
         buffer + sizeof(buffer),
         value);
+
     if (error != std::errc{})
     {
         return false;
     }
+
     output.append(buffer, static_cast<std::size_t>(end - buffer));
     return true;
 }
@@ -128,6 +134,7 @@ template <typename Value>
 bool AppendLogValue(std::string& output, Value&& value)
 {
     using Type = std::remove_cvref_t<Value>;
+
     if constexpr (std::is_same_v<Type, std::nullptr_t>)
     {
         output.append("(null)");
@@ -138,6 +145,7 @@ bool AppendLogValue(std::string& output, Value&& value)
         std::is_same_v<std::remove_cv_t<std::remove_extent_t<Type>>, char>)
     {
         constexpr std::size_t size = std::extent_v<Type>;
+
         if constexpr (size == 0)
         {
             output.append(value);
@@ -146,6 +154,7 @@ bool AppendLogValue(std::string& output, Value&& value)
         {
             AppendLogText(output, value, size);
         }
+
         return true;
     }
     else if constexpr (
@@ -201,23 +210,29 @@ bool AppendLogValue(std::string& output, Value&& value)
 inline bool FormatLogMessage(std::string& output, std::string_view format)
 {
     std::size_t literal{};
+
     for (std::size_t index{}; index < format.size();)
     {
         const char character = format[index];
+
         if (character != '{' && character != '}')
         {
             ++index;
             continue;
         }
+
         output.append(format.data() + literal, index - literal);
+
         if (index + 1 >= format.size() || format[index + 1] != character)
         {
             return false;
         }
+
         output.push_back(character);
         index += 2;
         literal = index;
     }
+
     output.append(format.data() + literal, format.size() - literal);
     return true;
 }
@@ -230,39 +245,49 @@ bool FormatLogMessage(
     Rest&&... rest)
 {
     std::size_t literal{};
+
     for (std::size_t index{}; index < format.size();)
     {
         const char character = format[index];
+
         if (character != '{' && character != '}')
         {
             ++index;
             continue;
         }
+
         output.append(format.data() + literal, index - literal);
+
         if (index + 1 >= format.size())
         {
             return false;
         }
+
         const char next = format[index + 1];
+
         if (character == '{' && next == '}')
         {
             if (!AppendLogValue(output, std::forward<First>(first)))
             {
                 return false;
             }
+
             return FormatLogMessage(
                 output,
                 format.substr(index + 2),
                 std::forward<Rest>(rest)...);
         }
+
         if (next != character)
         {
             return false;
         }
+
         output.push_back(character);
         index += 2;
         literal = index;
     }
+
     return false;
 }
 
@@ -317,6 +342,7 @@ class Command final
 {
 public:
     Command() = default;
+
     ~Command()
     {
         static_cast<void>(Reset());
@@ -337,6 +363,7 @@ public:
             static_cast<void>(Reset());
             MoveFrom(other);
         }
+
         return *this;
     }
 
@@ -357,6 +384,7 @@ public:
         {
             return KEEL_RESULT_OK;
         }
+
         if (!state_ ||
             !state_->accepting_resources.load(std::memory_order_acquire) || !state_->api ||
             !state_->api->unregister_command)
@@ -364,12 +392,15 @@ public:
             Clear();
             return KEEL_RESULT_NOT_READY;
         }
+
         const KeelResult result = state_->api->unregister_command(state_->plugin, handle_);
+
         if (result == KEEL_RESULT_OK || result == KEEL_RESULT_NOT_FOUND ||
             result == KEEL_RESULT_NOT_READY)
         {
             Clear();
         }
+
         return result;
     }
 
@@ -404,6 +435,7 @@ class Context final
 {
 public:
     Context() = default;
+
     ~Context()
     {
         Unbind();
@@ -425,12 +457,15 @@ public:
     void Log(KeelLogLevel level, const char* message) const noexcept
     {
         const std::shared_ptr<detail::ContextState> state = state_;
+
         if (!state || !state->api || !state->plugin || !state->api->log || !message)
         {
             return;
         }
+
         const auto sink = state->api->log;
         const KeelPluginHandle plugin = state->plugin;
+
         try
         {
             sink(plugin, level, message);
@@ -448,15 +483,19 @@ public:
         Arguments&&... arguments) const noexcept
     {
         const std::shared_ptr<detail::ContextState> state = state_;
+
         if (!state || !state->api || !state->plugin || !state->api->log || !format)
         {
             return;
         }
+
         const auto sink = state->api->log;
         const KeelPluginHandle plugin = state->plugin;
+
         try
         {
             std::string message;
+
             if (detail::FormatLogMessage(
                     message,
                     format,
@@ -469,6 +508,7 @@ public:
         catch (...)
         {
         }
+
         try
         {
             sink(plugin, level, "[KeelS2] log formatting failed");
@@ -484,19 +524,23 @@ public:
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         if (output)
         {
             return KEEL_RESULT_ALREADY_EXISTS;
         }
+
         KeelCommandHandle handle{};
         const KeelResult result = state_->api->register_command(
             state_->plugin,
             &spec,
             &handle);
+
         if (result == KEEL_RESULT_OK)
         {
             output.Adopt(state_, handle);
         }
+
         return result;
     }
 
@@ -531,8 +575,10 @@ public:
             {
                 *service = nullptr;
             }
+
             return KEEL_RESULT_NOT_READY;
         }
+
         return state_->api->query_service(state_->plugin, name, version, service);
     }
 
@@ -625,6 +671,7 @@ public:
         {
             return KEEL_FALSE;
         }
+
         try
         {
             const PluginInfo info = Instance().Information();
@@ -653,6 +700,7 @@ public:
         {
             return KEEL_FALSE;
         }
+
         try
         {
             Context& context = PluginContext();
@@ -668,10 +716,12 @@ public:
     static void Unload(KeelPluginHandle plugin) noexcept
     {
         Context& context = PluginContext();
+
         if (!context || context.PluginHandle() != plugin)
         {
             return;
         }
+
         context.DisableResources();
         Instance().Unload(context);
         context.Unbind();

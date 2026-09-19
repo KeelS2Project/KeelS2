@@ -22,6 +22,7 @@ public:
             0,
             100,
             &AuthoringApiContractPlugin::IntegerChanged);
+
         floating = CreateConVar<float>(
             "keels2_authoring_api_float",
             1.25f,
@@ -29,11 +30,13 @@ public:
             FCVAR_NONE,
             0.25f,
             4.0f);
+
         limitTeams = FindConVar<int>("mp_limitteams");
         const bool command = CreateCommand(
             "keels2_authoring_api_contract",
             "Pins member command registration with raw Source-compatible flags",
             &AuthoringApiContractPlugin::Command);
+
         return integer && floating && limitTeams && command;
     }
 
@@ -72,6 +75,7 @@ static_assert(std::is_base_of_v<keels2::Plugin, AuthoringApiContractPlugin>);
 static_assert(std::is_same_v<
     std::remove_cv_t<decltype(AuthoringApiContractPlugin::Info)>,
     keels2::PluginInfo>);
+
 static_assert(std::is_copy_constructible_v<keels2::ConVar<int>>);
 static_assert(std::is_copy_assignable_v<keels2::ConVar<int>>);
 

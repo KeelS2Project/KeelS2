@@ -158,8 +158,10 @@ typedef struct KeelCs2PlayerStatSchema
 
 KeelResult KeelCs2_ResolvePlayerStatSchema(void* schema_system, const char* module, uint32_t key,
     KeelCs2PlayerStatSchema* schema);
+
 KeelResult KeelCs2_ReadPlayerStat(void* entity_system, const KeelCs2EntityIdentity* controller,
     const KeelCs2PlayerStatSchema* schema, const KeelCs2PlayerStatisticsBindings* bindings, int32_t* value);
+
 KeelResult KeelCs2_WritePlayerStat(void* entity_system, const KeelCs2EntityIdentity* controller,
     const KeelCs2PlayerStatSchema* schema, const KeelCs2PlayerStatisticsBindings* bindings, int32_t value);
 
@@ -178,6 +180,7 @@ typedef struct KeelCs2RoundContext
 KeelResult KeelCs2_ResolveRoundSchema(void* schema_system, const char* module, KeelCs2RoundContext* context);
 KeelResult KeelCs2_FindRoundContext(void* entity_system,
     const KeelCs2RoundBindings* bindings, KeelCs2RoundContext* context);
+
 KeelResult KeelCs2_TerminateRound(void* entity_system, const KeelCs2RoundContext* context,
     const KeelRoundTermination* request, const KeelCs2RoundBindings* bindings);
 
@@ -186,6 +189,7 @@ KeelResult KeelCs2_TerminateRound(void* entity_system, const KeelCs2RoundContext
 KeelResult KeelCs2_PrepareRespawn(void* entity_system, void* schema_system, const char* module,
     const KeelCs2EntityIdentity* controller, const KeelCs2PlayerManagementBindings* bindings,
     KeelCs2EntityIdentity* prepared_pawn);
+
 KeelResult KeelCs2_ManagePlayer(void* entity_system, void* schema_system, const char* module,
     const KeelCs2EntityIdentity* controller, const KeelCs2EntityIdentity* prepared_pawn,
     const KeelPlayerManagementAction* action,
@@ -199,6 +203,7 @@ void* KeelCs2_CreateGameEventListener(
     void* manager,
     KeelCs2GameEventCallback callback,
     void* user_data);
+
 void KeelCs2_DestroyGameEventListener(void* listener);
 uint32_t KeelCs2_ListenForGameEvent(void* listener, const char* name);
 uint32_t KeelCs2_WriteRejectionMessage(void* buffer, const char* message, uint32_t length);
@@ -209,18 +214,22 @@ KeelResult KeelCs2_ResolveSchemaField(
     const char* field_name,
     KeelSchemaValueType value_type,
     KeelCs2SchemaField* field);
+
 void* KeelCs2_ReadGameEntitySystem(void* game_resource_service, uint32_t offset);
 KeelResult KeelCs2_FindEntityByIndex(
     void* entity_system,
     int32_t index,
     KeelCs2EntityIdentity* entity);
+
 KeelResult KeelCs2_FindEntityBySource2Handle(
     void* entity_system,
     uint32_t source2_handle,
     KeelCs2EntityIdentity* entity);
+
 KeelResult KeelCs2_ValidateEntity(
     void* entity_system,
     const KeelCs2EntityIdentity* entity);
+
 KeelResult KeelCs2_CaptureEntity(void* entity_system, const void* instance, KeelCs2EntityIdentity* output);
 typedef struct KeelCs2EntityOutputContext
 {
@@ -243,6 +252,7 @@ typedef struct KeelCs2EntityOutputContext
  * Validation never dereferences saved output/instance addresses. */
 KeelResult KeelCs2_CaptureOutputContext(void* system, const void* output,
     const void* activator, const void* caller, KeelCs2EntityOutputContext* context);
+
 KeelResult KeelCs2_ValidateOutputContext(void* system, const KeelCs2EntityOutputContext* context);
 /* Internal construction primitives. The adapter must retain its map epoch and
  * reacquire the entity system after factory callbacks, before capturing the
@@ -254,6 +264,7 @@ KeelResult KeelCs2_ValidateOutputContext(void* system, const KeelCs2EntityOutput
  * Only the construction owner may invoke these with a captured identity. */
 KeelResult KeelCs2_CreateEntity(const KeelCs2EntityConstructionBindings* bindings,
     const char* class_name, void** instance);
+
 KeelResult KeelCs2_CaptureCreatedEntity(void* system, const void* instance,
     KeelCs2EntityIdentity* output);
 #define KEELS2_CS2_ENTITY_CAPACITY 32768u
@@ -263,46 +274,59 @@ KeelResult KeelCs2_ValidatePendingEntity(void* system, const KeelCs2EntityIdenti
  * did not enter engine spawning. Never remove a live or spawning entity. */
 KeelResult KeelCs2_FinishCreatedSpawn(void* system, const KeelCs2EntityIdentity* entity,
     const KeelCs2EntityConstructionBindings* bindings);
+
 KeelResult KeelCs2_ValidateCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
     void* base_class, KeelBool require_pre_spawn);
+
 /* Invoked becomes true immediately before entering the engine and remains
  * true if the engine throws. Callers must not retry a dispatched spawn or
  * cancellation. No borrowed entity is accessed after the engine call. */
 KeelResult KeelCs2_SpawnCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
     void* base_class, const KeelCs2EntityConstructionBindings* bindings, const void* key_values, KeelBool* invoked);
+
 KeelResult KeelCs2_RemoveCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
     const KeelCs2EntityConstructionBindings* bindings, KeelBool* invoked);
+
 KeelResult KeelCs2_ResolveCreatedEntityPointer(void* system, const KeelCs2EntityIdentity* entity,
     const char* class_name, void** output);
+
 KeelResult KeelCs2_PrepareCreatedEntityTool(void* system, const KeelCs2EntityIdentity* entity, void* base,
     KeelCs2EntityToolContext* context);
+
 KeelResult KeelCs2_TeleportCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
     const KeelCs2EntityToolContext* context, const KeelCs2EntityToolBindings* bindings,
     const KeelCs2EntityToolClass* target, const KeelEntityTeleport* request);
+
 KeelResult KeelCs2_ResolveEntityPointer(void* entity_system, const KeelCs2EntityIdentity* entity,
     const char* class_name, void** output);
+
 KeelResult KeelCs2_ReadEntityField(
     void* entity_system,
     const KeelCs2EntityIdentity* entity,
     const KeelCs2SchemaField* field,
     void* value,
     uint32_t value_size);
+
 KeelResult KeelCs2_ResolveEntityToolBase(void* schema_system, const char* module, uint32_t kind, void** output);
 KeelResult KeelCs2_PrepareEntityTool(void* system, const KeelCs2EntityIdentity* entity, void* base,
     KeelCs2EntityToolContext* context);
+
 KeelResult KeelCs2_ApplyEntityTool(void* system, const KeelCs2EntityIdentity* entity,
     const KeelCs2EntityToolContext* context, const KeelCs2EntityToolBindings* bindings,
     const KeelCs2EntityToolClass* target, uint32_t kind, const KeelEntityTeleport* request, const char* model);
+
 KeelResult KeelCs2_ResolveEntityWriteClass(void* schema_system, const char* module, void** base_class);
 KeelResult KeelCs2_WriteEntityField(void* entity_system, void* base_class,
     const KeelCs2EntityIdentity* entity, const KeelCs2SchemaField* field,
     const void* value, uint32_t value_size, void* notify);
+
 KeelResult KeelCs2_CommandCaller(const void* context, int32_t* slot);
 KeelResult KeelCs2_ServerCommand(void* engine_server, const char* command);
 KeelResult KeelCs2_ClientConsolePrint(
     void* engine_server,
     int32_t slot,
     const char* message);
+
 KeelResult KeelCs2_FindUserMessage(
     void* network_messages,
     const char* name,

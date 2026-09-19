@@ -19,19 +19,24 @@ extern "C" KeelResult KeelCs2_PrintChat(void* engine_server, void* network_messa
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     std::size_t length{};
+
     while (length <= 512 && text[length])
     {
         ++length;
     }
+
     if (length > 512)
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     if (!engine_server || !network_messages || !game_events)
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     try
     {
         auto* engine = static_cast<IVEngineServer2*>(engine_server);
@@ -39,32 +44,40 @@ extern "C" KeelResult KeelCs2_PrintChat(void* engine_server, void* network_messa
         auto* events = static_cast<IGameEventSystem*>(game_events);
         std::array<uint64, (ABSOLUTE_PLAYER_LIMIT + 63) / 64> recipients{};
         bool found{};
+
         for (int candidate = 0; candidate < ABSOLUTE_PLAYER_LIMIT; ++candidate)
         {
             if (!broadcast && candidate != slot)
             {
                 continue;
             }
+
             keels2::cs2::PlayerInfoMessage player_message;
             auto& info = player_message.Get();
+
             if (!engine->GetPlayerInfo(CPlayerSlot(candidate), info) || info.ishltv() ||
                 engine->GetPlayerUserId(CPlayerSlot(candidate)).Get() < 0)
             {
                 continue;
             }
+
             const auto index = static_cast<std::size_t>(candidate);
             recipients[index / 64] |= uint64{1} << (index % 64);
             found = true;
         }
+
         if (!found)
         {
             return broadcast ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
         }
+
         INetworkMessageInternal* definition = messages->FindNetworkMessagePartial("TextMsg");
+
         if (!definition)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         bool release_failed{};
         const auto release = [&](CNetMessage* message) noexcept {
             try
@@ -77,15 +90,18 @@ extern "C" KeelResult KeelCs2_PrintChat(void* engine_server, void* network_messa
             }
         };
         std::unique_ptr<CNetMessage, decltype(release)> message(definition->AllocateMessage(), release);
+
         if (!message)
         {
             return KEEL_RESULT_ENGINE_FAILURE;
         }
+
         auto* proto = static_cast<google::protobuf::Message*>(message->AsProto());
         const auto* descriptor = proto ? proto->GetDescriptor() : nullptr;
         const auto* reflection = proto ? proto->GetReflection() : nullptr;
         const auto* destination = descriptor ? descriptor->FindFieldByName("dest") : nullptr;
         const auto* parameters = descriptor ? descriptor->FindFieldByName("param") : nullptr;
+
         if (!descriptor || descriptor->name() != "CUserMessageTextMsg" || !reflection ||
             !destination || destination->cpp_type() != google::protobuf::FieldDescriptor::CPPTYPE_UINT32 ||
             destination->is_repeated() || !parameters ||
@@ -93,6 +109,7 @@ extern "C" KeelResult KeelCs2_PrintChat(void* engine_server, void* network_messa
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         // Reflection setters would allocate adapter-owned strings inside an
         // engine-owned message. Let the engine's virtual parser populate it so
         // its destructor also owns every allocation (notably on Windows).
@@ -111,8 +128,10 @@ extern "C" KeelResult KeelCs2_PrintChat(void* engine_server, void* network_messa
         {
             return KEEL_RESULT_ENGINE_FAILURE;
         }
+
         events->PostEventAbstract(CSplitScreenSlot(-1), false, ABSOLUTE_PLAYER_LIMIT,
             recipients.data(), definition, message.get(), 0, BUF_RELIABLE);
+
         message.reset();
         return release_failed ? KEEL_RESULT_ENGINE_FAILURE : KEEL_RESULT_OK;
     }

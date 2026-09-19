@@ -30,6 +30,7 @@ public:
         const char* source,
         int count = -1,
         bool ignore_alignment = false);
+
     KEELS2_FAKE_TIER0_EXPORT void Purge(int allocated_bytes_to_preserve = 0);
     KEELS2_FAKE_TIER0_EXPORT int Format(const char* format, ...);
     KEELS2_FAKE_TIER0_EXPORT const char* AppendFormat(const char* format, ...);
@@ -73,15 +74,22 @@ public:
         const void* buffer,
         int size,
         BufferFlags_t flags = BF_NONE);
+
     KEELS2_FAKE_TIER0_EXPORT int ParseToken(
         const characterset_t* breaks,
         char* token,
         int maximum_length,
         bool parse_comments = true);
+
 protected:
     KEELS2_FAKE_TIER0_EXPORT void AddNullTermination();
+
 private:
-    struct Memory { unsigned count{}, allocated{}; void* pointer{}; } memory_;
+    struct Memory
+    {
+        unsigned count{}, allocated{};
+        void* pointer{};
+    } memory_;
     int get_{}, put_{};
     unsigned char error_{}, flags_{}, reserved_{};
     int tabs_{}, max_put_{}, offset_{};
@@ -108,22 +116,27 @@ const char* CBufferString::Insert(
     const int length = length_ & length_mask;
     const int capacity = allocated_size_ & length_mask;
     char* destination = (allocated_size_ & stack) != 0 ? storage_.local_ : storage_.pointer_;
+
     if (!destination || !source || index < 0 || index > length)
     {
         return destination ? destination : "";
     }
+
     const int source_length = count < 0
         ? static_cast<int>(std::strlen(source))
         : count;
+
     if (source_length < 0 || source_length >= capacity - length)
     {
         length_ |= overflow;
         return destination;
     }
+
     std::memmove(
         destination + index + source_length,
         destination + index,
         static_cast<std::size_t>(length - index + 1));
+
     std::memcpy(destination + index, source, static_cast<std::size_t>(source_length));
     length_ = (length_ & ~length_mask) | (length + source_length);
     return destination;
@@ -134,15 +147,18 @@ void CBufferString::Purge(int allocated_bytes_to_preserve)
     constexpr int free_heap = static_cast<int>(1u << 31);
     constexpr int stack = 1 << 30;
     constexpr int allow_heap = static_cast<int>(1u << 31);
+
     if ((length_ & free_heap) != 0 && (allocated_size_ & stack) == 0)
     {
         std::free(storage_.pointer_);
     }
+
     const int allow = allocated_size_ & allow_heap;
     length_ = 0;
         allocated_size_ = allocated_bytes_to_preserve > 0
             ? allow | stack | (allocated_bytes_to_preserve + 8)
         : 0;
+
     storage_.pointer_ = nullptr;
 }
 
@@ -154,20 +170,24 @@ int CBufferString::Format(const char* format, ...)
     const int length = format
         ? std::vsnprintf(buffer, sizeof(buffer), format, arguments)
         : -1;
+
     va_end(arguments);
     constexpr int length_mask = (1 << 30) - 1;
     length_ &= ~length_mask;
     char* destination = (allocated_size_ & (1 << 30)) != 0
         ? storage_.local_
         : storage_.pointer_;
+
     if (destination)
     {
         destination[0] = '\0';
     }
+
     if (length < 0)
     {
         return length;
     }
+
     Insert(0, buffer, std::min(length, static_cast<int>(sizeof(buffer) - 1)));
     return length;
 }
@@ -180,8 +200,10 @@ const char* CBufferString::AppendFormat(const char* format, ...)
     const int length = format
         ? std::vsnprintf(buffer, sizeof(buffer), format, arguments)
         : -1;
+
     va_end(arguments);
     constexpr int length_mask = (1 << 30) - 1;
+
     if (length >= 0)
     {
         Insert(
@@ -189,6 +211,7 @@ const char* CBufferString::AppendFormat(const char* format, ...)
             buffer,
             std::min(length, static_cast<int>(sizeof(buffer) - 1)));
     }
+
     return (allocated_size_ & (1 << 30)) != 0
         ? storage_.local_
         : storage_.pointer_;
@@ -202,12 +225,14 @@ int CUtlString::Format(const char* format, ...)
     va_copy(measure, arguments);
     const int length = format ? std::vsnprintf(nullptr, 0, format, measure) : -1;
     va_end(measure);
+
     if (length < 0)
     {
         va_end(arguments);
         Purge();
         return length;
     }
+
     std::string text(static_cast<std::size_t>(length) + 1, '\0');
     std::vsnprintf(text.data(), text.size(), format, arguments);
     va_end(arguments);
@@ -223,15 +248,19 @@ void CUtlString::Set(const char* value)
 void CUtlString::SetDirect(const char* value, int length)
 {
     Purge();
+
     if (!value || length <= 0)
     {
         return;
     }
+
     value_ = static_cast<char*>(std::malloc(static_cast<std::size_t>(length) + 1));
+
     if (!value_)
     {
         return;
     }
+
     std::memcpy(value_, value, static_cast<std::size_t>(length));
     value_[length] = '\0';
 }
@@ -248,21 +277,27 @@ void CUtlString::Trim(const char* trim_characters)
     {
         return;
     }
+
     const std::size_t length = std::strlen(value_);
     std::size_t begin{};
+
     while (begin < length && std::strchr(trim_characters, value_[begin]))
     {
         ++begin;
     }
+
     std::size_t end = length;
+
     while (end > begin && std::strchr(trim_characters, value_[end - 1]))
     {
         --end;
     }
+
     if (begin != 0)
     {
         std::memmove(value_, value_ + begin, end - begin);
     }
+
     value_[end - begin] = '\0';
 }
 
@@ -275,12 +310,17 @@ bool CUtlString::operator==(const CUtlString& other) const
 
 CUtlBuffer::CUtlBuffer(int, int size, BufferFlags_t flags)
 {
-    if (size) std::abort();
+    if (size)
+        std::abort();
+
     flags_ = static_cast<unsigned char>(flags);
 }
+
 void CUtlBuffer::AddNullTermination()
 {
-    if (memory_.pointer || memory_.count || put_) std::abort();
+    if (memory_.pointer || memory_.count || put_)
+        std::abort();
+
     max_put_ = 0;
 }
 
@@ -299,10 +339,12 @@ int CUtlBuffer::ParseToken(
 {
     static_cast<void>(breaks);
     static_cast<void>(parse_comments);
+
     if (token && maximum_length > 0)
     {
         token[0] = '\0';
     }
+
     return 0;
 }
 
@@ -326,16 +368,20 @@ extern "C" KEELS2_FAKE_TIER0_EXPORT void* UtlVectorMemory_Alloc(
     int old_size)
 {
     static_cast<void>(old_size);
+
     if (KeyValuesFixtureMemoryActive()) return KeyValuesFixtureVectorAlloc(memory,reallocate,
         new_size > 0 ? static_cast<std::size_t>(new_size) : 0);
+
     if (new_size <= 0)
     {
         if (reallocate)
         {
             std::free(memory);
         }
+
         return nullptr;
     }
+
     return reallocate
         ? std::realloc(memory, static_cast<std::size_t>(new_size))
         : std::malloc(static_cast<std::size_t>(new_size));
@@ -348,15 +394,19 @@ extern "C" KEELS2_FAKE_TIER0_EXPORT int UtlVectorMemory_CalcNewAllocationCount(
     int bytes_per_item)
 {
     static_cast<void>(bytes_per_item);
+
     if (grow_size > 0)
     {
         return ((new_size + grow_size - 1) / grow_size) * grow_size;
     }
+
     int result = std::max(allocation_count, 1);
+
     while (result < new_size && result <= std::numeric_limits<int>::max() / 2)
     {
         result *= 2;
     }
+
     return std::max(result, new_size);
 }
 
@@ -377,6 +427,7 @@ extern "C" KEELS2_FAKE_TIER0_EXPORT int V_tier0_strcmp(
     {
         return left ? 1 : (right ? -1 : 0);
     }
+
     return std::strcmp(left, right);
 }
 
@@ -392,13 +443,16 @@ extern "C" KEELS2_FAKE_TIER0_EXPORT int V_stricmp_fast(
     {
         const int difference = std::tolower(static_cast<unsigned char>(*left)) -
             std::tolower(static_cast<unsigned char>(*right));
+
         if (difference != 0)
         {
             return difference;
         }
+
         ++left;
         ++right;
     }
+
     return static_cast<unsigned char>(*left) - static_cast<unsigned char>(*right);
 }
 
@@ -533,11 +587,13 @@ extern "C" KEELS2_FAKE_TIER0_EXPORT void Warning(const char* format, ...)
     {
         return;
     }
+
     char buffer[1024]{};
     std::va_list arguments;
     va_start(arguments, format);
     const int length = std::vsnprintf(buffer, sizeof(buffer), format, arguments);
     va_end(arguments);
+
     if (length >= 0)
     {
         g_message.assign(buffer);
@@ -551,11 +607,13 @@ KEELS2_FAKE_TIER0_EXPORT void ConMsg(const char* format, ...)
     {
         return;
     }
+
     char buffer[1024]{};
     std::va_list arguments;
     va_start(arguments, format);
     const int length = std::vsnprintf(buffer, sizeof(buffer), format, arguments);
     va_end(arguments);
+
     if (length >= 0)
     {
         g_message.assign(buffer);

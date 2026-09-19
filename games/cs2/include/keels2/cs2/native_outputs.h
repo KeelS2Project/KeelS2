@@ -11,14 +11,22 @@ public:
     virtual bool OutputOnThread() const noexcept = 0;
     virtual KeelResult OutputCurrent(std::uint64_t expected, void*& system, std::uint64_t& epoch) noexcept = 0;
 };
+
 class NativeOutputHooks final
 {
 public:
     explicit NativeOutputHooks(OutputEnvironment& environment) : environment_(environment) {}
+
     KeelResult Start(void* function, const char* profile, const KeelHookApi&, host::GameHookDefer,
         host::GameEntityOutputCallback, void*);
+
     KeelResult Stop();
-    bool Started() const noexcept { return hook_ != 0; }
+
+    bool Started() const noexcept
+    {
+        return hook_ != 0;
+    }
+
 private:
     struct Pending
     {

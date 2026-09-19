@@ -32,10 +32,12 @@ LifecycleService::LifecycleService(Host& host, GameAdapter& adapter, KeelHookSer
     : host_(host), adapter_(adapter), hooks_(hooks)
 {
     LifecycleService* expected{};
+
     if (!active_.compare_exchange_strong(expected, this, std::memory_order_acq_rel))
     {
         throw std::runtime_error("lifecycle service already exists");
     }
+
     api_ = {
         sizeof(KeelLifecycleApi),
         KEELS2_LIFECYCLE_API_VERSION,
@@ -61,30 +63,38 @@ KeelResult LifecycleService::EnsureEvent(KeelLifecycleEventType event)
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     std::scoped_lock lock(registry_mutex_);
+
     if (shutting_down_)
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     if (installed_[event])
     {
         return KEEL_RESULT_OK;
     }
+
     if (!adapter_.IsGameThread())
     {
         return KEEL_RESULT_WRONG_THREAD;
     }
+
     std::string error;
     const KeelResult result = adapter_.EnableLifecycleEvent(
         event, hooks_.Api(), 0, &DispatchEntry, this, error);
+
     if (result != KEEL_RESULT_OK)
     {
         if (!error.empty())
         {
             host_.Write(KEEL_LOG_ERROR, error);
         }
+
         return result;
     }
+
     installed_[event] = true;
     return KEEL_RESULT_OK;
 }
@@ -95,27 +105,33 @@ KeelResult LifecycleService::EnsurePlayerTracking()
     {
         return KEEL_RESULT_WRONG_THREAD;
     }
+
     for (const auto event : {KEELS2_LIFECYCLE_CLIENT_CONNECTED, KEELS2_LIFECYCLE_CLIENT_DISCONNECTING})
     {
         const KeelResult result = EnsureEvent(event);
+
         if (result != KEEL_RESULT_OK)
         {
             return result;
         }
     }
+
     return KEEL_RESULT_OK;
 }
 
 void LifecycleService::Activate(KeelPluginHandle plugin)
 {
     std::scoped_lock lock(registry_mutex_);
+
     if (shutting_down_)
     {
         return;
     }
+
     for (const auto& [handle, subscription] : subscriptions_)
     {
         static_cast<void>(handle);
+
         if (subscription->owner == plugin)
         {
             subscription->enabled.store(true, std::memory_order_release);
@@ -128,13 +144,16 @@ KeelResult LifecycleService::Deactivate(KeelPluginHandle plugin)
     std::vector<std::shared_ptr<Subscription>> owned;
     {
         std::scoped_lock lock(registry_mutex_);
+
         if (IsCurrentOwner(plugin))
         {
             return KEEL_RESULT_BUSY;
         }
+
         for (const auto& [handle, subscription] : subscriptions_)
         {
             static_cast<void>(handle);
+
             if (subscription->owner == plugin)
             {
                 subscription->enabled.store(false, std::memory_order_release);
@@ -142,20 +161,24 @@ KeelResult LifecycleService::Deactivate(KeelPluginHandle plugin)
             }
         }
     }
+
     for (const auto& subscription : owned)
     {
         WaitForZero(subscription->active);
     }
+
     return KEEL_RESULT_OK;
 }
 
 KeelResult LifecycleService::ReleasePlugin(KeelPluginHandle plugin)
 {
     const KeelResult result = Deactivate(plugin);
+
     if (result != KEEL_RESULT_OK)
     {
         return result;
     }
+
     std::scoped_lock lock(registry_mutex_);
     std::erase_if(subscriptions_, [plugin](const auto& entry) {
         return entry.second->owner == plugin;
@@ -169,12 +192,15 @@ bool LifecycleService::Shutdown()
     bool current{};
     {
         std::scoped_lock lock(registry_mutex_);
+
         if (shutdown_complete_)
         {
             return true;
         }
+
         shutting_down_ = true;
         subscriptions.reserve(subscriptions_.size());
+
         for (const auto& [handle, subscription] : subscriptions_)
         {
             static_cast<void>(handle);
@@ -183,14 +209,17 @@ bool LifecycleService::Shutdown()
             current = current || IsCurrentCallback(subscription.get());
         }
     }
+
     if (current)
     {
         return false;
     }
+
     for (const auto& subscription : subscriptions)
     {
         WaitForZero(subscription->active);
     }
+
     std::scoped_lock lock(registry_mutex_);
     subscriptions_.clear();
     shutdown_complete_ = true;
@@ -203,10 +232,12 @@ KeelResult LifecycleService::SubscribeEntry(
     KeelLifecycleSubscriptionHandle* subscription)
 {
     LifecycleService* service = active_.load(std::memory_order_acquire);
+
     if (!service)
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     try
     {
         return service->Subscribe(plugin, spec, subscription);
@@ -223,10 +254,12 @@ KeelResult LifecycleService::UnsubscribeEntry(
     KeelLifecycleSubscriptionHandle subscription)
 {
     LifecycleService* service = active_.load(std::memory_order_acquire);
+
     if (!service)
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     try
     {
         return service->Unsubscribe(plugin, subscription);
@@ -241,6 +274,7 @@ KeelResult LifecycleService::UnsubscribeEntry(
 void LifecycleService::DispatchEntry(const KeelLifecycleEvent& event, void* user_data)
 {
     auto* service = static_cast<LifecycleService*>(user_data);
+
     if (service && active_.load(std::memory_order_acquire) == service)
     {
         service->Dispatch(event);
@@ -257,8 +291,10 @@ KeelResult LifecycleService::Subscribe(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     *output = 0;
     const KeelResult installed = EnsureEvent(spec->event);
+
     if (installed != KEEL_RESULT_OK)
     {
         return installed;
@@ -267,14 +303,17 @@ KeelResult LifecycleService::Subscribe(
     std::scoped_lock host_lock(host_.state_mutex_);
     std::scoped_lock registry_lock(registry_mutex_);
     PluginRecord* owner = host_.PluginByHandle(plugin);
+
     if (shutting_down_ || !host_.accepting_resources_ || !owner || !owner->accepting_resources)
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     if (next_subscription_ == 0 || next_sequence_ == 0)
     {
         return KEEL_RESULT_ENGINE_FAILURE;
     }
+
     auto subscription = std::make_shared<Subscription>();
     subscription->handle = next_subscription_++;
     subscription->owner = plugin;
@@ -285,6 +324,7 @@ KeelResult LifecycleService::Subscribe(
     subscription->enabled.store(
         owner->state == PluginState::loaded && !owner->loading,
         std::memory_order_release);
+
     const auto handle = subscription->handle;
     subscriptions_.emplace(handle, std::move(subscription));
     *output = handle;
@@ -299,24 +339,30 @@ KeelResult LifecycleService::Unsubscribe(
     {
         std::scoped_lock lock(registry_mutex_);
         const auto iterator = subscriptions_.find(handle);
+
         if (iterator == subscriptions_.end() || iterator->second->owner != plugin)
         {
             return KEEL_RESULT_NOT_FOUND;
         }
+
         subscription = iterator->second;
         subscription->enabled.store(false, std::memory_order_release);
+
         if (IsCurrentCallback(subscription.get()))
         {
             return KEEL_RESULT_BUSY;
         }
     }
+
     WaitForZero(subscription->active);
     std::scoped_lock lock(registry_mutex_);
     const auto iterator = subscriptions_.find(handle);
+
     if (iterator != subscriptions_.end() && iterator->second == subscription)
     {
         subscriptions_.erase(iterator);
     }
+
     return KEEL_RESULT_OK;
 }
 
@@ -327,27 +373,34 @@ void LifecycleService::Dispatch(const KeelLifecycleEvent& event)
     {
         return;
     }
+
     if (event.type == KEELS2_LIFECYCLE_CLIENT_CONNECTED || event.type == KEELS2_LIFECYCLE_CLIENT_DISCONNECTING)
     {
         std::scoped_lock lock(host_.state_mutex_);
+
         if (host_.players_)
         {
             host_.players_->OnLifecycle(event);
         }
     }
+
     if (event.type == KEELS2_LIFECYCLE_GAME_FRAME &&
         event.payload_size == sizeof(KeelLifecycleGameFrame) && adapter_.IsGameThread())
         host_.DispatchDeferredPluginCommands();
+
     std::vector<std::shared_ptr<Subscription>> callbacks;
     {
         std::scoped_lock lock(registry_mutex_);
+
         if (shutting_down_)
         {
             return;
         }
+
         for (const auto& [handle, subscription] : subscriptions_)
         {
             static_cast<void>(handle);
+
             if (subscription->event == event.type &&
                 subscription->enabled.load(std::memory_order_acquire))
             {
@@ -355,24 +408,30 @@ void LifecycleService::Dispatch(const KeelLifecycleEvent& event)
             }
         }
     }
+
     std::sort(callbacks.begin(), callbacks.end(), [](const auto& left, const auto& right) {
         return left->sequence < right->sequence;
     });
+
     for (const auto& callback : callbacks)
     {
         callback->active.fetch_add(1, std::memory_order_acq_rel);
+
         if (!callback->enabled.load(std::memory_order_acquire))
         {
             LeaveActive(callback->active);
             continue;
         }
+
         if (callback_depth_ == callback_stack_.size())
         {
             LeaveActive(callback->active);
             host_.Write(KEEL_LOG_ERROR, "lifecycle callback recursion limit reached");
             continue;
         }
+
         callback_stack_[callback_depth_++] = callback.get();
+
         try
         {
             callback->callback(&event, callback->user_data);
@@ -381,6 +440,7 @@ void LifecycleService::Dispatch(const KeelLifecycleEvent& event)
         {
             host_.Write(KEEL_LOG_ERROR, "plugin threw during a lifecycle callback");
         }
+
         callback_stack_[--callback_depth_] = nullptr;
         LeaveActive(callback->active);
     }
@@ -401,6 +461,7 @@ bool LifecycleService::IsCurrentOwner(KeelPluginHandle plugin) noexcept
             return true;
         }
     }
+
     return false;
 }
 
@@ -423,6 +484,7 @@ void LifecycleService::LeaveActive(std::atomic<std::uint32_t>& active) noexcept
 void LifecycleService::WaitForZero(std::atomic<std::uint32_t>& active) noexcept
 {
     std::uint32_t value = active.load(std::memory_order_acquire);
+
     while (value != 0)
     {
         active.wait(value, std::memory_order_acquire);

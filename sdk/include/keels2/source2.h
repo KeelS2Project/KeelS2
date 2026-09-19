@@ -55,6 +55,7 @@ typedef struct KeelSource2ApiV1
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*query_interface)(
         KeelPluginHandle plugin,
         KeelSource2Capability capability,
@@ -65,10 +66,12 @@ typedef struct KeelSource2Api
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*query_interface)(
         KeelPluginHandle plugin,
         KeelSource2Capability capability,
         KeelSource2InterfaceInfo* info);
+
     KeelResult (*query_named_interface)(
         KeelPluginHandle plugin,
         KeelSource2Factory factory,

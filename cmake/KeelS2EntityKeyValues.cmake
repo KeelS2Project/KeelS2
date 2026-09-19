@@ -15,6 +15,7 @@ target_include_directories(keels2_cs2_keyvalues_sdk SYSTEM BEFORE PRIVATE
 target_link_libraries(keels2_cs2_keyvalues_sdk PRIVATE KeelS2::SourceSDK)
 set_target_properties(keels2_cs2_keyvalues_sdk PROPERTIES
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
+
 if(MSVC)
     target_compile_options(keels2_cs2_keyvalues_sdk PRIVATE /Zc:sizedDealloc-)
 else()
@@ -32,6 +33,7 @@ set_target_properties(keels2_cs2_keyvalues PROPERTIES
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 keels2_set_output(keels2_cs2_keyvalues "bin/${KEELS2_PLATFORM_DIR}")
 keels2_enable_warnings(keels2_cs2_keyvalues)
+
 if(MSVC)
     target_compile_options(keels2_cs2_keyvalues PRIVATE /Zc:sizedDealloc-)
 else()
@@ -58,6 +60,7 @@ if(BUILD_TESTING)
     set_target_properties(keels2_keyvalues_fixture PROPERTIES
         CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
     keels2_enable_warnings(keels2_keyvalues_fixture)
+
     if(MSVC)
         target_compile_options(keels2_keyvalues_fixture PRIVATE /Zc:sizedDealloc-)
     else()
@@ -68,6 +71,7 @@ if(BUILD_TESTING)
         set_property(TARGET keels2_keyvalues_fixture APPEND PROPERTY LINK_DEPENDS
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/entity_keyvalues_fixture.map")
     endif()
+
     add_executable(keels2_entity_keyvalues_test tests/entity_keyvalues_test.cpp)
     target_include_directories(keels2_entity_keyvalues_test PRIVATE games/cs2/include sdk/include)
     target_link_libraries(keels2_entity_keyvalues_test PRIVATE
@@ -90,6 +94,7 @@ if(BUILD_TESTING)
         keels2_cs2_constructions keels2_keyvalues_fixture keels2_fake_tier0)
     keels2_enable_warnings(keels2_owned_construction_test)
     add_test(NAME owned_construction COMMAND keels2_owned_construction_test)
+
     if(WIN32)
         set_property(TEST entity_keyvalues entity_variant entity_variant_snapshot owned_construction APPEND PROPERTY ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:keels2_cs2_keyvalues>")

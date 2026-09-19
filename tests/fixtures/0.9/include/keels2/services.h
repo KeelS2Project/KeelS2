@@ -27,11 +27,14 @@ typedef struct KeelServicesApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*publish)(
         KeelPluginHandle plugin,
         const KeelServiceSpec* spec,
         KeelServiceHandle* publication);
+
     KeelResult (*withdraw)(KeelPluginHandle plugin, KeelServiceHandle publication);
+
     KeelResult (*release)(
         KeelPluginHandle plugin,
         const char* name,

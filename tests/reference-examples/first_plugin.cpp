@@ -3,6 +3,7 @@
 namespace docs
 {
 using namespace keels2::authoring;
+
 class FirstPlugin final : public Plugin
 {
 public:
@@ -14,4 +15,5 @@ public:
     };
 };
 }
+
 KEELS2_PLUGIN(docs::FirstPlugin)

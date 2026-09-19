@@ -78,10 +78,12 @@ std::uint32_t EngineInvalidFreeCount()
 bool ResetEngineAllocatorDiagnostics()
 {
     std::scoped_lock lock(g_engine_allocator_mutex);
+
     if (!g_engine_allocations.empty())
     {
         return false;
     }
+
     g_engine_allocation_count = 0;
     g_engine_free_count = 0;
     g_engine_invalid_free_count = 0;
@@ -95,6 +97,7 @@ extern "C" KEELS2_TEST_EXPORT char* MemAlloc_StrDupFunc(const char* value)
     const char* source = value ? value : "";
     const std::size_t size = std::strlen(source) + 1;
     auto* copy = static_cast<char*>(std::malloc(size));
+
     if (copy)
     {
         std::memcpy(copy, source, size);
@@ -102,6 +105,7 @@ extern "C" KEELS2_TEST_EXPORT char* MemAlloc_StrDupFunc(const char* value)
         g_engine_allocations.insert(copy);
         ++g_engine_allocation_count;
     }
+
     return copy;
 }
 
@@ -111,15 +115,19 @@ extern "C" KEELS2_TEST_EXPORT void MemAlloc_FreeFunc(void* value)
     {
         return;
     }
+
     {
         std::scoped_lock lock(g_engine_allocator_mutex);
+
         if (g_engine_allocations.erase(value) == 0)
         {
             ++g_engine_invalid_free_count;
             return;
         }
+
         ++g_engine_free_count;
     }
+
     std::free(value);
 }
 
@@ -166,18 +174,22 @@ public:
         {
             return;
         }
+
         std::shared_ptr<ConVarEntry> entry;
         std::vector<ConVarCallback> callbacks;
         {
             std::scoped_lock lock(convar_mutex);
             entry = ConVarByAccess(reference.AccessIndex());
+
             if (!entry)
             {
                 return;
             }
+
             entry->data.flags |= keels2::cs2::kPerformingCallbacksFlag;
             entry->current_value = ReadLiveConVarValue(entry->type, new_value);
             WriteLiveConVarValue(*entry, entry->current_value);
+
             for (const auto& callback : entry->callbacks)
             {
                 if (callback.active)
@@ -185,9 +197,11 @@ public:
                     callbacks.push_back(callback);
                 }
             }
+
             ++convar_change_count;
             last_change_slot = slot;
         }
+
         for (const auto& callback : callbacks)
         {
             keels2::cs2::ConVarObject object{callback.reference, &entry->data};
@@ -199,10 +213,12 @@ public:
                 nullptr,
                 callback.callback);
         }
+
         {
             std::scoped_lock lock(convar_mutex);
             entry->data.flags &= ~keels2::cs2::kPerformingCallbacksFlag;
         }
+
         DrainQueuedValues();
     }
 
@@ -230,11 +246,13 @@ public:
         const auto found = std::find_if(entries.begin(), entries.end(), [command](const Entry& entry) {
             return entry.active && entry.reference.AccessIndex() == command.AccessIndex();
         });
+
         if (found != entries.end() && found->callback)
         {
             found->callback->CommandCallback(context, arguments);
         }
     }
+
     void InstallGlobalChangeCallback(keels2::cs2::GlobalConVarCallback callback) override
     {
         global_callbacks.push_back(callback);
@@ -244,6 +262,7 @@ public:
     {
         std::erase(global_callbacks, callback);
     }
+
     void CallGlobalChangeCallbacks(
         keels2::cs2::ConVarObject* reference,
         std::int32_t slot,
@@ -256,17 +275,22 @@ public:
         last_global_new = new_value ? new_value : "";
         last_global_old = old_value ? old_value : "";
         const auto callbacks = global_callbacks;
+
         if (reference && reference->data)
         {
             reference->data->flags |= keels2::cs2::kPerformingCallbacksFlag;
+
             for (const auto callback : callbacks)
             {
                 callback(reference, slot, new_value, old_value, nullptr);
             }
+
             reference->data->flags &= ~keels2::cs2::kPerformingCallbacksFlag;
         }
+
         DrainQueuedValues();
     }
+
     KEELS2_EMPTY_SLOT(24)
     KEELS2_EMPTY_SLOT(25)
     KEELS2_EMPTY_SLOT(26)
@@ -292,6 +316,7 @@ public:
         {
             return;
         }
+
         *reference = {};
         *data = nullptr;
 
@@ -302,6 +327,7 @@ public:
             &default_value,
             setup.value_info.default_value,
             sizeof(default_value));
+
         if (setup.value_info.has_minimum)
         {
             std::memcpy(
@@ -309,6 +335,7 @@ public:
                 setup.value_info.minimum_value,
                 sizeof(minimum));
         }
+
         if (setup.value_info.has_maximum)
         {
             std::memcpy(
@@ -320,20 +347,24 @@ public:
         std::array<void*, 3> registration_strings{};
         std::size_t registration_string_count{};
         std::size_t invalid_registration_string_count{};
+
         if (setup.value_info.type == keels2::cs2::ConVarType::string)
         {
             if (setup.value_info.has_default)
             {
                 registration_strings[registration_string_count++] = default_value.string;
             }
+
             if (setup.value_info.has_minimum)
             {
                 registration_strings[registration_string_count++] = minimum.string;
             }
+
             if (setup.value_info.has_maximum)
             {
                 registration_strings[registration_string_count++] = maximum.string;
             }
+
             for (std::size_t index{}; index < registration_string_count; ++index)
             {
                 if (!IsEngineAllocation(registration_strings[index]))
@@ -348,9 +379,12 @@ public:
             std::scoped_lock lock(convar_mutex);
             convar_registration_string_count +=
                 static_cast<std::uint32_t>(registration_string_count);
+
             convar_invalid_registration_string_count +=
                 static_cast<std::uint32_t>(invalid_registration_string_count);
+
             rejected = reject_convar_registration_name == setup.name;
+
             if (rejected)
             {
                 reject_convar_registration_name.clear();
@@ -364,6 +398,7 @@ public:
             {
                 MemAlloc_FreeFunc(registration_strings[index]);
             }
+
             return;
         }
 
@@ -372,6 +407,7 @@ public:
         {
             std::scoped_lock lock(convar_mutex);
             entry = ConVarByName(setup.name);
+
             if (!entry)
             {
                 entry = std::make_shared<ConVarEntry>();
@@ -385,7 +421,9 @@ public:
                     default_value,
                     entry->default_value,
                     entry->default_string);
+
                 SetCurrentValue(*entry, default_value);
+
                 if (setup.value_info.has_minimum)
                 {
                     entry->has_minimum = true;
@@ -395,6 +433,7 @@ public:
                         entry->minimum_value,
                         entry->minimum_string);
                 }
+
                 if (setup.value_info.has_maximum)
                 {
                     entry->has_maximum = true;
@@ -404,6 +443,7 @@ public:
                         entry->maximum_value,
                         entry->maximum_string);
                 }
+
                 RefreshConVarData(*entry);
                 convars.push_back(entry);
             }
@@ -412,6 +452,7 @@ public:
             callback.reference = keels2::cs2::ConVarRef(
                 entry->access_index,
                 registered_index);
+
             callback.provider = setup.value_info.change_provider;
             callback.callback = setup.value_info.change_callback;
             callback.active = callback.provider && callback.callback;
@@ -420,6 +461,7 @@ public:
             entry->data.callback_index = callback.active
                 ? static_cast<std::uint32_t>(registered_index)
                 : 0;
+
             *reference = callback.reference;
             *data = &entry->data;
             ++convar_register_count;
@@ -446,6 +488,7 @@ public:
     void UnregisterConVarCallbacks(keels2::cs2::ConVarRef reference) override
     {
         std::scoped_lock lock(convar_mutex);
+
         for (const auto& entry : convars)
         {
             const auto callback = std::find_if(
@@ -456,6 +499,7 @@ public:
                         candidate.reference.AccessIndex() == reference.AccessIndex() &&
                         candidate.reference.RegisteredIndex() == reference.RegisteredIndex();
                 });
+
             if (callback != entry->callbacks.end())
             {
                 callback->active = false;
@@ -496,6 +540,7 @@ public:
         const auto iterator = std::find_if(entries.begin(), entries.end(), [reference](const Entry& entry) {
             return entry.reference.AccessIndex() == reference.AccessIndex() && entry.active;
         });
+
         if (iterator != entries.end())
         {
             ++unregister_count;
@@ -520,13 +565,16 @@ public:
         {
             return;
         }
+
         {
             std::scoped_lock lock(convar_mutex);
             const auto entry = ConVarByData(reference->data);
+
             if (!entry)
             {
                 return;
             }
+
             PendingValue pending;
             pending.entry = entry;
             pending.slot = slot;
@@ -543,11 +591,14 @@ public:
         {
             return false;
         }
+
         std::scoped_lock lock(convar_mutex);
+
         if (ConVarByName(name))
         {
             return false;
         }
+
         auto entry = std::make_shared<ConVarEntry>();
         entry->access_index = next_convar_access++;
         entry->name = name;
@@ -568,10 +619,12 @@ public:
             std::scoped_lock lock(convar_mutex);
             entry = ConVarByName(name);
         }
+
         if (!entry || entry->type != keels2::cs2::ConVarType::int32)
         {
             return false;
         }
+
         keels2::cs2::ConVarValue changed{};
         changed.int32 = value;
         ApplyValue(*entry, 0, changed);
@@ -593,10 +646,12 @@ public:
     {
         std::scoped_lock lock(convar_mutex);
         const auto entry = ConVarByName(name);
+
         if (!entry || entry->type != keels2::cs2::ConVarType::int32)
         {
             return false;
         }
+
         const auto current = ReadLiveConVarValue(entry->type, entry->data.values);
         value = current.int32;
         return true;
@@ -606,10 +661,12 @@ public:
     {
         std::scoped_lock lock(convar_mutex);
         const auto entry = ConVarByName(name);
+
         if (!entry || entry->type != keels2::cs2::ConVarType::float32)
         {
             return false;
         }
+
         const auto current = ReadLiveConVarValue(entry->type, entry->data.values);
         value = current.float32;
         return true;
@@ -619,15 +676,19 @@ public:
     {
         std::scoped_lock lock(convar_mutex);
         const auto entry = ConVarByName(name);
+
         if (!entry)
         {
             return false;
         }
+
         const std::size_t size = LiveConVarValueSize(entry->type);
-        return size != 0 && std::all_of(
-            entry->data.values + size,
-            entry->data.values + sizeof(entry->data.values),
-            [](std::byte value) { return value == kLiveValueCanary; });
+        return size != 0 && std::all_of(entry->data.values + size,
+                                        entry->data.values + sizeof(entry->data.values),
+                                        [](std::byte value)
+                                        {
+                                            return value == kLiveValueCanary;
+                                        });
     }
 
     bool HasConVar(const char* name) const
@@ -640,12 +701,13 @@ public:
     {
         std::scoped_lock lock(convar_mutex);
         const auto entry = ConVarByName(name);
-        return entry
-            ? static_cast<std::size_t>(std::count_if(
-                entry->callbacks.begin(),
-                entry->callbacks.end(),
-                [](const ConVarCallback& callback) { return callback.active; }))
-            : 0;
+        return entry ? static_cast<std::size_t>(std::count_if(entry->callbacks.begin(),
+                                                              entry->callbacks.end(),
+                                                              [](const ConVarCallback& callback)
+                                                              {
+                                                                  return callback.active;
+                                                              }))
+                     : 0;
     }
 
     std::uint64_t Flags(const char* name) const
@@ -670,9 +732,11 @@ public:
         {
             return false;
         }
+
         const auto iterator = std::find_if(entries.begin(), entries.end(), [arguments](const Entry& entry) {
             return entry.active && entry.name == *arguments.begin();
         });
+
         if (iterator == entries.end() || !iterator->callback)
         {
             return false;
@@ -810,12 +874,16 @@ private:
         {
             case keels2::cs2::ConVarType::boolean:
                 return sizeof(keels2::cs2::ConVarValue::boolean);
+
             case keels2::cs2::ConVarType::int32:
                 return sizeof(keels2::cs2::ConVarValue::int32);
+
             case keels2::cs2::ConVarType::float32:
                 return sizeof(keels2::cs2::ConVarValue::float32);
+
             case keels2::cs2::ConVarType::string:
                 return sizeof(keels2::cs2::ConVarValue::string);
+
             default:
                 return 0;
         }
@@ -827,10 +895,12 @@ private:
     {
         keels2::cs2::ConVarValue value{};
         const std::size_t size = LiveConVarValueSize(type);
+
         if (source && size != 0)
         {
             std::memcpy(&value, source, size);
         }
+
         return value;
     }
 
@@ -839,6 +909,7 @@ private:
         const keels2::cs2::ConVarValue& value)
     {
         const std::size_t size = LiveConVarValueSize(entry.type);
+
         if (size != 0)
         {
             std::memcpy(entry.data.values, &value, size);
@@ -852,6 +923,7 @@ private:
         std::string& string_storage)
     {
         destination = source;
+
         if (type == keels2::cs2::ConVarType::string)
         {
             string_storage = source.string ? source.string : "";
@@ -868,14 +940,18 @@ private:
         {
             case keels2::cs2::ConVarType::boolean:
                 return first.boolean == second.boolean;
+
             case keels2::cs2::ConVarType::int32:
                 return first.int32 == second.int32;
+
             case keels2::cs2::ConVarType::float32:
                 return first.float32 == second.float32;
+
             case keels2::cs2::ConVarType::string:
                 return std::strcmp(
                     first.string ? first.string : "",
                     second.string ? second.string : "") == 0;
+
             default:
                 return false;
         }
@@ -888,10 +964,12 @@ private:
         if (entry.type == keels2::cs2::ConVarType::string)
         {
             char* replacement = MemAlloc_StrDupFunc(value.string ? value.string : "");
+
             if (!replacement)
             {
                 return;
             }
+
             const auto current = ReadLiveConVarValue(entry.type, entry.data.values);
             MemAlloc_FreeFunc(current.string);
             entry.current_value = value;
@@ -901,6 +979,7 @@ private:
         {
             entry.current_value = value;
         }
+
         WriteLiveConVarValue(entry, entry.current_value);
     }
 
@@ -911,6 +990,7 @@ private:
     {
         auto old_value = ReadLiveConVarValue(entry.type, entry.data.values);
         std::string old_string;
+
         if (entry.type == keels2::cs2::ConVarType::string)
         {
             old_string = old_value.string ? old_value.string : "";
@@ -920,10 +1000,12 @@ private:
         keels2::cs2::ConVarValue new_value{};
         std::string new_string;
         StoreConVarValue(entry.type, requested, new_value, new_string);
+
         if (EqualConVarValue(entry.type, old_value, new_value))
         {
             return;
         }
+
         SetCurrentValue(entry, new_value);
         new_value = ReadLiveConVarValue(entry.type, entry.data.values);
         ++entry.data.times_changed;
@@ -937,10 +1019,12 @@ private:
     {
         {
             std::scoped_lock lock(convar_mutex);
+
             if (draining_queued_values)
             {
                 return;
             }
+
             draining_queued_values = true;
         }
         while (true)
@@ -948,20 +1032,24 @@ private:
             PendingValue pending;
             {
                 std::scoped_lock lock(convar_mutex);
+
                 if (queued_values.empty())
                 {
                     draining_queued_values = false;
                     return;
                 }
+
                 pending = std::move(queued_values.front());
                 queued_values.erase(queued_values.begin());
             }
+
             if (pending.entry)
             {
                 if (pending.entry->type == keels2::cs2::ConVarType::string)
                 {
                     pending.value.string = pending.string_storage.data();
                 }
+
                 ApplyValue(*pending.entry, pending.slot, pending.value);
             }
         }
@@ -980,6 +1068,7 @@ private:
             entry.data.values,
             sizeof(entry.data.values),
             kLiveValueCanary);
+
         WriteLiveConVarValue(entry, entry.current_value);
     }
 
@@ -989,6 +1078,7 @@ private:
         {
             return {};
         }
+
         const std::string_view requested{name};
         const auto entry = std::find_if(
             convars.begin(),
@@ -998,6 +1088,7 @@ private:
                 {
                     return false;
                 }
+
                 return std::equal(
                     candidate->name.begin(),
                     candidate->name.end(),
@@ -1011,6 +1102,7 @@ private:
                         return fold(left) == fold(right);
                     });
             });
+
         return entry == convars.end() ? std::shared_ptr<ConVarEntry>{} : *entry;
     }
 
@@ -1043,6 +1135,7 @@ public:
         {
             return false;
         }
+
         std::vector<const char*> values(arguments);
         alignas(CCommand) std::array<unsigned char, keels2::cs2::kCommandSize> command{};
         const auto count = static_cast<std::int32_t>(values.size());
@@ -1058,6 +1151,7 @@ public:
             sizeof(value_pointer)
         );
         const std::array<std::int32_t, 2> context{target, slot};
+
         if (cvars)
         {
             keels2::cs2::CvarInterface* volatile dispatch = cvars;
@@ -1067,8 +1161,10 @@ public:
         {
             callback->CommandCallback(context.data(), command.data());
         }
+
         return true;
     }
+
     struct Entry
     {
         keels2::cs2::CommandRef reference;
@@ -1137,68 +1233,138 @@ public:
         return "round_start";
     }
 
-    int GetID() const override { return 1; }
-    bool IsReliable() const override { return true; }
-    bool IsLocal() const override { return false; }
-    bool IsEmpty(const GameEventKeySymbol_t&) override { return false; }
-    bool GetBool(const GameEventKeySymbol_t&, bool value) override { return value; }
-    int GetInt(const GameEventKeySymbol_t&, int value) override { return value; }
-    uint64 GetUint64(const GameEventKeySymbol_t&, uint64 value) override { return value; }
-    float GetFloat(const GameEventKeySymbol_t&, float value) override { return value; }
+    int GetID() const override
+    {
+        return 1;
+    }
+
+    bool IsReliable() const override
+    {
+        return true;
+    }
+
+    bool IsLocal() const override
+    {
+        return false;
+    }
+
+    bool IsEmpty(const GameEventKeySymbol_t&) override
+    {
+        return false;
+    }
+
+    bool GetBool(const GameEventKeySymbol_t&, bool value) override
+    {
+        return value;
+    }
+
+    int GetInt(const GameEventKeySymbol_t&, int value) override
+    {
+        return value;
+    }
+
+    uint64 GetUint64(const GameEventKeySymbol_t&, uint64 value) override
+    {
+        return value;
+    }
+
+    float GetFloat(const GameEventKeySymbol_t&, float value) override
+    {
+        return value;
+    }
+
     const char* GetString(const GameEventKeySymbol_t&, const char* value) override
     {
         return value;
     }
-    void* GetPtr(const GameEventKeySymbol_t&) override { return nullptr; }
+
+    void* GetPtr(const GameEventKeySymbol_t&) override
+    {
+        return nullptr;
+    }
+
     CEntityHandle GetEHandle(const GameEventKeySymbol_t&, CEntityHandle value) override
     {
         return value;
     }
+
     CEntityInstance* GetEntity(
         const GameEventKeySymbol_t&,
         CEntityInstance* value) override
     {
         return value;
     }
+
     CEntityIndex GetEntityIndex(
         const GameEventKeySymbol_t&,
         CEntityIndex value) override
     {
         return value;
     }
+
     CPlayerSlot GetPlayerSlot(const GameEventKeySymbol_t&) override
     {
         return CPlayerSlot(-1);
     }
+
     CEntityInstance* GetPlayerController(const GameEventKeySymbol_t&) override
     {
         return nullptr;
     }
-    CEntityInstance* GetPlayerPawn(const GameEventKeySymbol_t&) override { return nullptr; }
-    CEntityHandle GetPawnEHandle(const GameEventKeySymbol_t&) override { return {}; }
+
+    CEntityInstance* GetPlayerPawn(const GameEventKeySymbol_t&) override
+    {
+        return nullptr;
+    }
+
+    CEntityHandle GetPawnEHandle(const GameEventKeySymbol_t&) override
+    {
+        return {};
+    }
+
     CEntityIndex GetPawnEntityIndex(const GameEventKeySymbol_t&) override
     {
         return CEntityIndex(-1);
     }
+
     void SetBool(const GameEventKeySymbol_t&, bool) override {}
+
     void SetInt(const GameEventKeySymbol_t&, int) override {}
+
     void SetUint64(const GameEventKeySymbol_t&, uint64) override {}
+
     void SetFloat(const GameEventKeySymbol_t&, float) override {}
+
     void SetString(const GameEventKeySymbol_t&, const char*) override {}
+
     void SetPtr(const GameEventKeySymbol_t&, void*) override {}
+
     void SetEntity(const GameEventKeySymbol_t&, CEntityInstance*) override {}
+
     void SetEntity(const GameEventKeySymbol_t&, CEntityIndex) override {}
+
     void SetPlayer(const GameEventKeySymbol_t&, CEntityInstance*) override {}
+
     void SetPlayer(const GameEventKeySymbol_t&, CPlayerSlot) override {}
+
     void SetPlayerRaw(
         const GameEventKeySymbol_t&,
         const GameEventKeySymbol_t&,
         CEntityInstance*) override
     {
     }
-    bool HasKey(const GameEventKeySymbol_t&) override { return true; }
+
+    bool HasKey(const GameEventKeySymbol_t&) override
+    {
+        return true;
+    }
+
     void unk001() override {}
-    KeyValues3* GetDataKeys() const override { return nullptr; }
+
+    KeyValues3* GetDataKeys() const override
+    {
+        return nullptr;
+    }
 };
 
 template <typename Function>
@@ -1232,6 +1398,7 @@ void* g_schema_system_interface{};
 void* g_game_resource_interface{};
 
 std::byte g_user_message{};
+
 struct NetworkMessageInfoFixture
 {
     int categories{};
@@ -1247,6 +1414,7 @@ struct NetworkMessageInfoFixture
 static_assert(
     offsetof(NetworkMessageInfoFixture, message_id) ==
     offsetof(NetMessageInfo_t, m_MessageId));
+
 NetworkMessageInfoFixture g_user_message_info{};
 
 NetMessageInfo_t* GetNetworkMessageInfoFixture(void*, INetworkMessageInternal* message)
@@ -1320,11 +1488,14 @@ bool DispatchSource2LevelInit()
     VtableFunction<void (*)(void*, const char*, void*, void**)>(
         &g_engine_service,
         13)(&g_engine_service, "game", &g_loop_factory, nullptr);
+
     void* loop = VtableFunction<void* (*)(void*)>(&g_loop_factory, 2)(&g_loop_factory);
+
     if (loop != &g_loop)
     {
         return false;
     }
+
     return VtableFunction<bool (*)(void*, void*, void*)>(loop, 0)(
         loop,
         &g_game_event_instance,
@@ -1345,7 +1516,10 @@ void UnregisterSource2LoopMode()
 
 struct OriginalFactoryProbe final : FactoryProbe
 {
-    int Value() override { return 11; }
+    int Value() override
+    {
+        return 11;
+    }
 } g_factory_probe;
 std::atomic<unsigned> g_factory_originals{};
 
@@ -1358,14 +1532,17 @@ void* EngineFactory(const char* name, int* return_code)
 {
     void* result{};
     bool inconsistent{};
+
     if (name && std::strcmp(name, "KeelFactoryMissing001") == 0)
     {
         if (return_code)
         {
             *return_code = 17;
         }
+
         return nullptr;
     }
+
     if (name && (std::strcmp(name, "KeelFactoryProbe001") == 0 ||
         std::strcmp(name, "KeelFactoryBlock001") == 0))
     {
@@ -1427,10 +1604,12 @@ void* EngineFactory(const char* name, int* return_code)
     {
         result = &g_null_vtable_interface;
     }
+
     if (return_code)
     {
         *return_code = result && !inconsistent ? 0 : 1;
     }
+
     return result;
 }
 
@@ -1438,10 +1617,12 @@ bool CopyFile(const std::filesystem::path& source, const std::filesystem::path& 
 {
     std::error_code error;
     std::filesystem::create_directories(destination.parent_path(), error);
+
     if (error)
     {
         return false;
     }
+
     std::filesystem::copy_file(source, destination, std::filesystem::copy_options::overwrite_existing, error);
     return !error;
 }
@@ -1454,29 +1635,36 @@ std::filesystem::path RuntimePluginPath(
     std::filesystem::path selected;
     std::uint64_t selected_handle{};
     std::error_code error;
-    for (std::filesystem::directory_iterator iterator(root, error), end;
-         !error && iterator != end;
+
+    for (std::filesystem::directory_iterator iterator(root, error), end; !error && iterator != end;
+
          iterator.increment(error))
     {
         if (!iterator->is_directory(error))
         {
             continue;
         }
+
         std::uint64_t handle{};
         bool valid = true;
         const std::string name = iterator->path().filename().string();
+
         for (const char raw_character : name)
         {
             const auto character = static_cast<unsigned char>(raw_character);
+
             if (character < '0' || character > '9' ||
                 handle > (UINT64_MAX - static_cast<std::uint64_t>(character - '0')) / 10u)
             {
                 valid = false;
                 break;
             }
+
             handle = handle * 10u + static_cast<std::uint64_t>(character - '0');
         }
+
         const std::filesystem::path candidate = iterator->path() / logical_path.filename();
+
         if (valid && !name.empty() && handle >= selected_handle &&
             std::filesystem::is_regular_file(candidate, error) && !error)
         {
@@ -1484,6 +1672,7 @@ std::filesystem::path RuntimePluginPath(
             selected_handle = handle;
         }
     }
+
     return selected;
 }
 
@@ -1496,13 +1685,16 @@ bool VtableEntryBelongsTo(
     {
         return false;
     }
+
     void* address = (*static_cast<void***>(object))[index];
     std::filesystem::path module;
     std::string error;
+
     if (!keels2::platform::ModulePathFromAddress(address, module, error))
     {
         return false;
     }
+
     std::error_code filesystem_error;
     return std::filesystem::equivalent(module, expected_module, filesystem_error) && !filesystem_error;
 }
@@ -1517,21 +1709,25 @@ std::size_t Count(const std::string& messages, const char* expected)
     std::size_t count{};
     std::size_t position{};
     const std::size_t length = std::strlen(expected);
+
     while ((position = messages.find(expected, position)) != std::string::npos)
     {
         ++count;
         position += length;
     }
+
     return count;
 }
 
 bool ContainsInOrder(const std::string& messages, const char* first, const char* second)
 {
     const auto first_position = messages.find(first);
+
     if (first_position == std::string::npos)
     {
         return false;
     }
+
     return messages.find(second, first_position + std::strlen(first)) != std::string::npos;
 }
 
@@ -1541,6 +1737,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
     {
         return Count(messages, "[KeelS2/bootstrap] genuine server module is unavailable:") == 1;
     }
+
     if (scenario == "unknown_build")
     {
         return Contains(messages, "[KeelS2/bootstrap] unsupported cs2 server module") &&
@@ -1550,10 +1747,12 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
     }
 
     const bool selected_profile = Contains(messages, "[KeelS2/bootstrap] selected compatibility profile: test-fixture-");
+
     if (scenario == "missing_host")
     {
         return selected_profile && Contains(messages, "[KeelS2/bootstrap] could not load host:");
     }
+
     if (scenario == "missing_plugin")
     {
         const bool missing_message = Contains(messages, "Version 1.0.0. Loaded 0 plugins.");
@@ -1561,12 +1760,14 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "Listing 0 plugins:") &&
             Contains(messages, "Version 1.0.0. Loaded") && Contains(messages, "host stopped");
     }
+
     if (scenario == "invalid_plugin")
     {
         return selected_profile && Contains(messages, "plugin query was rejected:") &&
             Contains(messages, "Listing 1 plugins:") && Contains(messages, " - invalid") &&
             Contains(messages, "Version 1.0.0. Loaded") && Contains(messages, "host stopped");
     }
+
     if (scenario == "failed_plugin_load")
     {
         return selected_profile && Contains(messages, "plugin load was rejected: Failing Test Plugin") &&
@@ -1575,36 +1776,44 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "Failing Test Plugin (1) - error") &&
             Contains(messages, "Version 1.0.0. Loaded") && Contains(messages, "host stopped");
     }
+
     if (scenario == "reverse_unload")
     {
         return selected_profile && Contains(messages, "plugin loaded: Lifecycle First 1") &&
-            Contains(messages, "plugin loaded: Lifecycle Second 1") &&
-            ContainsInOrder(messages, "[Lifecycle Second] second unload callback completed", "[Lifecycle First] first unload callback completed") &&
-            ContainsInOrder(messages, "[Lifecycle First] first unload callback completed", "host stopped");
+               Contains(messages, "plugin loaded: Lifecycle Second 1") &&
+               ContainsInOrder(messages,
+                               "[Lifecycle Second] second unload callback completed",
+                               "[Lifecycle First] first unload callback completed") &&
+               ContainsInOrder(messages, "[Lifecycle First] first unload callback completed", "host stopped");
     }
+
     if (scenario == "missing_cvar")
     {
         return selected_profile && Contains(messages, "game adapter failed: VEngineCvar007 is unavailable") &&
             Contains(messages, "[KeelS2/bootstrap] host rejected startup");
     }
+
     if (scenario == "missing_source2_server")
     {
         return selected_profile &&
             Contains(messages, "game adapter failed: Source2Server001 is unavailable") &&
             Contains(messages, "[KeelS2/bootstrap] host rejected startup");
     }
+
     if (scenario == "missing_game_clients")
     {
         return selected_profile &&
             Contains(messages, "game adapter failed: Source2GameClients001 is unavailable") &&
             Contains(messages, "[KeelS2/bootstrap] host rejected startup");
     }
+
     if (scenario == "wrong_cvar_provenance")
     {
         return selected_profile &&
             Contains(messages, "game adapter failed: VEngineCvar007 resolves to unexpected module") &&
             Contains(messages, "[KeelS2/bootstrap] host rejected startup");
     }
+
     if (scenario == "duplicate_command")
     {
         return selected_profile &&
@@ -1612,18 +1821,21 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "[Duplicate Command Test] duplicate command rejection passed") &&
             Contains(messages, "plugin loaded: Duplicate Command Test 1");
     }
+
     if (scenario == "duplicate_plugin_name")
     {
         return selected_profile && Contains(messages, "plugin friendly name conflict \"KeelS2 Basic\"") &&
             Contains(messages, "01_basic") && Contains(messages, "02_basic") &&
             Contains(messages, "Listing 2 plugins:") && Contains(messages, " - error");
     }
+
     if (scenario == "reserved_command")
     {
         return selected_profile && Contains(messages, "cannot register reserved command \"keel\"") &&
             Contains(messages, "[Reserved Command Test] reserved command rejection passed") &&
             Contains(messages, "plugin loaded: Reserved Command Test 1");
     }
+
     if (scenario == "core_commands" || scenario == "client_console")
     {
         return selected_profile && Contains(messages, "KeelS2 Menu") &&
@@ -1650,6 +1862,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "Compatibility identity: test-fixture-") &&
             Contains(messages, "Server fingerprint: test-fixture-");
     }
+
     if (scenario == "plugin_refresh")
     {
         return selected_profile &&
@@ -1661,6 +1874,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "Unloaded plugins: 1; 0 remain loaded.") &&
             Contains(messages, "2 disabled") && Contains(messages, "host stopped");
     }
+
     if (scenario == "plugin_lifecycle")
     {
         const auto final_unload = messages.rfind("[KeelS2 Basic] unload callback completed");
@@ -1686,6 +1900,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             final_unload != std::string::npos && host_stopped != std::string::npos &&
             final_unload < host_stopped;
     }
+
     if (scenario == "command_removal")
     {
         return selected_profile &&
@@ -1693,6 +1908,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "[KeelS2 Basic] unload callback completed") &&
             !Contains(messages, "Could not unregister the keel_test command.");
     }
+
     if (scenario == "plugin_index_compaction")
     {
         return selected_profile &&
@@ -1708,6 +1924,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             ContainsInOrder(messages, "[KeelS2] plugin unloaded: [02] Lifecycle Second", "  [02] Lifecycle First") &&
             !Contains(messages, "Plugin [04]");
     }
+
     if (scenario == "factories" || scenario == "factory_wrong_name" ||
         scenario == "factory_failed_load" || scenario == "factory_reload")
     {
@@ -1715,6 +1932,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "factory fixture unloaded") && Contains(messages, "host stopped") &&
             !Contains(messages, "factory check failed");
     }
+
     if (scenario == "source2_service")
     {
         return selected_profile &&
@@ -1731,6 +1949,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "Source 2 interface gateway runtime validation failed") &&
             !Contains(messages, "Source 2 interface view remained active during unload");
     }
+
     if (scenario == "schema_entity_service")
     {
         return selected_profile &&
@@ -1753,6 +1972,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "wrong-thread access was accepted") &&
             !Contains(messages, "view remained active during unload");
     }
+
     if (scenario == "lifecycle_service")
     {
         return selected_profile &&
@@ -1778,6 +1998,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "[Lifecycle Test] removed subscription dispatched") &&
             !Contains(messages, "[Lifecycle Test] callback entered during load");
     }
+
     if (scenario == "source2_callbacks")
     {
         return selected_profile &&
@@ -1822,6 +2043,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "Source 2 callback recursion limit reached") &&
             !Contains(messages, "plugin threw during a Source 2 callback");
     }
+
     if (scenario == "authoring_concurrency")
     {
         return selected_profile &&
@@ -1831,6 +2053,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Count(messages, "plugin unloaded: [01] Authoring Concurrency Test") == 1 &&
             Contains(messages, "host stopped");
     }
+
     if (scenario == "convar_service")
     {
         return selected_profile &&
@@ -1847,6 +2070,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "host stopped") &&
             !Contains(messages, "native resources could not be rolled back");
     }
+
     if (scenario == "convar_failed_load")
     {
         return selected_profile &&
@@ -1857,6 +2081,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "native resources could not be rolled back") &&
             Contains(messages, "host stopped");
     }
+
     if (scenario == "clean_sample")
     {
         return selected_profile && Contains(messages, "plugin loaded: KeelS2 Sample 1.0.0") &&
@@ -1865,6 +2090,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "mp_limitteams changed slot=0 old=2 new=3") &&
             Contains(messages, "host stopped") && !Contains(messages, "plugin load was rejected");
     }
+
     if (scenario == "convar_facade")
     {
         return selected_profile &&
@@ -1904,6 +2130,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "exception escaped a ConVar callback") &&
             !Contains(messages, "plugin threw during a Source 2 callback");
     }
+
     if (scenario == "convar_native_access")
     {
         return selected_profile &&
@@ -1915,6 +2142,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "plugin load was rejected") &&
             !Contains(messages, "native resources could not be rolled back");
     }
+
     if (scenario == "convar_authoring")
     {
         return selected_profile &&
@@ -1933,6 +2161,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "exception escaped a ConVar callback") &&
             !Contains(messages, "plugin threw during a ConVar callback");
     }
+
     if (scenario == "lifecycle_pre_init")
     {
         return selected_profile &&
@@ -1948,6 +2177,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "host stopped") &&
             !Contains(messages, "[Lifecycle Test] callback entered during load");
     }
+
     if (scenario == "failed_server_init")
     {
         return selected_profile &&
@@ -1955,6 +2185,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "host stopped") &&
             !Contains(messages, "host module retained");
     }
+
     if (scenario == "missing_game_event_capture")
     {
         return selected_profile &&
@@ -1965,6 +2196,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Contains(messages, "host stopped") &&
             !Contains(messages, "host module retained");
     }
+
     if (scenario == "lifecycle_failed_load")
     {
         return selected_profile &&
@@ -1988,32 +2220,35 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "native resources could not be rolled back") &&
             Contains(messages, "host stopped");
     }
+
     if (scenario == "keelhook")
     {
-        return selected_profile &&
-            Contains(messages, "descriptor and service-query fuzz passed") &&
-            Contains(messages, "scalar direct-call service contract passed") &&
-            Contains(messages, "[KeelHook Target Fixture] resolver and incompatible-prototype checks passed") &&
-            Contains(messages, "callbacks remained staged until plugin activation") &&
-            Contains(messages, "[KeelHook Peer Fixture] shared physical target joined") &&
-            Contains(messages, "[KeelHook Peer Fixture] shared typed lease reset and reuse passed") &&
-            Contains(messages, "[KeelHook Peer Fixture] shared typed callbacks dispatched independently") &&
-            Contains(messages, "plugin unload is busy in KeelHook: KeelHook Target Fixture") &&
-            Contains(messages, "object lifetimes, reference returns, and vafmt forwarding passed") &&
-            Contains(messages, "detour, virtual scopes, aggregate calls, ordering, recursion, action semantics, explicit control, and concurrency passed") &&
-            Contains(messages, "plugin paused: [01] KeelHook Target Fixture") &&
-            Contains(messages, "plugin resumed: [01] KeelHook Target Fixture") &&
-            Contains(messages, "peer unload callback ran after automatic cleanup") &&
-            Contains(messages, "peer cleanup and last-callback restoration passed") &&
-            Contains(messages, "dispatch benchmark ns/call: no-hook=") &&
-            Contains(messages, "callback restoration retry semantics passed") &&
-            Contains(messages, "automatic target-owner cleanup passed before module unload") &&
-            Contains(messages, "concurrent unload probe armed") &&
-            Contains(messages, "concurrent callback retained host API access during unload") &&
-            Count(messages, "plugin loaded:") == 2 && Count(messages, "plugin unloaded:") == 2 &&
-            Count(messages, "KeelHook: target is already managed with an incompatible prototype") == 2 &&
-            !Contains(messages, "automatic target-owner cleanup failed");
+        return selected_profile && Contains(messages, "descriptor and service-query fuzz passed") &&
+               Contains(messages, "scalar direct-call service contract passed") &&
+               Contains(messages, "[KeelHook Target Fixture] resolver and incompatible-prototype checks passed") &&
+               Contains(messages, "callbacks remained staged until plugin activation") &&
+               Contains(messages, "[KeelHook Peer Fixture] shared physical target joined") &&
+               Contains(messages, "[KeelHook Peer Fixture] shared typed lease reset and reuse passed") &&
+               Contains(messages, "[KeelHook Peer Fixture] shared typed callbacks dispatched independently") &&
+               Contains(messages, "plugin unload is busy in KeelHook: KeelHook Target Fixture") &&
+               Contains(messages, "object lifetimes, reference returns, and vafmt forwarding passed") &&
+               Contains(
+                   messages,
+                   "detour, virtual scopes, aggregate calls, ordering, recursion, action semantics, explicit control, and concurrency passed") &&
+               Contains(messages, "plugin paused: [01] KeelHook Target Fixture") &&
+               Contains(messages, "plugin resumed: [01] KeelHook Target Fixture") &&
+               Contains(messages, "peer unload callback ran after automatic cleanup") &&
+               Contains(messages, "peer cleanup and last-callback restoration passed") &&
+               Contains(messages, "dispatch benchmark ns/call: no-hook=") &&
+               Contains(messages, "callback restoration retry semantics passed") &&
+               Contains(messages, "automatic target-owner cleanup passed before module unload") &&
+               Contains(messages, "concurrent unload probe armed") &&
+               Contains(messages, "concurrent callback retained host API access during unload") &&
+               Count(messages, "plugin loaded:") == 2 && Count(messages, "plugin unloaded:") == 2 &&
+               Count(messages, "KeelHook: target is already managed with an incompatible prototype") == 2 &&
+               !Contains(messages, "automatic target-owner cleanup failed");
     }
+
     if (scenario == "keelhook_shutdown_retry")
     {
         return selected_profile &&
@@ -2025,6 +2260,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             Count(messages, "plugin loaded:") == 2 && Count(messages, "plugin unloaded:") == 2 &&
             !Contains(messages, "automatic target-owner cleanup failed");
     }
+
     if (scenario == "plugin_runtime_service")
     {
         return selected_profile &&
@@ -2045,6 +2281,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "did not report busy") &&
             !Contains(messages, "snapshot failed");
     }
+
     if (scenario == "plugin_runtime_concurrency")
     {
         return selected_profile &&
@@ -2063,6 +2300,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "did not report busy") &&
             !Contains(messages, "snapshot failed");
     }
+
     if (scenario == "plugin_transition_shutdown_retry")
     {
         return selected_profile &&
@@ -2077,63 +2315,65 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "invalid event") &&
             !Contains(messages, "snapshot failed");
     }
+
     if (scenario == "plugin_dependencies")
     {
-        return selected_profile &&
-            Count(messages, "[Dependency Test] load Dependency Core") == 1 &&
-            Count(messages, "[Dependency Test] load Dependency Middle") == 1 &&
-            Count(messages, "[Dependency Test] load Dependency Leaf") == 1 &&
-            ContainsInOrder(
-                messages,
-                "[Dependency Test] load Dependency Core",
-                "[Dependency Test] load Dependency Middle") &&
-            ContainsInOrder(
-                messages,
-                "[Dependency Test] load Dependency Middle",
-                "[Dependency Test] load Dependency Leaf") &&
-            Contains(messages, "Dependency Missing: missing dependency Not Installed 1.0.0") &&
-            Contains(messages, "Dependency Mismatch: dependency version mismatch for Dependency Core: found 1.2.3, required 9.9.9") &&
-            Count(messages, "dependency cycle detected") == 2 &&
-            Contains(messages, "Dependency Self: plugin cannot depend on itself") &&
-            Contains(messages, "dependency manifest is incompatible") &&
-            Contains(messages, "plugin pause is blocked by running dependent Dependency Middle: Dependency Core") &&
-            Contains(messages, "plugin unload is blocked by dependent Dependency Middle: Dependency Core") &&
-            Contains(messages, "plugin pause is blocked by running dependent Dependency Leaf: Dependency Middle") &&
-            Contains(messages, "plugin paused: [") &&
-            Contains(messages, "] Dependency Core") &&
-            Contains(messages, "plugin resume was rejected: Dependency Leaf: dependency is not running: Dependency Middle") &&
-            Contains(messages, "plugin resume was rejected: Dependency Middle: dependency is not running: Dependency Core") &&
-            Contains(messages, "plugin resumed: [") &&
-            ContainsInOrder(
-                messages,
-                "[Dependency Test] unload Dependency Leaf",
-                "[Dependency Test] unload Dependency Middle") &&
-            ContainsInOrder(
-                messages,
-                "[Dependency Test] unload Dependency Middle",
-                "[Dependency Test] unload Dependency Core") &&
-            !Contains(messages, "[Dependency Test] load Dependency Missing") &&
-            !Contains(messages, "[Dependency Test] load Dependency Mismatch") &&
-            !Contains(messages, "[Dependency Test] load Dependency Cycle") &&
-            !Contains(messages, "[Dependency Test] load Dependency Self") &&
-            !Contains(messages, "[Dependency Test] load Dependency Malformed") &&
-            Contains(messages, "host stopped");
+        return selected_profile && Count(messages, "[Dependency Test] load Dependency Core") == 1 &&
+               Count(messages, "[Dependency Test] load Dependency Middle") == 1 &&
+               Count(messages, "[Dependency Test] load Dependency Leaf") == 1 &&
+               ContainsInOrder(
+                   messages, "[Dependency Test] load Dependency Core", "[Dependency Test] load Dependency Middle") &&
+               ContainsInOrder(
+                   messages, "[Dependency Test] load Dependency Middle", "[Dependency Test] load Dependency Leaf") &&
+               Contains(messages, "Dependency Missing: missing dependency Not Installed 1.0.0") &&
+               Contains(
+                   messages,
+                   "Dependency Mismatch: dependency version mismatch for Dependency Core: found 1.2.3, required 9.9.9") &&
+               Count(messages, "dependency cycle detected") == 2 &&
+               Contains(messages, "Dependency Self: plugin cannot depend on itself") &&
+               Contains(messages, "dependency manifest is incompatible") &&
+               Contains(messages, "plugin pause is blocked by running dependent Dependency Middle: Dependency Core") &&
+               Contains(messages, "plugin unload is blocked by dependent Dependency Middle: Dependency Core") &&
+               Contains(messages, "plugin pause is blocked by running dependent Dependency Leaf: Dependency Middle") &&
+               Contains(messages, "plugin paused: [") && Contains(messages, "] Dependency Core") &&
+               Contains(messages,
+                        "plugin resume was rejected: Dependency Leaf: dependency is not running: Dependency Middle") &&
+               Contains(messages,
+                        "plugin resume was rejected: Dependency Middle: dependency is not running: Dependency Core") &&
+               Contains(messages, "plugin resumed: [") &&
+               ContainsInOrder(messages,
+                               "[Dependency Test] unload Dependency Leaf",
+                               "[Dependency Test] unload Dependency Middle") &&
+               ContainsInOrder(messages,
+                               "[Dependency Test] unload Dependency Middle",
+                               "[Dependency Test] unload Dependency Core") &&
+               !Contains(messages, "[Dependency Test] load Dependency Missing") &&
+               !Contains(messages, "[Dependency Test] load Dependency Mismatch") &&
+               !Contains(messages, "[Dependency Test] load Dependency Cycle") &&
+               !Contains(messages, "[Dependency Test] load Dependency Self") &&
+               !Contains(messages, "[Dependency Test] load Dependency Malformed") && Contains(messages, "host stopped");
     }
+
     if (scenario == "published_services")
     {
-        return selected_profile &&
-            Contains(messages, "[Published Service Provider] versioned service published") &&
-            Contains(messages, "[Published Service Consumer] versioned service consumed") &&
-            Contains(messages, "plugin pause is blocked by running dependent Published Service Consumer: Published Service Provider") &&
-            Contains(messages, "plugin unload is blocked by dependent Published Service Consumer: Published Service Provider") &&
-            Contains(messages, "plugin reload is blocked by dependent Published Service Consumer: Published Service Provider") &&
-            Contains(messages, "[Published Service Consumer] service lease released") &&
-            Contains(messages, "[Published Service Provider] provider unloaded after publication withdrawal") &&
-            Contains(messages, "[Published Service Consumer] withdrawn service is no longer queryable") &&
-            !Contains(messages, "service lease release failed") &&
-            !Contains(messages, "withdrawn service remained queryable") &&
-            Contains(messages, "host stopped");
+        return selected_profile && Contains(messages, "[Published Service Provider] versioned service published") &&
+               Contains(messages, "[Published Service Consumer] versioned service consumed") &&
+               Contains(
+                   messages,
+                   "plugin pause is blocked by running dependent Published Service Consumer: Published Service Provider") &&
+               Contains(
+                   messages,
+                   "plugin unload is blocked by dependent Published Service Consumer: Published Service Provider") &&
+               Contains(
+                   messages,
+                   "plugin reload is blocked by dependent Published Service Consumer: Published Service Provider") &&
+               Contains(messages, "[Published Service Consumer] service lease released") &&
+               Contains(messages, "[Published Service Provider] provider unloaded after publication withdrawal") &&
+               Contains(messages, "[Published Service Consumer] withdrawn service is no longer queryable") &&
+               !Contains(messages, "service lease release failed") &&
+               !Contains(messages, "withdrawn service remained queryable") && Contains(messages, "host stopped");
     }
+
     if (scenario == "reload_retry")
     {
         return selected_profile &&
@@ -2145,6 +2385,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "plugin reload and rollback both failed") &&
             Contains(messages, "host stopped");
     }
+
     if (scenario == "abi_v4_compatibility")
     {
         return selected_profile &&
@@ -2155,6 +2396,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
                 "[KeelS2 ABI 4 Fixture] frozen ABI 4 fixture unloaded",
                 "host stopped");
     }
+
     if (scenario == "unload_preparation")
     {
         return selected_profile &&
@@ -2169,6 +2411,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "cleanup acquired a new ConVar") &&
             !Contains(messages, "cleanup lost native access") && Contains(messages, "host stopped");
     }
+
     if (scenario == "success")
     {
         return selected_profile && Contains(messages, "plugin loaded: KeelS2 Basic 1.0.0") &&
@@ -2177,6 +2420,7 @@ bool ValidateMessages(const std::string& scenario, const std::string& messages)
             !Contains(messages, "[KeelS2] [INFO]") &&
             ContainsInOrder(messages, "[KeelS2 Basic] unload callback completed", "host stopped");
     }
+
     return false;
 }
 
@@ -2275,6 +2519,7 @@ int main(int argument_count, char** arguments)
     const bool factories = scenario == "factories" || scenario == "factory_pin" ||
         scenario == "factory_pin_race" || scenario == "factory_wrong_name" ||
         scenario == "factory_failed_load" || scenario == "factory_reload";
+
     const bool source2_service = scenario == "source2_service";
     const bool schema_entity_service = scenario == "schema_entity_service";
     const bool lifecycle_service = scenario == "lifecycle_service";
@@ -2290,6 +2535,7 @@ int main(int argument_count, char** arguments)
     const bool plugin_runtime_concurrency = scenario == "plugin_runtime_concurrency";
     const bool plugin_transition_shutdown_retry =
         scenario == "plugin_transition_shutdown_retry";
+
     const bool plugin_dependencies = scenario == "plugin_dependencies";
     const bool published_services = scenario == "published_services";
     const bool reload_retry = scenario == "reload_retry";
@@ -2302,6 +2548,7 @@ int main(int argument_count, char** arguments)
     const bool keelhook_shutdown_retry = scenario == "keelhook_shutdown_retry";
     const bool unload_preparation = scenario == "unload_preparation";
     const bool success = scenario == "success";
+
     if (!missing_server && !unknown_build && !missing_host && !missing_plugin &&
         !invalid_plugin && !failed_plugin_load && !reverse_unload && !missing_cvar &&
         !missing_source2_server && !missing_game_clients && !wrong_cvar_provenance &&
@@ -2324,55 +2571,72 @@ int main(int argument_count, char** arguments)
 
     keels2::platform::DynamicLibrary fake_tier0;
     std::string loader_error;
+
     if (!fake_tier0.Open(fake_tier0_source, loader_error))
     {
         return 3;
     }
+
     using MessagesFunction = const char* (*)();
     using ClearMessagesFunction = void (*)();
     const auto messages = reinterpret_cast<MessagesFunction>(fake_tier0.Symbol("KeelTest_Messages"));
     const auto clear_messages = reinterpret_cast<ClearMessagesFunction>(fake_tier0.Symbol("KeelTest_ClearMessages"));
+
     if (!messages || !clear_messages)
     {
         return 4;
     }
+
     clear_messages();
     g_cvar.Reset();
     keels2::platform::DynamicLibrary schema_entity_fixture;
+
     if (!schema_entity_fixture.Open(schema_entity_fixture_source, loader_error))
     {
         return 123;
     }
+
     using InterfaceFunction = void* (*)();
     using SchemaEntityVoidFunction = void (*)();
     using SchemaEntityReadyFunction = void (*)(bool);
     using SchemaEntityCountFunction = std::uint32_t (*)();
     const auto schema_system = reinterpret_cast<InterfaceFunction>(
         schema_entity_fixture.Symbol("KeelTest_SchemaSystem"));
+
     const auto game_resource = reinterpret_cast<InterfaceFunction>(
         schema_entity_fixture.Symbol("KeelTest_GameResourceService"));
+
     const auto reset_schema_entities = reinterpret_cast<SchemaEntityVoidFunction>(
         schema_entity_fixture.Symbol("KeelTest_ResetSchemaEntities"));
+
     const auto set_entity_system_ready = reinterpret_cast<SchemaEntityReadyFunction>(
         schema_entity_fixture.Symbol("KeelTest_SetEntitySystemReady"));
+
     const auto destroy_entity = reinterpret_cast<SchemaEntityVoidFunction>(
         schema_entity_fixture.Symbol("KeelTest_DestroyEntity"));
+
     const auto reuse_entity = reinterpret_cast<SchemaEntityVoidFunction>(
         schema_entity_fixture.Symbol("KeelTest_ReuseEntity"));
+
     const auto schema_lookup_count = reinterpret_cast<SchemaEntityCountFunction>(
         schema_entity_fixture.Symbol("KeelTest_SchemaLookupCount"));
+
     if (!schema_system || !game_resource || !reset_schema_entities ||
         !set_entity_system_ready || !destroy_entity || !reuse_entity ||
         !schema_lookup_count)
     {
         return 124;
     }
+
     const auto console_engine = reinterpret_cast<InterfaceFunction>(
         schema_entity_fixture.Symbol("KeelTest_ConsoleEngine"));
+
     const auto console_output = reinterpret_cast<const char* (*)(int)>(
         schema_entity_fixture.Symbol("KeelTest_ConsoleOutput"));
+
     const auto reset_console = reinterpret_cast<SchemaEntityVoidFunction>(
         schema_entity_fixture.Symbol("KeelTest_ResetConsoleOutput"));
+
     if (client_console || plugin_refresh || convar_facade || clean_sample)
     {
         if (!console_engine || !console_output || !reset_console ||
@@ -2381,36 +2645,45 @@ int main(int argument_count, char** arguments)
             return 160;
         }
     }
+
     reset_schema_entities();
     g_schema_system_interface = schema_system();
     g_game_resource_interface = game_resource();
+
     if (!g_schema_system_interface || !g_game_resource_interface)
     {
         return 125;
     }
+
     if (!ResetEngineAllocatorDiagnostics())
     {
         return 103;
     }
+
     if ((convar_service || convar_failed_load) &&
         !g_cvar.SeedInt32("sv_keels2_existing", 42))
     {
         return 74;
     }
+
     if ((convar_facade || convar_authoring || clean_sample) &&
         !g_cvar.SeedInt32("mp_limitteams", 2))
     {
         return 74;
     }
+
     std::array<void*, keels2::cs2::kUnregisterConCommandSlot + 1> foreign_cvar_vtable{};
     void** foreign_cvar_vptr{};
+
     if (wrong_cvar_provenance)
     {
         void* foreign_target = fake_tier0.Symbol("Msg");
+
         if (!foreign_target)
         {
             return 45;
         }
+
         foreign_cvar_vtable.fill(foreign_target);
         foreign_cvar_vptr = foreign_cvar_vtable.data();
         g_cvar_override = &foreign_cvar_vptr;
@@ -2418,6 +2691,7 @@ int main(int argument_count, char** arguments)
 
     std::error_code error;
     std::filesystem::remove_all(fixture, error);
+
     if (missing_source2_server || missing_game_clients)
     {
 #if defined(_WIN32)
@@ -2434,6 +2708,7 @@ int main(int argument_count, char** arguments)
             return 42;
         }
     }
+
     if (reverse_unload)
     {
 #if defined(_WIN32)
@@ -2445,6 +2720,7 @@ int main(int argument_count, char** arguments)
             return 39;
         }
     }
+
     if (lifecycle_failed_load)
     {
 #if defined(_WIN32)
@@ -2456,6 +2732,7 @@ int main(int argument_count, char** arguments)
             return 55;
         }
     }
+
     if (lifecycle_pre_init)
     {
 #if defined(_WIN32)
@@ -2467,6 +2744,7 @@ int main(int argument_count, char** arguments)
             return 63;
         }
     }
+
     if (failed_server_init)
     {
 #if defined(_WIN32)
@@ -2478,6 +2756,7 @@ int main(int argument_count, char** arguments)
             return 64;
         }
     }
+
     if (missing_game_event_capture)
     {
 #if defined(_WIN32)
@@ -2489,6 +2768,7 @@ int main(int argument_count, char** arguments)
             return 120;
         }
     }
+
     if (convar_failed_load)
     {
 #if defined(_WIN32)
@@ -2500,6 +2780,7 @@ int main(int argument_count, char** arguments)
             return 75;
         }
     }
+
     const auto normal_proxy_path = fixture / "game" / "csgo" / "addons" / "keels2" / "bin" / platform / server_name;
     const auto proxy_path = invalid_layout ? fixture / "invalid" / "bin" / platform / server_name : normal_proxy_path;
     const auto host_path = normal_proxy_path.parent_path() / host_name;
@@ -2508,36 +2789,52 @@ int main(int argument_count, char** arguments)
     const auto plugin_directory = fixture / "game" / "csgo" / "addons" / "keels2" / "plugins" / platform;
     const auto lifecycle_plugin_path =
         plugin_directory / (std::string("01_lifecycle_service") + plugin_extension);
+
     const auto authoring_concurrency_plugin_path =
         plugin_directory / (std::string("01_authoring_concurrency") + plugin_extension);
+
     const auto convar_plugin_path =
         plugin_directory / (std::string("01_convar_service") + plugin_extension);
+
     const auto convar_facade_plugin_path =
         plugin_directory / (std::string("01_convar_facade") + plugin_extension);
+
     const auto native_convar_provider_path =
         plugin_directory / (std::string("01_native_convar_provider") + plugin_extension);
+
     const auto native_convar_consumer_path =
         plugin_directory / (std::string("02_native_convar_consumer") + plugin_extension);
+
     const auto convar_authoring_plugin_path =
         plugin_directory / (std::string("01_convar_authoring") + plugin_extension);
+
     const auto plugin_runtime_service_path =
         plugin_directory / (std::string("01_plugin_runtime") + plugin_extension);
+
     const auto source2_callbacks_first_path =
         plugin_directory / (std::string("01_source2_callbacks_first") + plugin_extension);
+
     const auto source2_callbacks_second_path =
         plugin_directory / (std::string("02_source2_callbacks_second") + plugin_extension);
+
     const auto source2_callbacks_peer_path =
         plugin_directory / (std::string("03_source2_callbacks_peer") + plugin_extension);
+
     const auto schema_entity_service_path =
         plugin_directory / (std::string("01_schema_entity_service") + plugin_extension);
+
     const auto published_service_provider_path =
         plugin_directory / (std::string("01_published_service_provider") + plugin_extension);
+
     const auto published_service_consumer_path =
         plugin_directory / (std::string("02_published_service_consumer") + plugin_extension);
+
     const auto reload_retry_path =
         plugin_directory / (std::string("01_retry") + plugin_extension);
+
     const auto abi_v4_fixture_path =
         plugin_directory / (std::string("01_abi_v4_fixture") + plugin_extension);
+
     const auto real_server_path = fixture / "game" / "csgo" / "bin" / platform / server_name;
     const auto& proxy_source = unknown_build ? production_proxy_source : test_proxy_source;
 
@@ -2545,63 +2842,75 @@ int main(int argument_count, char** arguments)
     {
         return 5;
     }
+
     if (!missing_server && !CopyFile(real_server_source, real_server_path))
     {
         return 6;
     }
+
     if (!missing_server && !unknown_build && !missing_host &&
         (!CopyFile(host_source, host_path) || !CopyFile(adapter_source, adapter_path) ||
             !CopyFile(host_source.parent_path()/keyvalues_name,adapter_path.parent_path()/keyvalues_name)))
     {
         return 7;
     }
+
     if (missing_plugin)
     {
         std::filesystem::create_directories(plugin_directory, error);
+
         if (error)
         {
             return 8;
         }
     }
+
     if ((success || unload_preparation || core_commands || plugin_lifecycle || plugin_refresh || command_removal ||
          plugin_index_compaction) &&
         !CopyFile(plugin_source, plugin_directory / (std::string("01_basic") + plugin_extension)))
     {
         return 9;
     }
+
     if (invalid_plugin &&
         !CopyFile(invalid_plugin_source, plugin_directory / (std::string("invalid") + plugin_extension)))
     {
         return 10;
     }
+
     if (failed_plugin_load &&
         !CopyFile(failing_plugin_source, plugin_directory / (std::string("failing") + plugin_extension)))
     {
         return 11;
     }
+
     if (duplicate_command &&
         (!CopyFile(plugin_source, plugin_directory / (std::string("01_basic") + plugin_extension)) ||
          !CopyFile(duplicate_command_source, plugin_directory / (std::string("02_duplicate_command") + plugin_extension))))
     {
         return 12;
     }
+
     if (duplicate_plugin_name &&
         (!CopyFile(plugin_source, plugin_directory / (std::string("01_basic") + plugin_extension)) ||
          !CopyFile(plugin_source, plugin_directory / (std::string("02_basic") + plugin_extension))))
     {
         return 13;
     }
+
     if ((reverse_unload || core_commands || plugin_index_compaction) &&
         (!CopyFile(lifecycle_first_source, plugin_directory / (std::string("02_lifecycle_first") + plugin_extension)) ||
          !CopyFile(lifecycle_second_source, plugin_directory / (std::string("03_lifecycle_second") + plugin_extension))))
     {
         return 14;
     }
+
     if (reserved_command &&
         !CopyFile(reserved_command_source, plugin_directory / (std::string("reserved") + plugin_extension)))
     {
         return 15;
     }
+
     if ((keelhook || keelhook_shutdown_retry) &&
         (!CopyFile(
             keelhook_target_source,
@@ -2612,11 +2921,13 @@ int main(int argument_count, char** arguments)
     {
         return 36;
     }
+
     if (factories && !CopyFile(factory_plugin_source,
             plugin_directory / (std::string("01_factory") + plugin_extension)))
     {
         return 150;
     }
+
     if (scenario == "factory_failed_load")
     {
 #if defined(_WIN32)
@@ -2625,6 +2936,7 @@ int main(int argument_count, char** arguments)
         setenv("KEELS2_FACTORY_FAIL_LOAD", "1", 1);
 #endif
     }
+
     if (source2_service &&
         !CopyFile(
             source2_service_source,
@@ -2632,11 +2944,13 @@ int main(int argument_count, char** arguments)
     {
         return 43;
     }
+
     if (schema_entity_service &&
         !CopyFile(schema_entity_service_source, schema_entity_service_path))
     {
         return 126;
     }
+
     if ((lifecycle_service || lifecycle_pre_init || lifecycle_failed_load) &&
         !CopyFile(
             lifecycle_service_source,
@@ -2644,35 +2958,42 @@ int main(int argument_count, char** arguments)
     {
         return 46;
     }
+
     if (authoring_concurrency &&
         !CopyFile(authoring_concurrency_source, authoring_concurrency_plugin_path))
     {
         return 68;
     }
+
     if ((convar_service || convar_failed_load) &&
         !CopyFile(convar_service_source, convar_plugin_path))
     {
         return 76;
     }
+
     if (convar_facade && !CopyFile(convar_facade_source, convar_facade_plugin_path))
     {
         return 92;
     }
+
     if (clean_sample && !CopyFile(clean_sample_source, convar_facade_plugin_path))
     {
         return 168;
     }
+
     if (convar_native_access &&
         (!CopyFile(native_convar_provider_source, native_convar_provider_path) ||
          !CopyFile(native_convar_consumer_source, native_convar_consumer_path)))
     {
         return 135;
     }
+
     if (convar_authoring &&
         !CopyFile(convar_authoring_source, convar_authoring_plugin_path))
     {
         return 135;
     }
+
     if ((plugin_runtime_service || plugin_runtime_concurrency ||
             plugin_transition_shutdown_retry) &&
         (!CopyFile(plugin_runtime_service_source, plugin_runtime_service_path) ||
@@ -2681,6 +3002,7 @@ int main(int argument_count, char** arguments)
     {
         return 93;
     }
+
     if (plugin_dependencies &&
         (!CopyFile(dependency_leaf_source,
              plugin_directory / (std::string("01_dependency_leaf") + plugin_extension)) ||
@@ -2703,6 +3025,7 @@ int main(int argument_count, char** arguments)
     {
         return 95;
     }
+
     if (source2_callbacks &&
         (!CopyFile(source2_callbacks_first_source, source2_callbacks_first_path) ||
          !CopyFile(source2_callbacks_second_source, source2_callbacks_second_path) ||
@@ -2710,27 +3033,33 @@ int main(int argument_count, char** arguments)
     {
         return 108;
     }
+
     if (published_services &&
         (!CopyFile(published_service_provider_source, published_service_provider_path) ||
          !CopyFile(published_service_consumer_source, published_service_consumer_path)))
     {
         return 142;
     }
+
     if (reload_retry && !CopyFile(failing_plugin_source, reload_retry_path))
     {
         return 144;
     }
+
     if (abi_v4_compatibility && !CopyFile(abi_v4_fixture_source, abi_v4_fixture_path))
     {
         return 146;
     }
 
     keels2::platform::DynamicLibrary proxy;
+
     if (!proxy.Open(proxy_path, loader_error))
     {
         return 16;
     }
+
     const auto factory = reinterpret_cast<KeelCreateInterfaceFn>(proxy.Symbol("CreateInterface"));
+
     if (!factory)
     {
         return 17;
@@ -2738,20 +3067,25 @@ int main(int argument_count, char** arguments)
 
     int return_code = 0;
     void* config = factory("Source2ServerConfig001", &return_code);
+
     if (missing_server)
     {
         if (config || return_code != 1)
         {
             return 18;
         }
+
         return_code = 0;
+
         if (factory("Source2Server001", &return_code) || return_code != 1)
         {
             return 19;
         }
+
         const char* output = messages();
         return output && ValidateMessages(scenario, output) ? 0 : 20;
     }
+
     if (unknown_build && !VtableEntryBelongsTo(config, 0, real_server_path))
     {
         return 21;
@@ -2761,6 +3095,7 @@ int main(int argument_count, char** arguments)
     g_expose_sample_engine = convar_facade || clean_sample;
     using ConnectFunction = bool (*)(void*, KeelCreateInterfaceFn);
     const auto connect = config ? VtableFunction<ConnectFunction>(config, 0) : nullptr;
+
     if (!config || return_code != 0 || !connect || !connect(config, &EngineFactory))
     {
         return 22;
@@ -2769,16 +3104,20 @@ int main(int argument_count, char** arguments)
     void* server = factory("Source2Server001", &return_code);
     using InitFunction = int (*)(void*);
     const auto init = server ? VtableFunction<InitFunction>(server, 3) : nullptr;
+
     if (unknown_build && !VtableEntryBelongsTo(server, 3, real_server_path))
     {
         return 23;
     }
+
     if (!server || return_code != 0 || !init)
     {
         return 24;
     }
+
     const int init_result = init(server);
     const bool expected_init_failure = failed_server_init || missing_game_event_capture;
+
     if ((!expected_init_failure && init_result != 1) ||
         (expected_init_failure && init_result != 0))
     {
@@ -2789,11 +3128,13 @@ int main(int argument_count, char** arguments)
     {
         using DisconnectFunction = void (*)(void*);
         const auto disconnect = VtableFunction<DisconnectFunction>(config, 1);
+
         if (!disconnect || g_cvar.register_count != 1 || g_cvar.ActiveCount() != 0 ||
             g_cvar.unregister_count != 1)
         {
             return 65;
         }
+
         disconnect(config);
 #if defined(_WIN32)
         const int clear_result = _putenv_s(
@@ -2808,14 +3149,17 @@ int main(int argument_count, char** arguments)
                 : "KEELS2_TEST_SKIP_GAME_EVENT_LOAD");
 #endif
         const char* output = messages();
+
         if (clear_result != 0 || !output || !ValidateMessages(scenario, output))
         {
             if (output)
             {
                 std::fputs(output, stderr);
             }
+
             return 66;
         }
+
         return 0;
     }
 
@@ -2849,6 +3193,7 @@ int main(int argument_count, char** arguments)
     Source2CountFunction game_event_add_count{};
     Source2CountFunction game_event_remove_count{};
     Source2BoolFunction game_event_listener_active{};
+
     if (lifecycle_service || lifecycle_failed_load || authoring_concurrency ||
         source2_callbacks || convar_facade || clean_sample || schema_entity_service || source2_service || unload_preparation)
     {
@@ -2856,39 +3201,55 @@ int main(int argument_count, char** arguments)
         {
             return 47;
         }
+
         dispatch_lifecycle = reinterpret_cast<DispatchLifecycleFunction>(
             lifecycle_fixture.Symbol("KeelTest_DispatchLifecycle"));
+
         lifecycle_call_count = reinterpret_cast<LifecycleCallCountFunction>(
             lifecycle_fixture.Symbol("KeelTest_LifecycleCallCount"));
+
         reset_lifecycle_calls = reinterpret_cast<ResetLifecycleCallsFunction>(
             lifecycle_fixture.Symbol("KeelTest_ResetLifecycleCalls"));
+
         if (!dispatch_lifecycle || !lifecycle_call_count || !reset_lifecycle_calls)
         {
             return 48;
         }
+
         reset_lifecycle_calls();
+
         if (source2_callbacks || convar_facade || clean_sample)
         {
             dispatch_client_connect = reinterpret_cast<DispatchClientConnectFunction>(
                 lifecycle_fixture.Symbol("KeelTest_DispatchClientConnect"));
+
             dispatch_client_command = reinterpret_cast<DispatchClientCommandFunction>(
                 lifecycle_fixture.Symbol("KeelTest_DispatchClientCommand"));
+
             rejection_message = reinterpret_cast<RejectionMessageFunction>(
                 lifecycle_fixture.Symbol("KeelTest_RejectionMessage"));
+
             client_connect_original_calls = reinterpret_cast<OriginalCallCountFunction>(
                 lifecycle_fixture.Symbol("KeelTest_ClientConnectOriginalCalls"));
+
             client_command_original_calls = reinterpret_cast<OriginalCallCountFunction>(
                 lifecycle_fixture.Symbol("KeelTest_ClientCommandOriginalCalls"));
+
             dispatch_game_event = reinterpret_cast<DispatchGameEventFunction>(
                 lifecycle_fixture.Symbol("KeelTest_DispatchGameEvent"));
+
             game_event_load_count = reinterpret_cast<Source2CountFunction>(
                 lifecycle_fixture.Symbol("KeelTest_GameEventLoadCount"));
+
             game_event_add_count = reinterpret_cast<Source2CountFunction>(
                 lifecycle_fixture.Symbol("KeelTest_GameEventAddCount"));
+
             game_event_remove_count = reinterpret_cast<Source2CountFunction>(
                 lifecycle_fixture.Symbol("KeelTest_GameEventRemoveCount"));
+
             game_event_listener_active = reinterpret_cast<Source2BoolFunction>(
                 lifecycle_fixture.Symbol("KeelTest_GameEventListenerActive"));
+
             if (!dispatch_client_connect || !dispatch_client_command || !rejection_message ||
                 !client_connect_original_calls || !client_command_original_calls ||
                 !dispatch_game_event || !game_event_load_count || !game_event_add_count ||
@@ -2896,6 +3257,7 @@ int main(int argument_count, char** arguments)
             {
                 return 109;
             }
+
             if (source2_callbacks)
             {
                 if (!source2_callbacks_first.Open(
@@ -2904,14 +3266,19 @@ int main(int argument_count, char** arguments)
                 {
                     return 118;
                 }
+
                 source2_arm_block = reinterpret_cast<Source2VoidFunction>(
                     source2_callbacks_first.Symbol("KeelTest_Source2ArmBlock"));
+
                 source2_block_entered = reinterpret_cast<Source2BoolFunction>(
                     source2_callbacks_first.Symbol("KeelTest_Source2BlockEntered"));
+
                 source2_release_block = reinterpret_cast<Source2VoidFunction>(
                     source2_callbacks_first.Symbol("KeelTest_Source2ReleaseBlock"));
+
                 source2_unload_count = reinterpret_cast<Source2CountFunction>(
                     source2_callbacks_first.Symbol("KeelTest_Source2UnloadCount"));
+
                 if (!source2_arm_block || !source2_block_entered ||
                     !source2_release_block || !source2_unload_count)
                 {
@@ -2923,11 +3290,13 @@ int main(int argument_count, char** arguments)
 
     std::uint32_t expected_registrations{};
     std::size_t expected_active{};
+
     if (!unknown_build && !missing_host && !missing_cvar &&
         !missing_source2_server && !missing_game_clients && !wrong_cvar_provenance)
     {
         expected_registrations = 1;
         expected_active = 1;
+
         if (success || unload_preparation || duplicate_command || duplicate_plugin_name || plugin_lifecycle || plugin_refresh ||
             command_removal || source2_service || schema_entity_service || convar_facade || clean_sample)
         {
@@ -2971,11 +3340,13 @@ int main(int argument_count, char** arguments)
             expected_active = 6;
         }
     }
+
     if (g_cvar.register_count != expected_registrations || g_cvar.ActiveCount() != expected_active)
     {
         std::fputs(messages(), stderr);
         return 25;
     }
+
     if (expected_active != 0 && !g_cvar.HasActive("keel"))
     {
         return 26;
@@ -2990,6 +3361,7 @@ int main(int argument_count, char** arguments)
             return 27;
         }
     }
+
     if (missing_plugin || invalid_plugin || failed_plugin_load || duplicate_plugin_name)
     {
         if (!g_cvar.Dispatch({"keel", "plugins", "list"}))
@@ -2997,57 +3369,54 @@ int main(int argument_count, char** arguments)
             return 28;
         }
     }
+
     if (core_commands)
     {
         const bool dispatched =
-            g_cvar.Dispatch({"keel"}) &&
-            g_cvar.Dispatch({"keel", "help", "plugins"}) &&
-            g_cvar.Dispatch({"keel", "version"}) &&
-            g_cvar.Dispatch({"keel", "game"}) &&
-            g_cvar.Dispatch({"keel", "status"}) &&
-            g_cvar.Dispatch({"keel", "credits"}) &&
-            g_cvar.Dispatch({"keel", "plugins", "list"}) &&
-            g_cvar.Dispatch({"keel", "plugins", "info", "1"}) &&
+            g_cvar.Dispatch({"keel"}) && g_cvar.Dispatch({"keel", "help", "plugins"}) &&
+            g_cvar.Dispatch({"keel", "version"}) && g_cvar.Dispatch({"keel", "game"}) &&
+            g_cvar.Dispatch({"keel", "status"}) && g_cvar.Dispatch({"keel", "credits"}) &&
+            g_cvar.Dispatch({"keel", "plugins", "list"}) && g_cvar.Dispatch({"keel", "plugins", "info", "1"}) &&
             g_cvar.Dispatch({"keel", "plugins", "info", "kEeLs2 bAsIc"}) &&
             g_cvar.Dispatch({"keel", "plugins", "info", "Basic"}) &&
-            g_cvar.Dispatch({"keel", "plugins", "info", "lifecycle"}) &&
-            g_cvar.Dispatch({"keel", "plugins", "cmds"}) &&
-            g_cvar.Dispatch({"keel", "plugins", "cmds", "1"}) &&
-            g_cvar.Dispatch({"keel", "plugins", "cvars"}) &&
+            g_cvar.Dispatch({"keel", "plugins", "info", "lifecycle"}) && g_cvar.Dispatch({"keel", "plugins", "cmds"}) &&
+            g_cvar.Dispatch({"keel", "plugins", "cmds", "1"}) && g_cvar.Dispatch({"keel", "plugins", "cvars"}) &&
             g_cvar.Dispatch({"keel", "plugins", "cvars", "1"}) &&
             g_cvar.Dispatch({"keel", "plugins", "cvars", "1", "extra"}) &&
             g_cvar.Dispatch({"keel", "plugins", "refresh", "extra"}) &&
-            g_cvar.Dispatch({"keel", "plugins", "unload_all", "extra"}) &&
-            g_cvar.Dispatch({"keel", "inspect"}) &&
-            g_cvar.Dispatch({"keel", "inspect", "hooks"}) &&
-            g_cvar.Dispatch({"keel", "inspect", "interfaces"}) &&
-            g_cvar.Dispatch({"keel", "inspect", "services"}) &&
-            g_cvar.Dispatch({"keel", "inspect", "resources"}) &&
-            g_cvar.Dispatch({"keel", "inspect", "profile"}) &&
-            g_cvar.Dispatch({"keel", "nonsense"});
+            g_cvar.Dispatch({"keel", "plugins", "unload_all", "extra"}) && g_cvar.Dispatch({"keel", "inspect"}) &&
+            g_cvar.Dispatch({"keel", "inspect", "hooks"}) && g_cvar.Dispatch({"keel", "inspect", "interfaces"}) &&
+            g_cvar.Dispatch({"keel", "inspect", "services"}) && g_cvar.Dispatch({"keel", "inspect", "resources"}) &&
+            g_cvar.Dispatch({"keel", "inspect", "profile"}) && g_cvar.Dispatch({"keel", "nonsense"});
+
         if (!dispatched)
         {
             return 29;
         }
     }
+
     if (client_console)
     {
         if ((g_cvar.Flags("keel") & ((1ull << 2) | (1ull << 25))) != ((1ull << 2) | (1ull << 25)))
         {
             return 170;
         }
+
         auto* core_callback = g_cvar.Callback("keel");
+
         for (std::int32_t target = -1; target <= 3; ++target)
         {
             const std::string before(messages());
             FakeCvar::DispatchCallback(core_callback, {"keel", "inspect", "hooks"}, -1, target);
             const std::string after(messages());
+
             if (after.find("Hook inspection complete", before.size()) == std::string::npos)
             {
                 std::fprintf(stderr, "server command was rejected for target %d\n", target);
                 return 171;
             }
         }
+
         const auto client = [&](std::initializer_list<const char*> command_arguments, int slot = 0) {
             reset_console();
             FakeCvar::DispatchCallback(core_callback, command_arguments, slot);
@@ -3058,6 +3427,7 @@ int main(int argument_count, char** arguments)
         const auto plugins = client({"keel", "plugins"});
         const auto version = client({"keel", "version"});
         const auto credits = client({"keel", "credits"});
+
         if (menu != "KeelS2 Menu\n"
                     "Usage: keel <command>\n"
                     "  plugins  - Show active plugins\n"
@@ -3076,18 +3446,22 @@ int main(int argument_count, char** arguments)
         {
             std::fprintf(stderr, "client reply mismatch:\n%s%s%s%s", menu.c_str(), plugins.c_str(),
                 version.c_str(), credits.c_str());
+
             return 161;
         }
+
         for (std::int32_t target = -1; target <= 3; ++target)
         {
             reset_console();
             FakeCvar::DispatchCallback(core_callback, {"keel", "inspect", "hooks"}, 5, target);
+
             if (console_output(5) != menu || console_output(0)[0] != '\0' ||
                 server_output != messages())
             {
                 return 172;
             }
         }
+
         for (const auto command_arguments : {
             std::initializer_list<const char*>{"keel", "plugins", "load", "bad"},
             {"keel", "plugins", "unload", "1"}, {"keel", "plugins", "reload", "1"},
@@ -3104,16 +3478,20 @@ int main(int argument_count, char** arguments)
                 return 162;
             }
         }
+
         if (!client({"keel", "plugins", "unload", "1"}, -2).empty() ||
             !client({"keel", "plugins"}, 64).empty() || server_output != messages())
         {
             return 163;
         }
+
         if (!g_cvar.Dispatch({"keel", "plugins", "pause", "1"}))
         {
             return 164;
         }
+
         const auto paused = client({"keel", "plugins"});
+
         if (!Contains(paused.c_str(), "Listing 2 active plugins:") ||
             Contains(paused.c_str(), "KeelS2 Basic") ||
             !ContainsInOrder(paused.c_str(), "[02] Lifecycle First", "[03] Lifecycle Second") ||
@@ -3123,6 +3501,7 @@ int main(int argument_count, char** arguments)
         {
             return 165;
         }
+
         for (const char* id : {"1", "2", "3"})
         {
             if (!g_cvar.Dispatch({"keel", "plugins", "resume", id}))
@@ -3130,34 +3509,47 @@ int main(int argument_count, char** arguments)
                 return 166;
             }
         }
+
         reset_console();
-        std::thread first([&] {
-            for (unsigned request{}; request < 20; ++request)
+        std::thread first(
+            [&]
             {
-                FakeCvar::DispatchCallback(core_callback, {"keel", "version"}, 0);
-            }
-        });
-        std::thread second([&] {
-            for (unsigned request{}; request < 20; ++request)
+                for (unsigned request{}; request < 20; ++request)
+                {
+                    FakeCvar::DispatchCallback(core_callback, {"keel", "version"}, 0);
+                }
+            });
+
+        std::thread second(
+            [&]
             {
-                FakeCvar::DispatchCallback(core_callback, {"keel", "credits"}, 5);
-            }
-        });
-        std::thread third([&] {
-            for (unsigned request{}; request < 20; ++request)
+                for (unsigned request{}; request < 20; ++request)
+                {
+                    FakeCvar::DispatchCallback(core_callback, {"keel", "credits"}, 5);
+                }
+            });
+
+        std::thread third(
+            [&]
             {
-                FakeCvar::DispatchCallback(core_callback, {"keel", "plugins"}, 7);
-            }
-        });
+                for (unsigned request{}; request < 20; ++request)
+                {
+                    FakeCvar::DispatchCallback(core_callback, {"keel", "plugins"}, 7);
+                }
+            });
+
         bool reloaded = true;
+
         for (unsigned cycle{}; cycle < 3; ++cycle)
         {
             reloaded = g_cvar.Dispatch({"keel", "plugins", "reload", "KeelS2 Basic"}) && reloaded;
         }
+
         first.join();
         second.join();
         third.join();
         expected_registrations += 3;
+
         if (!reloaded || Count(console_output(0), "Plugin ABI: 4") != 20 ||
             Contains(console_output(0), "Peter Brev") ||
             Count(console_output(5), "Created and developed by Peter Brev") != 20 ||
@@ -3173,8 +3565,10 @@ int main(int argument_count, char** arguments)
             const std::string third_output(console_output(7));
             std::fprintf(stderr, "client concurrency mismatch reloaded=%d:\n%s\n%s\n%s\n%s",
                 reloaded, first_output.c_str(), second_output.c_str(), third_output.c_str(), messages());
+
             return 167;
         }
+
         if (!CopyFile(invalid_plugin_source, plugin_directory / (std::string("invalid") + plugin_extension)) ||
             !CopyFile(failing_plugin_source, plugin_directory / (std::string("failing") + plugin_extension)) ||
             !g_cvar.Dispatch({"keel", "plugins", "load", "invalid"}) ||
@@ -3182,8 +3576,10 @@ int main(int argument_count, char** arguments)
         {
             return 168;
         }
+
         ++expected_registrations;
         const auto filtered = client({"keel", "plugins"});
+
         if (!Contains(filtered.c_str(), "Listing 3 active plugins:") ||
             Contains(filtered.c_str(), "Failing Test Plugin") ||
             Contains(filtered.c_str(), "invalid") ||
@@ -3192,6 +3588,7 @@ int main(int argument_count, char** arguments)
             return 169;
         }
     }
+
     if (plugin_refresh)
     {
         const auto basic_path = plugin_directory / (std::string("01_basic") + plugin_extension);
@@ -3200,6 +3597,7 @@ int main(int argument_count, char** arguments)
             return g_cvar.Dispatch(arguments);
         };
         const auto registrations = g_cvar.register_count;
+
         if (!dispatch({"keel", "plugins", "refresh"}) || g_cvar.register_count != registrations ||
             !CopyFile(lifecycle_first_source, new_path) ||
             !dispatch({"keel", "plugins", "refresh"}) || g_cvar.register_count != registrations + 1 ||
@@ -3211,32 +3609,41 @@ int main(int argument_count, char** arguments)
             !dispatch({"keel", "plugins", "info", new_path.filename().string().c_str()}) ||
             !dispatch({"keel", "plugins", "pause", "KeelS2 Basic"}))
             return 200;
+
         {
             std::ofstream changed(basic_path, std::ios::binary | std::ios::app);
             changed.put('\0');
+
             if (!changed)
                 return 201;
         }
+
         if (!dispatch({"keel", "plugins", "refresh"}) || g_cvar.register_count != registrations + 2)
             return 202;
+
         const auto paused_start = std::string(messages()).size();
         dispatch({"keel", "plugins", "list"});
         dispatch({"keel", "status"});
         const std::string paused_output = std::string(messages()).substr(paused_start);
+
         if (!Contains(paused_output.c_str(), " - paused") ||
             !Contains(paused_output.c_str(), "1 paused, 0 loading, 1 disabled"))
             return 203;
+
         const auto print_client = [&](std::initializer_list<const char*> arguments) {
             reset_console();
             FakeCvar::DispatchCallback(g_cvar.Callback("keel"), arguments, 0);
             return std::string(console_output(0));
         };
+
         if (!Contains(print_client({"keel", "plugins"}).c_str(), "No active plugins.") ||
             !Contains(print_client({"keel", "plugins", "unload_all"}).c_str(), "Usage: keel <command>") ||
             !Contains(print_client({"keel", "plugins", "refresh"}).c_str(), "Usage: keel <command>") ||
             g_cvar.register_count != registrations + 2)
             return 204;
+
         std::filesystem::remove(basic_path, error);
+
         if (error || !dispatch({"keel", "plugins", "refresh"}) ||
             !dispatch({"keel", "plugins", "resume", "KeelS2 Basic"}) ||
             !dispatch({"keel_test", "after_missing_file"}) ||
@@ -3247,23 +3654,30 @@ int main(int argument_count, char** arguments)
             !dispatch({"keel", "plugins", "refresh"}) || g_cvar.ActiveCount() != 1 ||
             !dispatch({"keel", "plugins", "list"}))
             return 205;
+
         const auto dependency_start = std::string(messages()).size();
+
         if (!CopyFile(dependency_leaf_source, plugin_directory / (std::string("03_leaf") + plugin_extension)) ||
             !CopyFile(dependency_middle_source, plugin_directory / (std::string("04_middle") + plugin_extension)) ||
             !CopyFile(dependency_core_source, plugin_directory / (std::string("05_core") + plugin_extension)) ||
             !dispatch({"keel", "plugins", "refresh"}))
             return 216;
+
         const auto dependency_output = std::string(messages()).substr(dependency_start);
+
         if (!Contains(dependency_output.c_str(), "Refreshed plugins: 3 loaded") ||
             !ContainsInOrder(dependency_output.c_str(), "load Dependency Core", "load Dependency Middle") ||
             !ContainsInOrder(dependency_output.c_str(), "load Dependency Middle", "load Dependency Leaf") ||
             !dispatch({"keel", "plugins", "unload_all"}))
             return 217;
+
         expected_registrations = registrations + 3;
     }
+
     if (plugin_lifecycle)
     {
         const std::string plugin_filename = std::string("01_basic") + plugin_extension;
+
         if (!g_cvar.Dispatch({"keel", "plugins"}) ||
             !g_cvar.Dispatch({"keel", "plugins", "load"}) ||
             !g_cvar.Dispatch({"keel", "plugins", "unload"}) ||
@@ -3297,8 +3711,10 @@ int main(int argument_count, char** arguments)
         {
             return 34;
         }
+
         expected_registrations = 4;
     }
+
     if (command_removal)
     {
         if (!g_cvar.Dispatch({"keel_test", "unregister"}) ||
@@ -3309,9 +3725,11 @@ int main(int argument_count, char** arguments)
             return 40;
         }
     }
+
     if (plugin_index_compaction)
     {
         const std::string first_filename = std::string("02_lifecycle_first") + plugin_extension;
+
         if (!g_cvar.Dispatch({"keel", "plugins", "list"}) ||
             !g_cvar.Dispatch({"keel", "plugins", "unload", "2"}) ||
             g_cvar.HasActive("lifecycle_first") || !g_cvar.HasActive("lifecycle_second") ||
@@ -3334,24 +3752,30 @@ int main(int argument_count, char** arguments)
         {
             return 35;
         }
+
         expected_registrations = 5;
     }
+
     if (factories && scenario != "factory_failed_load")
     {
         keels2::platform::DynamicLibrary provider;
         const auto provider_path = plugin_directory / ".runtime" / "1" /
             (std::string("01_factory") + plugin_extension);
+
         if (!provider.Open(provider_path, loader_error))
         {
             std::fputs(messages(), stderr);
             return 151;
         }
+
         const auto get_fixture = reinterpret_cast<FactoryFixture* (*)()>(
             provider.Symbol("KeelTest_FactoryFixture"));
+
         if (!get_fixture)
         {
             return 152;
         }
+
         auto& control = *get_fixture();
         control.engine = &EngineFactory;
         control.server = factory;
@@ -3361,10 +3785,12 @@ int main(int argument_count, char** arguments)
                 std::fprintf(stderr, "factory check failed: %s, calls=%u errors=%u order=%u\n%s",
                     phase, control.calls.load(), control.errors.load(), control.order.load(), messages());
             }
+
             return valid;
         };
         int code{};
         const auto initial_originals = g_factory_originals.load();
+
         if (!check(control.api && control.source2 &&
                 control.engine("KeelFactoryProbe001", &code) == &g_factory_probe && code == 0 &&
                 control.calls.load() == 4 && control.errors.load() == 0 &&
@@ -3372,14 +3798,18 @@ int main(int argument_count, char** arguments)
         {
             return 153;
         }
+
         control.recurse.store(true);
+
         if (!check(control.engine("KeelFactoryProbe001", nullptr) == &g_factory_probe &&
                 control.calls.load() == 8 && control.errors.load() == 0 &&
                 g_factory_originals.load() == initial_originals + 5, "reentrant original and named query"))
         {
             return 154;
         }
+
         control.recurse.store(false);
+
         for (KeelSource2Factory scope : {KEELS2_SOURCE2_FACTORY_ENGINE,
                 KEELS2_SOURCE2_FACTORY_FILESYSTEM, KEELS2_SOURCE2_FACTORY_PHYSICS,
                 KEELS2_SOURCE2_FACTORY_NETWORK, KEELS2_SOURCE2_FACTORY_SERVER_SERVICE})
@@ -3387,6 +3817,7 @@ int main(int argument_count, char** arguments)
             KeelSource2InterfaceInfo info{};
             info.size = sizeof(info);
             const unsigned before = control.calls.load();
+
             if (!check(control.source2->query_named_interface(control.plugin, scope,
                     "KeelFactoryProbe001", &info) == KEEL_RESULT_OK &&
                     info.instance == &g_factory_probe && info.factory == scope &&
@@ -3395,6 +3826,7 @@ int main(int argument_count, char** arguments)
                 return 155;
             }
         }
+
         if (!check(!control.engine("KeelFactoryMissing001", &code) && code == 17 &&
                 !control.server("KeelFactoryServerMissing001", &code) && code == 1 &&
                 !control.engine(nullptr, &code) && code == 1 && !control.errors.load(),
@@ -3402,9 +3834,11 @@ int main(int argument_count, char** arguments)
         {
             return 156;
         }
+
         KeelFactorySubscriptionHandle invalid = 99;
         KeelFactorySubscriptionSpec spec{};
         KeelFactoryResult original{};
+
         if (!check(control.api->subscribe(control.plugin, nullptr, &invalid) == KEEL_RESULT_INVALID_ARGUMENT &&
                 invalid == 0 && control.api->subscribe(control.plugin, &spec, &invalid) == KEEL_RESULT_INCOMPATIBLE &&
                 control.api->query_original(control.plugin, 1, "KeelFactoryProbe001", &original) == KEEL_RESULT_INCOMPATIBLE,
@@ -3412,9 +3846,11 @@ int main(int argument_count, char** arguments)
         {
             return 157;
         }
+
         spec.size = sizeof(spec);
         spec.factory = 99;
         original.size = sizeof(original);
+
         if (!check(control.api->subscribe(control.plugin, &spec, &invalid) == KEEL_RESULT_INVALID_ARGUMENT &&
                 control.api->query_original(control.plugin, 99, "x", &original) == KEEL_RESULT_INVALID_ARGUMENT &&
                 control.api->query_original(9999, 1, "x", &original) == KEEL_RESULT_NOT_READY &&
@@ -3423,7 +3859,9 @@ int main(int argument_count, char** arguments)
         {
             return 158;
         }
+
         const unsigned before_pause = control.calls.load();
+
         if (!check(g_cvar.Dispatch({"keel", "plugins", "pause", "1"}) &&
                 control.engine("KeelFactoryProbe001", &code) == &g_factory_probe &&
                 control.calls.load() == before_pause &&
@@ -3433,9 +3871,11 @@ int main(int argument_count, char** arguments)
         {
             return 159;
         }
+
         const bool pin = scenario == "factory_pin" || scenario == "factory_pin_race";
         control.mode.store(pin ? 2 : 1);
         FactoryProbe* exposed{};
+
         if (scenario == "factory_pin_race")
         {
             control.mode.store(3);
@@ -3443,21 +3883,27 @@ int main(int argument_count, char** arguments)
                 exposed = static_cast<FactoryProbe*>(control.engine("KeelFactoryProbe001", &code));
             });
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+
             while (!control.entered.load() && std::chrono::steady_clock::now() < deadline)
             {
                 std::this_thread::yield();
             }
+
             std::atomic<bool> completed{};
-            std::thread unloading([&] {
-                g_cvar.Dispatch({"keel", "plugins", "unload", "1"});
-                completed.store(true);
-            });
+            std::thread unloading(
+                [&]
+                {
+                    g_cvar.Dispatch({"keel", "plugins", "unload", "1"});
+                    completed.store(true);
+                });
+
             std::this_thread::sleep_for(std::chrono::milliseconds(30));
             const bool held = control.entered.load() && !completed.load();
             control.release.store(true);
             control.release.notify_all();
             caller.join();
             unloading.join();
+
             if (!check(held && completed.load() && !control.unloaded.load(),
                     "replacement exposure racing with provider unload"))
             {
@@ -3468,11 +3914,13 @@ int main(int argument_count, char** arguments)
         {
             exposed = static_cast<FactoryProbe*>(control.engine("KeelFactoryProbe001", &code));
         }
+
         if (!check(pin ? exposed && exposed->Value() == 29 && code == 0
                 : !exposed && code == 42, "first replacement wins and later subscribers observe it"))
         {
             return 160;
         }
+
         if (pin)
         {
             for (const auto handle : control.subscriptions)
@@ -3482,6 +3930,7 @@ int main(int argument_count, char** arguments)
                     return 161;
                 }
             }
+
             if (!check(g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) &&
                     g_cvar.Dispatch({"keel", "plugins", "reload", "1"}) &&
                     g_cvar.Dispatch({"keel", "plugins", "pause", "1"}) &&
@@ -3491,20 +3940,27 @@ int main(int argument_count, char** arguments)
             {
                 return 162;
             }
+
             keels2::platform::DynamicLibrary retained_host;
+
             if (!retained_host.Open(host_path, loader_error))
             {
                 return 163;
             }
+
             const auto stop = reinterpret_cast<KeelHostStopFn>(retained_host.Symbol("KeelHost_Stop"));
+
             if (!check(stop && stop() == 0 && stop() == 0 && control.unloaded.load() == 0 &&
                     exposed->Value() == 29 && !control.errors.load(), "shutdown retains replacement object and provider"))
             {
                 return 164;
             }
+
             return 0;
         }
+
         control.mode.store(0);
+
         if (scenario == "factory_reload" || scenario == "factory_wrong_name")
         {
             const char* failure = scenario == "factory_wrong_name"
@@ -3527,15 +3983,19 @@ int main(int argument_count, char** arguments)
             {
                 return 165;
             }
+
             keels2::platform::DynamicLibrary reloaded;
             const auto reloaded_path = plugin_directory / ".runtime" / "4" /
                 (std::string("01_factory") + plugin_extension);
+
             if (!reloaded.Open(reloaded_path, loader_error))
             {
                 return 170;
             }
+
             const auto get_reloaded = reinterpret_cast<FactoryFixture* (*)()>(
                 reloaded.Symbol("KeelTest_FactoryFixture"));
+
             if (!check(get_reloaded && get_reloaded()->calls.load() == 0 &&
                     control.engine("KeelFactoryProbe001", &code) == &g_factory_probe &&
                     get_reloaded()->calls.load() == 4, "paused reload stays inactive until resume"))
@@ -3548,37 +4008,52 @@ int main(int argument_count, char** arguments)
             control.remove_peer.store(true);
             const unsigned before_remove = control.calls.load();
             control.engine("KeelFactoryProbe001", &code);
+
             if (!check(control.calls.load() == before_remove + 3 && !control.errors.load(), "remove pending peer"))
             {
                 return 166;
             }
+
             control.order.store(0);
             control.remove_self.store(true);
             control.engine("KeelFactoryProbe001", &code);
+
             if (!check(control.api->unsubscribe(control.plugin, control.subscriptions[0]) == KEEL_RESULT_OK &&
                     !control.errors.load(), "self-removal disables immediately and can be drained"))
             {
                 return 167;
             }
+
             control.api->unsubscribe(control.plugin, control.subscriptions[1]);
             control.api->unsubscribe(control.plugin, control.subscriptions[2]);
-            std::thread caller([&] { control.engine("KeelFactoryBlock001", nullptr); });
+            std::thread caller(
+                [&]
+                {
+                    control.engine("KeelFactoryBlock001", nullptr);
+                });
+
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+
             while (!control.entered.load() && std::chrono::steady_clock::now() < deadline)
             {
                 std::this_thread::yield();
             }
+
             std::atomic<bool> completed{};
-            std::thread unloading([&] {
-                g_cvar.Dispatch({"keel", "plugins", "unload", "1"});
-                completed.store(true);
-            });
+            std::thread unloading(
+                [&]
+                {
+                    g_cvar.Dispatch({"keel", "plugins", "unload", "1"});
+                    completed.store(true);
+                });
+
             std::this_thread::sleep_for(std::chrono::milliseconds(30));
             const bool held = control.entered.load() && !completed.load() && !control.unloaded.load();
             control.release.store(true);
             control.release.notify_all();
             caller.join();
             unloading.join();
+
             if (!check(held && completed.load() && control.unloaded.load() == 1 &&
                     control.engine("KeelFactoryProbe001", &code) == &g_factory_probe && !control.errors.load(),
                     "concurrent unload waits for active callback"))
@@ -3587,38 +4062,52 @@ int main(int argument_count, char** arguments)
             }
         }
     }
+
     if (source2_service)
     {
         const auto set_player = reinterpret_cast<void (*)(int, int, std::uint64_t, bool)>(
             schema_entity_fixture.Symbol("KeelTest_SetPlayer"));
+
         const auto connected = reinterpret_cast<void (*)(std::int32_t)>(
             lifecycle_fixture.Symbol("KeelTest_PlayerConnected"));
+
         const auto disconnecting = reinterpret_cast<void (*)(std::int32_t)>(
             lifecycle_fixture.Symbol("KeelTest_PlayerDisconnecting"));
+
         if (!set_player || !connected || !disconnecting || !console_engine ||
             !g_cvar.Dispatch({"s2_check", "0"}))
         {
             return 44;
         }
+
         g_client_console_engine = console_engine();
         set_player(3, 4301, 0, false);
         g_cvar.Dispatch({"s2_check", "players", "late"});
         g_cvar.Dispatch({"s2_check", "players", "native"});
+
         if (!console_output || std::strcmp(console_output(3), "100% {literal}; quit\n") != 0)
         {
             return 44;
         }
+
         set_player(3, 4301, 76561198000000004ull, false);
         g_cvar.Dispatch({"s2_check", "players", "auth"});
-        const auto input_fixture = reinterpret_cast<void (*)(unsigned)>(schema_entity_fixture.Symbol("KeelTest_PlayerInputFixture"));
-        if (!input_fixture) return 44;
+        const auto input_fixture =
+            reinterpret_cast<void (*)(unsigned)>(schema_entity_fixture.Symbol("KeelTest_PlayerInputFixture"));
+
+        if (!input_fixture)
+            return 44;
+
         input_fixture(0);
         g_cvar.Dispatch({"s2_check", "players", "input-initial"});
         input_fixture(1);
         g_cvar.Dispatch({"s2_check", "players", "input-component"});
         input_fixture(2);
         g_cvar.Dispatch({"s2_check", "players", "input-pawn"});
-        if (!DispatchSource2LevelInit()) return 44;
+
+        if (!DispatchSource2LevelInit())
+            return 44;
+
         g_cvar.Dispatch({"s2_check", "players", "input-map"});
         input_fixture(3);
         g_cvar.Dispatch({"s2_check", "players", "input-unavailable"});
@@ -3636,6 +4125,7 @@ int main(int argument_count, char** arguments)
         set_player(3, 9003, 0, true);
         g_cvar.Dispatch({"s2_check", "players", "throw"});
         set_player(3, 9003, 0, false);
+
         if (!g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
             g_cvar.HasActive("s2_check") || g_cvar.ActiveCount() != 1 ||
             g_cvar.unregister_count != 1)
@@ -3644,36 +4134,48 @@ int main(int argument_count, char** arguments)
             return 44;
         }
     }
+
     if (schema_entity_service)
     {
         set_entity_system_ready(true);
+
         if (!DispatchSource2LevelInit() ||
             !g_cvar.Dispatch({"keel_schema_entity_check", "initial"}))
         {
             std::fputs(messages(), stderr);
             return 127;
         }
+
         bool offthread_dispatched{};
-        std::thread offthread([&] {
-            offthread_dispatched =
-                g_cvar.Dispatch({"keel_schema_entity_check", "offthread"});
-        });
+        std::thread offthread(
+            [&]
+            {
+                offthread_dispatched = g_cvar.Dispatch({"keel_schema_entity_check", "offthread"});
+            });
+
         offthread.join();
+
         if (!offthread_dispatched)
         {
             return 131;
         }
+
         destroy_entity();
+
         if (!g_cvar.Dispatch({"keel_schema_entity_check", "stale"}))
         {
             return 128;
         }
+
         reuse_entity();
+
         if (!g_cvar.Dispatch({"keel_schema_entity_check", "reuse"}))
         {
             return 129;
         }
+
         DispatchSource2LevelShutdown();
+
         if (!g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
             g_cvar.HasActive("keel_schema_entity_check") ||
             g_cvar.ActiveCount() != 1 || g_cvar.unregister_count != 1)
@@ -3681,16 +4183,21 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 130;
         }
+
         if (schema_lookup_count() != 3)
         {
             return 134;
         }
+
         reset_schema_entities();
+
         if (!g_cvar.Dispatch({"keel", "plugins", "load", "01_schema_entity_service"}))
         {
             return 132;
         }
+
         set_entity_system_ready(true);
+
         if (!DispatchSource2LevelInit() ||
             !g_cvar.Dispatch({"keel_schema_entity_check", "initial"}) ||
             schema_lookup_count() != 2)
@@ -3698,64 +4205,105 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 133;
         }
+
         keels2::platform::DynamicLibrary deferred_fixture;
         const auto deferred_path = plugin_directory / (std::string("01_schema_entity_service") + plugin_extension);
+
         if (!deferred_fixture.Open(RuntimePluginPath(plugin_directory, deferred_path), loader_error))
             return 210;
+
         using HookFixture = void (*)(void**,void**);
         using HookCallbackSetter = void (*)(void (*)());
         using HookInputs = void (*)(void*,void*,HookCallbackSetter,void (*)());
         const auto hook_fixture = reinterpret_cast<HookFixture>(schema_entity_fixture.Symbol("KeelTest_HookDataFixture"));
-        const auto hook_callback = reinterpret_cast<HookCallbackSetter>(schema_entity_fixture.Symbol("KeelTest_HookDataSchemaCallback"));
+        const auto hook_callback =
+            reinterpret_cast<HookCallbackSetter>(schema_entity_fixture.Symbol("KeelTest_HookDataSchemaCallback"));
+
         const auto hook_inputs = reinterpret_cast<HookInputs>(deferred_fixture.Symbol("KeelTest_HookDataInputs"));
-        if (!hook_fixture || !hook_callback || !hook_inputs) return 216;
-        void* damage_record{}; void* weapon_component{};
+
+        if (!hook_fixture || !hook_callback || !hook_inputs)
+            return 216;
+
+        void* damage_record{};
+        void* weapon_component{};
         hook_fixture(&damage_record,&weapon_component);
-        hook_inputs(damage_record,weapon_component,hook_callback,+[] {
-            DispatchSource2LevelShutdown(); DispatchSource2LevelInit();
-        });
+        hook_inputs(
+            damage_record,
+            weapon_component,
+            hook_callback,
+            +[]
+            {
+                DispatchSource2LevelShutdown();
+                DispatchSource2LevelInit();
+            });
+
         if (!g_cvar.Dispatch({"keel_schema_entity_check","hookdata"}) ||
             !Contains(messages(),"[Schema Entity Test] typed hook data passed")) {
-            std::fputs(messages(),stderr); return 217;
+            std::fputs(messages(), stderr);
+            return 217;
         }
+
         using DeferredFixture = void* (*)(void (*)());
         const auto deferred = reinterpret_cast<DeferredFixture>(deferred_fixture.Symbol("KeelTest_DeferredDispatch"));
+
         if (!deferred)
             return 211;
-        void* refresh_target = deferred(+[] {
-            g_cvar.Dispatch({"keel", "plugins", "refresh"});
-        });
+
+        void* refresh_target = deferred(+[]
+                                        {
+                                            g_cvar.Dispatch({"keel", "plugins", "refresh"});
+                                        });
+
         VtableFunction<void (*)(void*)>(refresh_target, 0)(refresh_target);
+
         if (!Contains(messages(), "plugin refresh queued for the next game frame after the current hook") ||
             !g_cvar.HasActive("keel_schema_entity_check"))
             return 214;
+
         dispatch_lifecycle();
+
         if (!Contains(messages(), "Refreshed plugins: 0 loaded, 0 reloaded, 1 unchanged"))
             return 215;
-        void* target = deferred(+[] {
-            g_cvar.Dispatch({"keel", "plugins", "unload_all"});
-            for (int request = 0; request < 32; ++request)
-                g_cvar.Dispatch({"keel", "plugins", "unload", "Schema Entity Test"});
-        });
+
+        void* target = deferred(+[]
+                                {
+                                    g_cvar.Dispatch({"keel", "plugins", "unload_all"});
+
+                                    for (int request = 0; request < 32; ++request)
+                                        g_cvar.Dispatch({"keel", "plugins", "unload", "Schema Entity Test"});
+                                });
+
         deferred_fixture.Close();
         VtableFunction<void (*)(void*)>(target, 0)(target);
+
         if (!g_cvar.HasActive("keel_schema_entity_check") ||
             Count(messages(), "plugin unload queued for the next game frame after the current hook: Schema Entity Test") != 31 ||
             Count(messages(), "plugin unload_all queued for the next game frame after the current hook: Schema Entity Test") != 1 ||
             Count(messages(), "deferred plugin command queue is full") != 1)
             return 212;
+
         dispatch_lifecycle();
+
         if (g_cvar.HasActive("keel_schema_entity_check") || g_cvar.ActiveCount() != 1 ||
             Count(messages(), "deferred plugin command target no longer exists") != 31)
             return 213;
+
         expected_registrations = 3;
     }
+
     if (source2_callbacks)
     {
-        const auto all_rejection = [](const char* message) {
+        const auto all_rejection = [](const char* message)
+        {
             return message && std::strlen(message) == 255 &&
-                std::all_of(message, message + 255, [](char value) { return value == 'A'; });
+                   std::all_of(message,
+                               message + 255,
+                               [](char value)
+                               {
+                                   return value == 'A';
+                               });
         };
+
         if (game_event_load_count() != 1 || game_event_add_count() != 1 ||
             !game_event_listener_active() || !DispatchSource2LevelInit() ||
             g_loop_init_calls != 1 || !dispatch_game_event(&g_game_event_instance) ||
@@ -3766,7 +4314,9 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 110;
         }
+
         dispatch_client_command();
+
         if (client_command_original_calls() != 0 ||
             !g_cvar.Dispatch({"keel", "plugins", "pause", "Source2 Callbacks Peer"}) ||
             dispatch_client_connect() || !all_rejection(rejection_message()) ||
@@ -3777,7 +4327,9 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 111;
         }
+
         dispatch_client_command();
+
         if (client_command_original_calls() != 0 ||
             !g_cvar.Dispatch({"keel", "plugins", "pause", "Source2 Callbacks Second"}) ||
             !dispatch_client_connect() || rejection_message()[0] != '\0' ||
@@ -3786,9 +4338,11 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 112;
         }
+
         dispatch_client_command();
         const std::size_t events_before_paused_dispatch =
             Count(messages(), "round_start");
+
         if (client_command_original_calls() != 1 ||
             !dispatch_game_event(&g_game_event_instance) ||
             Count(messages(), "round_start") != events_before_paused_dispatch ||
@@ -3800,7 +4354,9 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 113;
         }
+
         DispatchSource2LevelShutdown();
+
         if (g_loop_shutdown_calls != 1 ||
             !g_cvar.Dispatch({"keel", "plugins", "unload", "Source2 Callbacks Peer"}) ||
             !g_cvar.Dispatch({"keel", "plugins", "unload", "Source2 Callbacks First"}) ||
@@ -3809,8 +4365,10 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 114;
         }
+
         const std::size_t events_before_unloaded_dispatch =
             Count(messages(), "round_start");
+
         if (!dispatch_game_event(&g_game_event_instance) ||
             Count(messages(), "round_start") != events_before_unloaded_dispatch ||
             source2_unload_count() != 1)
@@ -3818,7 +4376,9 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 115;
         }
+
         source2_callbacks_first.Close();
+
         if (!g_cvar.Dispatch({"keel", "plugins", "load", "01_source2_callbacks_first"}) ||
             !source2_callbacks_first.Open(
                 RuntimePluginPath(plugin_directory, source2_callbacks_first_path),
@@ -3827,14 +4387,19 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 115;
         }
+
         source2_arm_block = reinterpret_cast<Source2VoidFunction>(
             source2_callbacks_first.Symbol("KeelTest_Source2ArmBlock"));
+
         source2_block_entered = reinterpret_cast<Source2BoolFunction>(
             source2_callbacks_first.Symbol("KeelTest_Source2BlockEntered"));
+
         source2_release_block = reinterpret_cast<Source2VoidFunction>(
             source2_callbacks_first.Symbol("KeelTest_Source2ReleaseBlock"));
+
         source2_unload_count = reinterpret_cast<Source2CountFunction>(
             source2_callbacks_first.Symbol("KeelTest_Source2UnloadCount"));
+
         if (!source2_arm_block || !source2_block_entered || !source2_release_block ||
             !source2_unload_count || game_event_add_count() != 1 ||
             !DispatchSource2LevelInit() ||
@@ -3844,14 +4409,17 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 115;
         }
+
         dispatch_client_command();
         DispatchSource2LevelShutdown();
+
         if (client_command_original_calls() != 2 || g_loop_shutdown_calls != 2 ||
             source2_unload_count() != 0)
         {
             std::fputs(messages(), stderr);
             return 116;
         }
+
         source2_arm_block();
         std::atomic<bool> level_init_completed{};
         bool level_init_result{};
@@ -3861,51 +4429,65 @@ int main(int argument_count, char** arguments)
         });
         const auto block_deadline = std::chrono::steady_clock::now() +
             std::chrono::seconds(5);
+
         while (!source2_block_entered() && std::chrono::steady_clock::now() < block_deadline)
         {
             std::this_thread::yield();
         }
+
         if (!source2_block_entered())
         {
             source2_release_block();
             level_init_thread.join();
             return 120;
         }
+
         std::atomic<bool> unload_completed{};
         bool unload_result{};
-        std::thread unload_thread([&] {
-            unload_result = g_cvar.Dispatch(
-                {"keel", "plugins", "unload", "Source2 Callbacks First"});
-            unload_completed.store(true, std::memory_order_release);
-        });
+        std::thread unload_thread(
+            [&]
+            {
+                unload_result = g_cvar.Dispatch({"keel", "plugins", "unload", "Source2 Callbacks First"});
+
+                unload_completed.store(true, std::memory_order_release);
+            });
+
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
         const bool drained_before_release = !unload_completed.load(std::memory_order_acquire) &&
             !level_init_completed.load(std::memory_order_acquire) &&
             source2_unload_count() == 0;
+
         source2_release_block();
         level_init_thread.join();
         unload_thread.join();
+
         if (!drained_before_release || !level_init_result || !unload_result ||
             source2_unload_count() != 1 || g_loop_init_calls != 3)
         {
             std::fputs(messages(), stderr);
             return 121;
         }
+
         DispatchSource2LevelShutdown();
+
         if (g_loop_shutdown_calls != 3)
         {
             return 122;
         }
+
         VtableFunction<void (*)(void*, void*)>(&g_loop_factory, 3)(
             &g_loop_factory,
             &g_loop);
+
         UnregisterSource2LoopMode();
         source2_callbacks_first.Close();
     }
+
     if (plugin_runtime_service)
     {
         const char* basic_marker =
             "KeelS2 1.0.0 is active. The basic native plugin is responding.";
+
         if (!g_cvar.Dispatch({"keel_runtime_probe"}) ||
             !g_cvar.Dispatch({"keel_test", "before_pause"}) ||
             Count(messages(), basic_marker) != 1 ||
@@ -3923,15 +4505,18 @@ int main(int argument_count, char** arguments)
             return 94;
         }
     }
+
     if (plugin_runtime_concurrency)
     {
         keels2::platform::DynamicLibrary runtime_plugin;
+
         if (!runtime_plugin.Open(
                 RuntimePluginPath(plugin_directory, plugin_runtime_service_path),
                 loader_error))
         {
             return 97;
         }
+
         using ArmBlockFunction = void (*)();
         using BlockEnteredFunction = KeelBool (*)();
         using ReleaseBlockFunction = void (*)();
@@ -3939,21 +4524,28 @@ int main(int argument_count, char** arguments)
         using PauseBasicFunction = KeelBool (*)();
         const auto arm_block = reinterpret_cast<ArmBlockFunction>(
             runtime_plugin.Symbol("KeelTest_PluginRuntimeArmBlock"));
+
         const auto block_entered = reinterpret_cast<BlockEnteredFunction>(
             runtime_plugin.Symbol("KeelTest_PluginRuntimeBlockEntered"));
+
         const auto release_block = reinterpret_cast<ReleaseBlockFunction>(
             runtime_plugin.Symbol("KeelTest_PluginRuntimeReleaseBlock"));
+
         const auto callback_count = reinterpret_cast<CountFunction>(
             runtime_plugin.Symbol("KeelTest_PluginRuntimeCallbackCount"));
+
         const auto unload_count = reinterpret_cast<CountFunction>(
             runtime_plugin.Symbol("KeelTest_PluginRuntimeUnloadCount"));
+
         const auto pause_basic = reinterpret_cast<PauseBasicFunction>(
             runtime_plugin.Symbol("KeelTest_PluginRuntimePauseBasic"));
+
         if (!arm_block || !block_entered || !release_block || !callback_count ||
             !unload_count || !pause_basic)
         {
             return 98;
         }
+
         arm_block();
 
         std::atomic<bool> pause_finished{};
@@ -3963,16 +4555,19 @@ int main(int argument_count, char** arguments)
             pause_finished.store(true, std::memory_order_release);
         });
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+
         while (block_entered() != KEEL_TRUE && std::chrono::steady_clock::now() < deadline)
         {
             std::this_thread::yield();
         }
+
         if (block_entered() != KEEL_TRUE)
         {
             release_block();
             pause_thread.join();
             return 99;
         }
+
         if (!g_cvar.Dispatch({"keel", "plugins", "unload", "2"}) ||
             !Contains(messages(), "plugin transition is already active: KeelS2 Basic"))
         {
@@ -3987,6 +4582,7 @@ int main(int argument_count, char** arguments)
             unload_succeeded.store(
                 g_cvar.Dispatch({"keel", "plugins", "unload", "1"}),
                 std::memory_order_release);
+
             unload_finished.store(true, std::memory_order_release);
         });
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -3998,6 +4594,7 @@ int main(int argument_count, char** arguments)
         const std::uint32_t callbacks_after_unload = callback_count();
         const char* basic_marker =
             "KeelS2 1.0.0 is active. The basic native plugin is responding.";
+
         if (!pause_waited || !unload_waited || !pause_succeeded.load(std::memory_order_acquire) ||
             !unload_succeeded.load(std::memory_order_acquire) || unload_count() != 1 ||
             g_cvar.ActiveCount() != 2 || !g_cvar.Dispatch({"keel_test", "while_paused"}) ||
@@ -4011,17 +4608,21 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 100;
         }
+
         runtime_plugin.Close();
     }
+
     if (plugin_transition_shutdown_retry)
     {
         keels2::platform::DynamicLibrary runtime_plugin;
+
         if (!runtime_plugin.Open(
                 RuntimePluginPath(plugin_directory, plugin_runtime_service_path),
                 loader_error))
         {
             return 104;
         }
+
         using ArmBlockFunction = void (*)();
         using BlockEnteredFunction = KeelBool (*)();
         using ReleaseBlockFunction = void (*)();
@@ -4029,21 +4630,28 @@ int main(int argument_count, char** arguments)
         using PauseBasicFunction = KeelBool (*)();
         const auto arm_block = reinterpret_cast<ArmBlockFunction>(
             runtime_plugin.Symbol("KeelTest_PluginRuntimeArmBlock"));
+
         const auto block_entered = reinterpret_cast<BlockEnteredFunction>(
             runtime_plugin.Symbol("KeelTest_PluginRuntimeBlockEntered"));
+
         const auto release_block = reinterpret_cast<ReleaseBlockFunction>(
             runtime_plugin.Symbol("KeelTest_PluginRuntimeReleaseBlock"));
+
         const auto unload_count = reinterpret_cast<CountFunction>(
             runtime_plugin.Symbol("KeelTest_PluginRuntimeUnloadCount"));
+
         const auto pause_basic = reinterpret_cast<PauseBasicFunction>(
             runtime_plugin.Symbol("KeelTest_PluginRuntimePauseBasic"));
+
         using EarlyDisconnectFunction = void (*)(void*);
         const auto early_disconnect = VtableFunction<EarlyDisconnectFunction>(config, 1);
+
         if (!arm_block || !block_entered || !release_block || !unload_count ||
             !pause_basic || !early_disconnect)
         {
             return 105;
         }
+
         arm_block();
 
         std::atomic<bool> pause_finished{};
@@ -4053,10 +4661,12 @@ int main(int argument_count, char** arguments)
             pause_finished.store(true, std::memory_order_release);
         });
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+
         while (block_entered() != KEEL_TRUE && std::chrono::steady_clock::now() < deadline)
         {
             std::this_thread::yield();
         }
+
         if (block_entered() != KEEL_TRUE ||
             !g_cvar.Dispatch({"keel", "plugins", "unload", "2"}))
         {
@@ -4076,6 +4686,7 @@ int main(int argument_count, char** arguments)
         release_block();
         pause_thread.join();
         disconnect_thread.join();
+
         if (!pause_waited || !disconnect_waited ||
             !pause_succeeded.load(std::memory_order_acquire) || unload_count() != 1 ||
             g_cvar.ActiveCount() != 0 || g_cvar.unregister_count != expected_registrations)
@@ -4083,8 +4694,10 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 107;
         }
+
         runtime_plugin.Close();
     }
+
     if (plugin_dependencies)
     {
         if (!g_cvar.Dispatch({"keel", "plugins", "list"}) ||
@@ -4106,33 +4719,45 @@ int main(int argument_count, char** arguments)
             return 96;
         }
     }
+
     if (plugin_dependencies)
     {
         if (!g_cvar.Dispatch({"keel", "plugins", "pause", "Dependency Leaf"}) ||
             !g_cvar.Dispatch({"keel", "plugins", "pause", "Dependency Middle"}) ||
             !g_cvar.Dispatch({"keel", "plugins", "pause", "Dependency Core"}))
             return 206;
+
         {
             std::ofstream changed(plugin_directory / (std::string("01_dependency_leaf") + plugin_extension),
                 std::ios::binary | std::ios::app);
+
             changed.put('\0');
+
             if (!changed)
                 return 218;
         }
+
         const auto refresh_start = std::string(messages()).size();
+
         if (!g_cvar.Dispatch({"keel", "plugins", "refresh"}))
             return 219;
+
         const auto refresh_output = std::string(messages()).substr(refresh_start);
-        if (!Contains(refresh_output.c_str(), "plugin reload is blocked: Dependency Leaf: dependency is not running: Dependency Middle") ||
+
+        if (!Contains(refresh_output.c_str(),
+                      "plugin reload is blocked: Dependency Leaf: dependency is not running: Dependency Middle") ||
             Contains(refresh_output.c_str(), "plugin unloaded:"))
             return 220;
+
         const auto before = std::string(messages()).size();
+
         if (!g_cvar.Dispatch({"keel", "plugins", "unload", "Dependency Core"}) ||
             std::string(messages()).find("plugin unload is blocked by dependent Dependency Middle", before) == std::string::npos ||
             !g_cvar.Dispatch({"keel", "plugins", "unload_all"}) ||
             !Contains(messages(), "Unloaded plugins: 3; 0 remain loaded."))
             return 207;
     }
+
     if (published_services)
     {
         if (!g_cvar.Dispatch({"keel", "plugins", "pause", "Published Service Provider"}) ||
@@ -4151,8 +4776,10 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 143;
         }
+
         expected_registrations = 5;
     }
+
     if (reload_retry)
     {
         if (!CopyFile(plugin_source, reload_retry_path) ||
@@ -4162,6 +4789,7 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 145;
         }
+
         for (std::uint32_t cycle{}; cycle < 100; ++cycle)
         {
             if (!g_cvar.Dispatch({"keel", "plugins", "reload", "KeelS2 Basic"}) ||
@@ -4171,10 +4799,12 @@ int main(int argument_count, char** arguments)
                 return 146;
             }
         }
+
         if (!CopyFile(failing_plugin_source, reload_retry_path))
         {
             return 147;
         }
+
         for (std::uint32_t cycle{}; cycle < 5; ++cycle)
         {
             if (!g_cvar.Dispatch({"keel", "plugins", "reload", "KeelS2 Basic"}) ||
@@ -4184,6 +4814,7 @@ int main(int argument_count, char** arguments)
                 return 148;
             }
         }
+
         if (!CopyFile(plugin_source, reload_retry_path) ||
             !g_cvar.Dispatch({"keel", "plugins", "reload", "KeelS2 Basic"}) ||
             !g_cvar.Dispatch({"keel", "plugins", "pause", "KeelS2 Basic"}) ||
@@ -4196,31 +4827,38 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 149;
         }
+
         if (!Contains(messages(), "reload candidate has a different plugin name") ||
             g_cvar.HasActive("partial_failure"))
         {
             return 172;
         }
+
         expected_registrations = 110;
     }
+
     if (lifecycle_service)
     {
         keels2::platform::DynamicLibrary lifecycle_plugin;
+
         if (!lifecycle_plugin.Open(
                 RuntimePluginPath(plugin_directory, lifecycle_plugin_path),
                 loader_error))
         {
             return 58;
         }
+
         using LifecycleCallbackCountFunction = std::uint32_t (*)(std::uint32_t);
         const auto lifecycle_callback_count = reinterpret_cast<LifecycleCallbackCountFunction>(
             lifecycle_plugin.Symbol("KeelTest_LifecycleCallbackCount"));
+
         if (!lifecycle_callback_count)
         {
             return 59;
         }
 
         dispatch_lifecycle();
+
         for (std::uint32_t event = 1; event <= 7; ++event)
         {
             if (lifecycle_call_count(event) != 1 || lifecycle_callback_count(event) != 1)
@@ -4228,11 +4866,14 @@ int main(int argument_count, char** arguments)
                 return 49;
             }
         }
+
         if (!g_cvar.Dispatch({"keel", "plugins", "pause", "1"}))
         {
             return 50;
         }
+
         dispatch_lifecycle();
+
         for (std::uint32_t event = 1; event <= 7; ++event)
         {
             if (lifecycle_call_count(event) != 2 || lifecycle_callback_count(event) != 1)
@@ -4240,11 +4881,14 @@ int main(int argument_count, char** arguments)
                 return 51;
             }
         }
+
         if (!g_cvar.Dispatch({"keel", "plugins", "resume", "1"}))
         {
             return 52;
         }
+
         dispatch_lifecycle();
+
         for (std::uint32_t event = 1; event <= 7; ++event)
         {
             if (lifecycle_call_count(event) != 3 || lifecycle_callback_count(event) != 2)
@@ -4252,6 +4896,7 @@ int main(int argument_count, char** arguments)
                 return 53;
             }
         }
+
         lifecycle_plugin.Close();
 
         if (!g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
@@ -4261,11 +4906,14 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 54;
         }
+
         dispatch_lifecycle();
+
         for (std::uint32_t event = 1; event <= 7; ++event)
         {
             const std::uint32_t count = lifecycle_call_count(event);
             const std::uint32_t expected = event == KEELS2_LIFECYCLE_GAME_FRAME ? 5 : 4;
+
             if (count != expected)
             {
                 std::fprintf(
@@ -4274,6 +4922,7 @@ int main(int argument_count, char** arguments)
                     event,
                     count,
                     expected);
+
                 std::fputs(messages(), stderr);
                 return 55;
             }
@@ -4285,28 +4934,35 @@ int main(int argument_count, char** arguments)
         {
             return 58;
         }
+
         using ArmLifecycleBlockFunction = void (*)();
         using LifecycleBlockEnteredFunction = std::uint32_t (*)();
         using ReleaseLifecycleBlockFunction = void (*)();
         const auto arm_block = reinterpret_cast<ArmLifecycleBlockFunction>(
             lifecycle_plugin.Symbol("KeelTest_LifecycleArmBlock"));
+
         const auto block_entered = reinterpret_cast<LifecycleBlockEnteredFunction>(
             lifecycle_plugin.Symbol("KeelTest_LifecycleBlockEntered"));
+
         const auto release_block = reinterpret_cast<ReleaseLifecycleBlockFunction>(
             lifecycle_plugin.Symbol("KeelTest_LifecycleReleaseBlock"));
+
         if (!arm_block || !block_entered || !release_block)
         {
             return 59;
         }
+
         arm_block();
         lifecycle_plugin.Close();
 
         std::thread lifecycle_thread(dispatch_lifecycle);
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+
         while (block_entered() != 1u && std::chrono::steady_clock::now() < deadline)
         {
             std::this_thread::yield();
         }
+
         if (block_entered() != 1u)
         {
             release_block();
@@ -4320,6 +4976,7 @@ int main(int argument_count, char** arguments)
             unload_succeeded.store(
                 g_cvar.Dispatch({"keel", "plugins", "unload", "1"}),
                 std::memory_order_release);
+
             unload_finished.store(true, std::memory_order_release);
         });
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -4327,15 +4984,18 @@ int main(int argument_count, char** arguments)
         release_block();
         lifecycle_thread.join();
         unload_thread.join();
+
         if (!waited || !unload_succeeded.load(std::memory_order_acquire) ||
             g_cvar.ActiveCount() != 1)
         {
             return 61;
         }
+
         for (std::uint32_t event = 1; event <= 7; ++event)
         {
             const std::uint32_t count = lifecycle_call_count(event);
             const std::uint32_t expected = event == KEELS2_LIFECYCLE_GAME_FRAME ? 6 : 5;
+
             if (count != expected)
             {
                 std::fprintf(
@@ -4344,14 +5004,18 @@ int main(int argument_count, char** arguments)
                     event,
                     count,
                     expected);
+
                 return 62;
             }
         }
+
         dispatch_lifecycle();
+
         for (std::uint32_t event = 1; event <= 7; ++event)
         {
             const std::uint32_t count = lifecycle_call_count(event);
             const std::uint32_t expected = event == KEELS2_LIFECYCLE_GAME_FRAME ? 7 : 6;
+
             if (count != expected)
             {
                 std::fprintf(
@@ -4360,33 +5024,42 @@ int main(int argument_count, char** arguments)
                     event,
                     count,
                     expected);
+
                 return 53;
             }
         }
     }
+
     if (authoring_concurrency)
     {
         keels2::platform::DynamicLibrary authoring_plugin;
+
         if (!authoring_plugin.Open(
                 RuntimePluginPath(plugin_directory, authoring_concurrency_plugin_path),
                 loader_error))
         {
             return 69;
         }
+
         using ArmBlockFunction = void (*)();
         using BlockEnteredFunction = KeelBool (*)();
         using ReleaseBlockFunction = void (*)();
         using CountFunction = std::uint32_t (*)();
         const auto arm_block = reinterpret_cast<ArmBlockFunction>(
             authoring_plugin.Symbol("KeelTest_AuthoringArmBlock"));
+
         const auto block_entered = reinterpret_cast<BlockEnteredFunction>(
             authoring_plugin.Symbol("KeelTest_AuthoringBlockEntered"));
+
         const auto release_block = reinterpret_cast<ReleaseBlockFunction>(
             authoring_plugin.Symbol("KeelTest_AuthoringReleaseBlock"));
+
         const auto callback_count = reinterpret_cast<CountFunction>(
             authoring_plugin.Symbol("KeelTest_AuthoringCallbackCount"));
+
         const auto unload_count = reinterpret_cast<CountFunction>(
             authoring_plugin.Symbol("KeelTest_AuthoringUnloadCount"));
+
         if (!arm_block || !block_entered || !release_block || !callback_count || !unload_count)
         {
             return 70;
@@ -4395,10 +5068,12 @@ int main(int argument_count, char** arguments)
         arm_block();
         std::thread lifecycle_thread(dispatch_lifecycle);
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+
         while (block_entered() != KEEL_TRUE && std::chrono::steady_clock::now() < deadline)
         {
             std::this_thread::yield();
         }
+
         if (block_entered() != KEEL_TRUE || callback_count() != 1u)
         {
             release_block();
@@ -4414,18 +5089,23 @@ int main(int argument_count, char** arguments)
             unload_succeeded.store(
                 g_cvar.Dispatch({"keel", "plugins", "unload", "1"}),
                 std::memory_order_release);
+
             unload_finished.store(true, std::memory_order_release);
         });
+
         while (!unload_started.load(std::memory_order_acquire))
         {
             std::this_thread::yield();
         }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
         const bool waited = !unload_finished.load(std::memory_order_acquire) &&
             unload_count() == 0u;
+
         release_block();
         lifecycle_thread.join();
         unload_thread.join();
+
         if (!waited || !unload_succeeded.load(std::memory_order_acquire) ||
             unload_count() != 1u || callback_count() != 1u || g_cvar.ActiveCount() != 1)
         {
@@ -4433,19 +5113,25 @@ int main(int argument_count, char** arguments)
         }
 
         dispatch_lifecycle();
+
         if (callback_count() != 1u)
         {
             return 73;
         }
+
         authoring_plugin.Close();
     }
+
     if (convar_service)
     {
         const auto listing_start = std::string(messages()).size();
+
         if (!g_cvar.Dispatch({"keel", "plugins", "cvars"}) ||
             !g_cvar.Dispatch({"keel", "plugins", "cvars", "1"}))
             return 208;
+
         const auto listing = std::string(messages()).substr(listing_start);
+
         if (!Contains(listing.c_str(), "Listing 4 plugin ConVars:") ||
             !Contains(listing.c_str(), "ConVars for [01] ConVar Service Test:") ||
             Count(listing.c_str(), "keels2_test_int") != 2 ||
@@ -4456,7 +5142,9 @@ int main(int argument_count, char** arguments)
             std::fputs(listing.c_str(), stderr);
             return 209;
         }
+
         std::int32_t initial_value{};
+
         if (g_cvar.convar_register_count != 4 || g_cvar.convar_unregister_count != 0 ||
             g_cvar.convar_registration_string_count != 1 ||
             g_cvar.convar_invalid_registration_string_count != 0 ||
@@ -4479,33 +5167,43 @@ int main(int argument_count, char** arguments)
         }
 
         keels2::platform::DynamicLibrary convar_plugin;
+
         if (!convar_plugin.Open(
                 RuntimePluginPath(plugin_directory, convar_plugin_path),
                 loader_error))
         {
             return 78;
         }
+
         using VoidFunction = void (*)();
         using BoolFunction = KeelBool (*)();
         using CountFunction = std::uint32_t (*)();
         const auto arm_block = reinterpret_cast<VoidFunction>(
             convar_plugin.Symbol("KeelTest_ConVarArmBlock"));
+
         const auto block_entered = reinterpret_cast<BoolFunction>(
             convar_plugin.Symbol("KeelTest_ConVarBlockEntered"));
+
         const auto release_block = reinterpret_cast<VoidFunction>(
             convar_plugin.Symbol("KeelTest_ConVarReleaseBlock"));
+
         const auto callback_count = reinterpret_cast<CountFunction>(
             convar_plugin.Symbol("KeelTest_ConVarCallbackCount"));
+
         const auto invalid_count = reinterpret_cast<CountFunction>(
             convar_plugin.Symbol("KeelTest_ConVarInvalidCount"));
+
         const auto busy_count = reinterpret_cast<CountFunction>(
             convar_plugin.Symbol("KeelTest_ConVarBusyCount"));
+
         if (!arm_block || !block_entered || !release_block || !callback_count ||
             !invalid_count || !busy_count || callback_count() != 0 || invalid_count() != 0)
         {
             return 79;
         }
+
         std::int32_t deferred_value{};
+
         if (!g_cvar.SetInt32("keels2_test_int", 9) || callback_count() != 2 ||
             busy_count() != 1 || invalid_count() != 0 || g_cvar.convar_queue_count != 1 ||
             g_cvar.last_queue_slot != 0 ||
@@ -4522,10 +5220,12 @@ int main(int argument_count, char** arguments)
             static_cast<void>(g_cvar.SetInt32("keels2_test_int", 8));
         });
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+
         while (block_entered() != KEEL_TRUE && std::chrono::steady_clock::now() < deadline)
         {
             std::this_thread::yield();
         }
+
         if (block_entered() != KEEL_TRUE || callback_count() != 4 || invalid_count() != 0)
         {
             release_block();
@@ -4541,17 +5241,21 @@ int main(int argument_count, char** arguments)
             unload_dispatched.store(
                 g_cvar.Dispatch({"keel", "plugins", "unload", "1"}),
                 std::memory_order_release);
+
             unload_finished.store(true, std::memory_order_release);
         });
+
         while (!unload_started.load(std::memory_order_acquire))
         {
             std::this_thread::yield();
         }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
         const bool waited = !unload_finished.load(std::memory_order_acquire);
         release_block();
         callback_thread.join();
         unload_thread.join();
+
         if (!waited || !unload_dispatched.load(std::memory_order_acquire) ||
             g_cvar.ActiveConVarCallbacks("keels2_test_int") != 0 ||
             g_cvar.convar_unregister_count != 4 || !g_cvar.HasConVar("keels2_test_int") ||
@@ -4568,6 +5272,7 @@ int main(int argument_count, char** arguments)
         {
             return 83;
         }
+
         if (!g_cvar.Dispatch({"keel", "plugins", "load", "01_convar_service"}) ||
             g_cvar.convar_register_count != 4)
         {
@@ -4583,6 +5288,7 @@ int main(int argument_count, char** arguments)
         }
 
         g_cvar.RejectConVarRegistration("keels2_test_string");
+
         if (!g_cvar.Dispatch({"keel", "plugins", "load", "01_convar_service"}) ||
             g_cvar.convar_register_count != 7 ||
             g_cvar.convar_unregister_count != 7 ||
@@ -4594,6 +5300,7 @@ int main(int argument_count, char** arguments)
         {
             return 105;
         }
+
         if (!g_cvar.Dispatch({"keel", "plugins", "load", "01_convar_service"}) ||
             g_cvar.convar_register_count != 11 ||
             g_cvar.convar_registration_string_count != 3 ||
@@ -4610,12 +5317,16 @@ int main(int argument_count, char** arguments)
         {
             return 87;
         }
+
         const auto reloaded_callback_count = reinterpret_cast<CountFunction>(
             convar_plugin.Symbol("KeelTest_ConVarCallbackCount"));
+
         const auto reloaded_invalid_count = reinterpret_cast<CountFunction>(
             convar_plugin.Symbol("KeelTest_ConVarInvalidCount"));
+
         const auto reloaded_busy_count = reinterpret_cast<CountFunction>(
             convar_plugin.Symbol("KeelTest_ConVarBusyCount"));
+
         if (!reloaded_callback_count || !reloaded_invalid_count || !reloaded_busy_count ||
             !g_cvar.SetInt32("keels2_test_int", 9) || reloaded_callback_count() != 2 ||
             reloaded_busy_count() != 1 || reloaded_invalid_count() != 0 ||
@@ -4623,7 +5334,9 @@ int main(int argument_count, char** arguments)
         {
             return 88;
         }
+
         convar_plugin.Close();
+
         if (!g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
             g_cvar.ActiveConVarCallbacks("keels2_test_int") != 0 ||
             g_cvar.convar_unregister_count != 11 || g_cvar.ActiveCount() != 1 ||
@@ -4634,6 +5347,7 @@ int main(int argument_count, char** arguments)
             return 89;
         }
     }
+
     if (convar_failed_load)
     {
         if (g_cvar.convar_register_count != 4 || g_cvar.convar_unregister_count != 4 ||
@@ -4655,15 +5369,18 @@ int main(int argument_count, char** arguments)
             return 91;
         }
     }
+
     if (convar_native_access)
     {
         keels2::platform::DynamicLibrary provider;
         keels2::platform::DynamicLibrary consumer;
+
         if (!provider.Open(RuntimePluginPath(plugin_directory, native_convar_provider_path), loader_error) ||
             !consumer.Open(RuntimePluginPath(plugin_directory, native_convar_consumer_path), loader_error))
         {
             return 160;
         }
+
         using Access = KeelResult (*)(void (*)(void*), void*, std::int32_t*);
         using Read = KeelResult (*)(std::int32_t*);
         using Throw = KeelResult (*)();
@@ -4679,6 +5396,7 @@ int main(int argument_count, char** arguments)
         const auto provider_unloads = reinterpret_cast<Unloads>(provider.Symbol("KeelTest_NativeConVarUnloads"));
         const auto consumer_unloads = reinterpret_cast<Unloads>(consumer.Symbol("KeelTest_NativeConVarUnloads"));
         std::int32_t observed = -1;
+
         if (!access || !observed_change || !read || !throwing || !provider_remove || !consumer_remove || !refresh ||
             !provider_unloads || !consumer_unloads ||
             read(&observed) != KEEL_RESULT_OK || observed != 7 ||
@@ -4688,17 +5406,19 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 161;
         }
+
         struct DuringAccess
         {
             Remove provider_remove;
             Remove consumer_remove;
             bool valid{};
         } during{provider_remove, consumer_remove};
+
         if (access([](void* context) {
                 auto& check = *static_cast<DuringAccess*>(context);
                 check.valid = !check.provider_remove() && !check.consumer_remove() &&
-                    g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) &&
-                    g_cvar.Dispatch({"keel", "plugins", "unload", "2"});
+                              g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) &&
+                              g_cvar.Dispatch({"keel", "plugins", "unload", "2"});
             }, &during, &observed) != KEEL_RESULT_OK || observed != 23 || !during.valid ||
             provider_unloads() != 0 || consumer_unloads() != 0 ||
             g_cvar.convar_unregister_count != 0 ||
@@ -4709,22 +5429,31 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 162;
         }
+
         during.valid = false;
+
         if (observed_change([](void* context) {
                 auto& check = *static_cast<DuringAccess*>(context);
                 check.valid = !check.provider_remove() && !check.consumer_remove() &&
-                    g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) &&
-                    g_cvar.Dispatch({"keel", "plugins", "unload", "2"});
+                              g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) &&
+                              g_cvar.Dispatch({"keel", "plugins", "unload", "2"});
             }, &during, &observed) != KEEL_RESULT_OK || observed != 23 || !during.valid ||
             provider_unloads() != 0 || consumer_unloads() != 0)
         {
             std::fputs(messages(), stderr);
             return 167;
         }
+
         observed = -1;
         KeelResult worker_result = KEEL_RESULT_OK;
-        std::thread worker([&] { worker_result = access(nullptr, nullptr, &observed); });
+        std::thread worker(
+            [&]
+            {
+                worker_result = access(nullptr, nullptr, &observed);
+            });
+
         worker.join();
+
         if (worker_result != KEEL_RESULT_WRONG_THREAD || observed != -1 ||
             !g_cvar.Dispatch({"keel", "plugins", "pause", "1"}) ||
             read(&observed) != KEEL_RESULT_NOT_READY || observed != -1 ||
@@ -4734,6 +5463,7 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 163;
         }
+
         struct DuringRelease
         {
             Remove remove;
@@ -4750,28 +5480,35 @@ int main(int argument_count, char** arguments)
                 check.finished.store(true, std::memory_order_release);
             });
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+
             while (std::chrono::steady_clock::now() < deadline)
             {
                 std::int32_t current = -1;
+
                 if (check.read(&current) == KEEL_RESULT_NOT_FOUND)
                 {
                     check.waited = current == -1 && !check.finished.load(std::memory_order_acquire);
                     break;
                 }
+
                 std::this_thread::yield();
             }
         }, &release, &observed);
+
         if (release.worker.joinable())
         {
             release.worker.join();
         }
+
         if (raced != KEEL_RESULT_OK || observed != 23 || !release.waited || !release.removed ||
             g_cvar.convar_unregister_count != 1)
         {
             std::fputs(messages(), stderr);
             return 166;
         }
+
         observed = -1;
+
         if (read(&observed) != KEEL_RESULT_NOT_FOUND || observed != -1 ||
             !g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) || provider_unloads() != 1 ||
             read(&observed) != KEEL_RESULT_NOT_FOUND || observed != -1)
@@ -4779,7 +5516,9 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 164;
         }
+
         provider.Close();
+
         if (!g_cvar.Dispatch({"keel", "plugins", "load", "01_native_convar_provider"}) ||
             read(&observed) != KEEL_RESULT_NOT_FOUND || observed != -1 ||
             !refresh() || read(&observed) != KEEL_RESULT_OK || observed != 7 ||
@@ -4789,33 +5528,43 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 165;
         }
+
         consumer.Close();
     }
+
     if (convar_authoring)
     {
         keels2::platform::DynamicLibrary authoring_plugin;
+
         if (!authoring_plugin.Open(
                 RuntimePluginPath(plugin_directory, convar_authoring_plugin_path),
                 loader_error))
         {
             return 136;
         }
+
         using ValueFunction = std::uint32_t (*)(std::uint32_t);
         using SetFunction = int (*)(int);
         using RemoveFunction = std::uint32_t (*)(std::uint32_t);
         using StringFunction = std::uint32_t (*)(const char*);
         auto value = reinterpret_cast<ValueFunction>(
             authoring_plugin.Symbol("KeelTest_ConVarAuthoringValue"));
+
         auto set = reinterpret_cast<SetFunction>(
             authoring_plugin.Symbol("KeelTest_ConVarAuthoringSet"));
+
         auto remove_convar = reinterpret_cast<RemoveFunction>(
             authoring_plugin.Symbol("KeelTest_ConVarAuthoringRemove"));
+
         auto set_string = reinterpret_cast<StringFunction>(
             authoring_plugin.Symbol("KeelTest_ConVarAuthoringSetString"));
+
         auto string_equals = reinterpret_cast<StringFunction>(
             authoring_plugin.Symbol("KeelTest_ConVarAuthoringStringEquals"));
+
         std::int32_t integer_value{};
         float floating_value{};
+
         if (!value || !set || !remove_convar || !set_string || !string_equals ||
             value(0) != 1 || value(1) != 0 ||
             value(2) != 0 ||
@@ -4877,6 +5626,7 @@ int main(int argument_count, char** arguments)
         }
 
         authoring_plugin.Close();
+
         if (!g_cvar.Dispatch({"keel", "plugins", "load", "01_convar_authoring"}) ||
             !authoring_plugin.Open(
                 RuntimePluginPath(plugin_directory, convar_authoring_plugin_path),
@@ -4885,16 +5635,22 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 140;
         }
+
         value = reinterpret_cast<ValueFunction>(
             authoring_plugin.Symbol("KeelTest_ConVarAuthoringValue"));
+
         set = reinterpret_cast<SetFunction>(
             authoring_plugin.Symbol("KeelTest_ConVarAuthoringSet"));
+
         remove_convar = reinterpret_cast<RemoveFunction>(
             authoring_plugin.Symbol("KeelTest_ConVarAuthoringRemove"));
+
         set_string = reinterpret_cast<StringFunction>(
             authoring_plugin.Symbol("KeelTest_ConVarAuthoringSetString"));
+
         string_equals = reinterpret_cast<StringFunction>(
             authoring_plugin.Symbol("KeelTest_ConVarAuthoringStringEquals"));
+
         if (!value || !set || !remove_convar || !set_string || !string_equals ||
             value(0) != 1 || value(1) != 0 || value(2) != 0 || value(3) != 0 ||
             value(5) != 1 || value(6) != 11 || value(7) != 0 || value(8) != 1 ||
@@ -4931,13 +5687,16 @@ int main(int argument_count, char** arguments)
             worker_read_after = string_equals("worker");
         });
         authoring_worker.join();
+
         if (worker_read_before != 0 || worker_set != 1 || worker_read_after != 0 ||
             g_cvar.convar_queue_count != 1)
         {
             std::fputs(messages(), stderr);
             return 142;
         }
+
         g_cvar.DrainQueuedConVarValues();
+
         if (string_equals("worker") != 1 || value(2) != 2 || value(3) != 0 ||
             EngineInvalidFreeCount() != 0)
         {
@@ -4947,15 +5706,23 @@ int main(int argument_count, char** arguments)
 
         using ObserverCheck = std::uint32_t (*)(int);
         auto observer_check = reinterpret_cast<ObserverCheck>(authoring_plugin.Symbol("KeelTest_ConVarObserverCheck"));
+
         if (!observer_check || observer_check(0) != 1)
         {
             std::fputs(messages(), stderr);
             return 166;
         }
+
         g_cvar.DrainQueuedConVarValues();
         std::uint32_t worker_observation{};
-        std::thread observer_worker([&] { worker_observation = observer_check(3); });
+        std::thread observer_worker(
+            [&]
+            {
+                worker_observation = observer_check(3);
+            });
+
         observer_worker.join();
+
         if (observer_check(1) != 1 || observer_check(2) != 1 || worker_observation != 1)
         {
             std::fputs(messages(), stderr);
@@ -4974,19 +5741,24 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 141;
         }
+
         authoring_plugin.Close();
     }
+
     if (clean_sample)
     {
         const auto set_player = reinterpret_cast<void (*)(int, int, std::uint64_t, bool)>(
             schema_entity_fixture.Symbol("KeelTest_SetPlayer"));
+
         if (!set_player || !reset_console || !console_output || !dispatch_game_event)
         {
             return 168;
         }
+
         reset_console();
         set_player(3, 4301, 76561198000000004ull, false);
         std::int32_t integer_value{};
+
         if (!g_cvar.Dispatch({"keel_sample"}, 3) ||
             std::strcmp(console_output(3), "#4301 Late player | team=0 authenticated=true\n") != 0 ||
             !g_cvar.Dispatch({"keel_sample", "bump"}) ||
@@ -5001,7 +5773,9 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 169;
         }
+
         dispatch_lifecycle();
+
         if (!Contains(messages(), "plugin reloaded transactionally: KeelS2 Sample") ||
             !g_cvar.Dispatch({"keel_sample", "bump"}) ||
             !g_cvar.ReadInt32("keels2_sample_int", integer_value) || integer_value != 44 ||
@@ -5010,8 +5784,10 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 169;
         }
+
         dispatch_lifecycle();
         const std::size_t before_retired_event = std::strlen(messages());
+
         if (!dispatch_game_event(&g_game_event_instance) || std::strlen(messages()) != before_retired_event ||
             g_cvar.Dispatch({"keel_sample"}) || !g_cvar.global_callbacks.empty() ||
             game_event_remove_count() != 0 ||
@@ -5021,18 +5797,23 @@ int main(int argument_count, char** arguments)
             std::fprintf(stderr, "clean sample console: %s\n", console_output(3));
             return 169;
         }
+
         expected_registrations = 3;
     }
+
     if (convar_facade)
     {
         const auto set_player = reinterpret_cast<void (*)(int, int, std::uint64_t, bool)>(
             schema_entity_fixture.Symbol("KeelTest_SetPlayer"));
+
         if (!set_player || !reset_console || !console_output)
         {
             return 93;
         }
+
         reset_console();
         set_player(3, 4301, 76561198000000004ull, false);
+
         if (!g_cvar.Dispatch({"keel_sample", "player"}, 3) ||
             std::strcmp(console_output(3), "#4301 Late player | team=0 authenticated=1\n") != 0 ||
             !Contains(messages(), "player chat output is unavailable") ||
@@ -5042,8 +5823,10 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 93;
         }
+
         std::int32_t integer_value{};
         float floating_value{};
+
         if (g_cvar.convar_register_count != 2 || g_cvar.convar_unregister_count != 0 ||
             g_cvar.convar_registration_string_count != 0 ||
             g_cvar.convar_invalid_registration_string_count != 0 ||
@@ -5071,12 +5854,14 @@ int main(int argument_count, char** arguments)
                 EngineInvalidFreeCount(),
                 g_cvar.ActiveConVarCallbacks("keels2_sample_int"),
                 g_cvar.ActiveCount());
+
             std::fputs(messages(), stderr);
             return 93;
         }
 
         dispatch_client_command();
         dispatch_lifecycle();
+
         for (std::uint32_t event = 1; event <= 7; ++event)
         {
             if (lifecycle_call_count(event) != 1)
@@ -5114,6 +5899,7 @@ int main(int argument_count, char** arguments)
         const std::uint32_t changes_before_rejection = g_cvar.convar_change_count;
         const std::uint32_t globals_before_rejection = g_cvar.convar_global_change_count;
         g_cvar.RejectNextFilter();
+
         if (!g_cvar.Dispatch({"keel_sample", "bump"}) ||
             g_cvar.convar_queue_count != 0 || g_cvar.convar_filter_count != 4 ||
             g_cvar.convar_change_count != changes_before_rejection + 1 ||
@@ -5158,10 +5944,13 @@ int main(int argument_count, char** arguments)
         DispatchSource2LevelShutdown();
         const std::size_t event_logs =
             Count(messages(), "[KeelS2 Source 2 Sample] event=round_start");
+
         const std::size_t frame_logs =
             Count(messages(), "[KeelS2 Source 2 Sample] GameFrame");
+
         const std::size_t connected_logs =
             Count(messages(), "[KeelS2 Source 2 Sample] ClientConnected");
+
         if (g_loop_shutdown_calls != 1 ||
             !g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
             g_cvar.ActiveConVarCallbacks("keels2_sample_int") != 0 ||
@@ -5176,6 +5965,7 @@ int main(int argument_count, char** arguments)
         }
 
         dispatch_lifecycle();
+
         if (Count(messages(), "[KeelS2 Source 2 Sample] event=round_start") != event_logs ||
             Count(messages(), "[KeelS2 Source 2 Sample] GameFrame") != frame_logs ||
             Count(messages(), "[KeelS2 Source 2 Sample] ClientConnected") != connected_logs ||
@@ -5200,6 +5990,7 @@ int main(int argument_count, char** arguments)
 
         dispatch_client_command();
         dispatch_lifecycle();
+
         if (client_command_original_calls() != 2 ||
             !g_cvar.Dispatch({"keel_sample"}) ||
             !g_cvar.ReadInt32("keels2_sample_int", integer_value) || integer_value != 9 ||
@@ -5220,6 +6011,7 @@ int main(int argument_count, char** arguments)
         }
 
         DispatchSource2LevelShutdown();
+
         if (g_loop_shutdown_calls != 2 ||
             !g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
             g_cvar.ActiveConVarCallbacks("keels2_sample_int") != 0 ||
@@ -5228,11 +6020,14 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 93;
         }
+
         expected_registrations = 3;
     }
+
     if (lifecycle_failed_load)
     {
         dispatch_lifecycle();
+
         for (std::uint32_t event = 1; event <= 7; ++event)
         {
             if (lifecycle_call_count(event) != 1)
@@ -5241,6 +6036,7 @@ int main(int argument_count, char** arguments)
             }
         }
     }
+
     if (lifecycle_pre_init)
     {
 #if defined(_WIN32)
@@ -5253,6 +6049,7 @@ int main(int argument_count, char** arguments)
             return 67;
         }
     }
+
     if (keelhook)
     {
         if (!g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) ||
@@ -5267,10 +6064,12 @@ int main(int argument_count, char** arguments)
         const auto keelhook_target_path =
             plugin_directory / ".runtime" / "1" /
             (std::string("01_keelhook_target") + plugin_extension);
+
         if (!keelhook_target.Open(keelhook_target_path, loader_error))
         {
             return 101;
         }
+
         using KeelHookTargetFunction = std::int32_t (*)(std::int32_t, std::int32_t);
         using KeelHookPauseTargetFunction = std::int32_t (*)(std::int32_t);
         using KeelHookLastArgumentFunction = std::int32_t (*)();
@@ -5278,16 +6077,22 @@ int main(int argument_count, char** arguments)
         using KeelHookPauseCleanupFunction = KeelBool (*)();
         const auto target = reinterpret_cast<KeelHookTargetFunction>(
             keelhook_target.Symbol("KeelHookFixtureTarget"));
+
         const auto pause_target = reinterpret_cast<KeelHookPauseTargetFunction>(
             keelhook_target.Symbol("KeelHookPauseFixtureTarget"));
+
         const auto last_left = reinterpret_cast<KeelHookLastArgumentFunction>(
             keelhook_target.Symbol("KeelTest_KeelHookLastLeft"));
+
         const auto last_right = reinterpret_cast<KeelHookLastArgumentFunction>(
             keelhook_target.Symbol("KeelTest_KeelHookLastRight"));
+
         const auto pause_calls = reinterpret_cast<KeelHookPauseCountFunction>(
             keelhook_target.Symbol("KeelTest_KeelHookPauseCalls"));
+
         const auto pause_cleanup = reinterpret_cast<KeelHookPauseCleanupFunction>(
             keelhook_target.Symbol("KeelTest_KeelHookPauseCleanup"));
+
         if (!target || !pause_target || !last_left || !last_right || !pause_calls ||
             !pause_cleanup || pause_calls() != 1 ||
             !g_cvar.Dispatch({"keel", "plugins", "pause", "1"}) ||
@@ -5301,6 +6106,7 @@ int main(int argument_count, char** arguments)
             std::fputs(messages(), stderr);
             return 102;
         }
+
         keelhook_target.Close();
 
         if (!g_cvar.Dispatch({"keel", "plugins", "unload", "2"}) ||
@@ -5314,6 +6120,7 @@ int main(int argument_count, char** arguments)
             return 37;
         }
     }
+
     if (keelhook_shutdown_retry && !g_cvar.Dispatch({"kh_prepare_shutdown_retry"}))
     {
         return 38;
@@ -5324,20 +6131,25 @@ int main(int argument_count, char** arguments)
     using CleanupCount = unsigned (*)();
     CleanupMode cleanup_mode{};
     CleanupCount cleanup_unloads{};
+
     if (unload_preparation)
     {
         const auto path = plugin_directory / (std::string("01_basic") + plugin_extension);
+
         if (!cleanup_image.Open(RuntimePluginPath(plugin_directory, path), loader_error))
         {
             return 180;
         }
+
         cleanup_mode = reinterpret_cast<CleanupMode>(cleanup_image.Symbol("KeelTest_CleanupMode"));
         cleanup_unloads = reinterpret_cast<CleanupCount>(cleanup_image.Symbol("KeelTest_CleanupUnloads"));
         auto frames = reinterpret_cast<CleanupCount>(cleanup_image.Symbol("KeelTest_CleanupFrames"));
+
         if (!cleanup_mode || !cleanup_unloads || !frames)
         {
             return 181;
         }
+
         if (!g_cvar.Dispatch({"keel", "plugins", "unload_all"}) || cleanup_unloads() != 0 ||
             !Contains(messages(), "Unloaded plugins: 0; 1 remain loaded.") ||
             !g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) || cleanup_unloads() != 0 ||
@@ -5345,119 +6157,168 @@ int main(int argument_count, char** arguments)
         {
             return 182;
         }
+
         const auto before = frames();
         dispatch_lifecycle();
+
         if (frames() != before + 1 || !g_cvar.Dispatch({"cleanup_test", "throw"}) ||
             !g_cvar.Dispatch({"keel", "plugins", "reload", "1"}) || cleanup_unloads() != 0 ||
             !g_cvar.HasActive("cleanup_test"))
         {
             return 183;
         }
+
         auto pause_mode = reinterpret_cast<CleanupMode>(cleanup_image.Symbol("KeelTest_PauseMode"));
         auto pause_calls = reinterpret_cast<CleanupCount>(cleanup_image.Symbol("KeelTest_PauseCalls"));
-        if (!pause_mode || !pause_calls) return 192;
+
+        if (!pause_mode || !pause_calls)
+            return 192;
+
         for (unsigned refusal : {0u, 2u})
         {
             pause_mode(refusal);
             const auto calls = pause_calls();
             const auto running_frames = frames();
+
             if (!g_cvar.Dispatch({"keel", "plugins", "pause", "1"}) || pause_calls() != calls + 1 ||
                 !g_cvar.HasActive("cleanup_test")) return 193;
+
             dispatch_lifecycle();
-            if (frames() != running_frames + 1 || cleanup_unloads()) return 194;
+
+            if (frames() != running_frames + 1 || cleanup_unloads())
+                return 194;
         }
+
         pause_mode(1);
+
         if (!g_cvar.Dispatch({"keel", "plugins", "pause", "1"}) ||
             !Contains(messages(), "pause released its ConVar; new registration remained blocked") ||
             !g_cvar.Dispatch({"keel", "plugins", "unload", "1"}))
         {
             return 190;
         }
+
         const auto paused_frames = frames();
         dispatch_lifecycle();
+
         if (frames() != paused_frames || cleanup_unloads() != 0 ||
             !g_cvar.Dispatch({"keel", "plugins", "resume", "1"}))
         {
             return 191;
         }
+
         if (!g_cvar.Dispatch({"cleanup_test", "allow"}) ||
             !g_cvar.Dispatch({"keel", "plugins", "unload", "1"}) || cleanup_unloads() != 1 ||
             g_cvar.HasActive("cleanup_test"))
         {
             return 184;
         }
+
         cleanup_image.Close();
+
         if (!g_cvar.Dispatch({"keel", "plugins", "load", "01_basic"}) ||
             !g_cvar.Dispatch({"cleanup_test", "allow"}) ||
             !g_cvar.Dispatch({"keel", "plugins", "reload", "1"}))
         {
             return 185;
         }
+
         expected_registrations += 2;
+
         if (!cleanup_image.Open(RuntimePluginPath(plugin_directory, path), loader_error))
         {
             return 186;
         }
+
         cleanup_mode = reinterpret_cast<CleanupMode>(cleanup_image.Symbol("KeelTest_CleanupMode"));
         cleanup_unloads = reinterpret_cast<CleanupCount>(cleanup_image.Symbol("KeelTest_CleanupUnloads"));
+
         if (!cleanup_mode || !cleanup_unloads)
         {
             return 187;
         }
+
         cleanup_mode(1);
-        if (!g_cvar.Dispatch({"keel", "plugins", "pause", "1"})) return 195;
+
+        if (!g_cvar.Dispatch({"keel", "plugins", "pause", "1"}))
+            return 195;
+
         cleanup_image.Close();
+
         if (!g_cvar.Dispatch({"keel", "plugins", "reload", "1"}) ||
             !cleanup_image.Open(RuntimePluginPath(plugin_directory, path), loader_error)) return 196;
+
         cleanup_mode = reinterpret_cast<CleanupMode>(cleanup_image.Symbol("KeelTest_CleanupMode"));
         cleanup_unloads = reinterpret_cast<CleanupCount>(cleanup_image.Symbol("KeelTest_CleanupUnloads"));
         pause_calls = reinterpret_cast<CleanupCount>(cleanup_image.Symbol("KeelTest_PauseCalls"));
         frames = reinterpret_cast<CleanupCount>(cleanup_image.Symbol("KeelTest_CleanupFrames"));
+
         if (!cleanup_mode || !cleanup_unloads || !pause_calls || !frames || pause_calls() != 1)
         {
             std::fputs("Paused replacement did not prepare its newly loaded state for pause\n", stderr);
             return 197;
         }
+
         const auto replacement_frames = frames();
         dispatch_lifecycle();
+
         if (frames() != replacement_frames || !g_cvar.Dispatch({"keel", "plugins", "resume", "1"}) ||
             !g_cvar.HasActive("cleanup_test")) return 198;
+
         dispatch_lifecycle();
-        if (frames() != replacement_frames + 1) return 198;
+
+        if (frames() != replacement_frames + 1)
+            return 198;
+
         ++expected_registrations;
+
         for (const char* replacement : {"refuse", "throw", "retain"})
         {
             cleanup_mode(1);
-            if (!g_cvar.Dispatch({"keel", "plugins", "pause", "1"})) return 199;
+
+            if (!g_cvar.Dispatch({"keel", "plugins", "pause", "1"}))
+                return 199;
+
             cleanup_image.Close();
 #if defined(_WIN32)
-            if (_putenv_s("KEELS2_TEST_PAUSED_REPLACEMENT", replacement) != 0) return 200;
+            if (_putenv_s("KEELS2_TEST_PAUSED_REPLACEMENT", replacement) != 0)
+                return 200;
 #else
-            if (setenv("KEELS2_TEST_PAUSED_REPLACEMENT", replacement, 1) != 0) return 200;
+            if (setenv("KEELS2_TEST_PAUSED_REPLACEMENT", replacement, 1) != 0)
+                return 200;
 #endif
             const auto message_start = std::strlen(messages());
+
             if (!g_cvar.Dispatch({"keel", "plugins", "reload", "1"}) ||
                 !cleanup_image.Open(RuntimePluginPath(plugin_directory, path), loader_error)) return 201;
+
             const auto* recent = messages() + message_start;
             const bool retained = std::strcmp(replacement, "retain") == 0;
             cleanup_mode = reinterpret_cast<CleanupMode>(cleanup_image.Symbol("KeelTest_CleanupMode"));
             cleanup_unloads = reinterpret_cast<CleanupCount>(cleanup_image.Symbol("KeelTest_CleanupUnloads"));
             pause_calls = reinterpret_cast<CleanupCount>(cleanup_image.Symbol("KeelTest_PauseCalls"));
             frames = reinterpret_cast<CleanupCount>(cleanup_image.Symbol("KeelTest_CleanupFrames"));
+
             if (!cleanup_mode || !cleanup_unloads || !pause_calls || !frames ||
                 !Contains(recent, "replacement was not activated") ||
                 !Contains(recent, retained ? "rollback is blocked by retained replacement resources" : "previous image restored") ||
                 pause_calls() != 1 || cleanup_unloads()) return 202;
+
             const auto retained_frames = frames();
             dispatch_lifecycle();
-            if (frames() != retained_frames) return 203;
+
+            if (frames() != retained_frames)
+                return 203;
+
             expected_registrations += retained ? 1u : 2u;
+
             if (!retained && (!g_cvar.Dispatch({"keel", "plugins", "resume", "1"}) ||
                 !g_cvar.HasActive("cleanup_test"))) return 204;
         }
     }
 
     const auto repeated_init = VtableFunction<InitFunction>(server, 3);
+
     if (!repeated_init || repeated_init(server) != 1 || g_cvar.register_count != expected_registrations)
     {
         return 30;
@@ -5465,24 +6326,31 @@ int main(int argument_count, char** arguments)
 
     using DisconnectFunction = void (*)(void*);
     const auto disconnect = VtableFunction<DisconnectFunction>(config, 1);
+
     if (!disconnect)
     {
         return 31;
     }
+
     if (unload_preparation)
     {
         disconnect(config);
+
         if (cleanup_unloads() != 0 || Contains(messages(), "host stopped"))
         {
             return 188;
         }
+
         cleanup_mode(1);
     }
+
     disconnect(config);
+
     if (unload_preparation && cleanup_unloads() != 1)
     {
         return 189;
     }
+
     cleanup_image.Close();
     const auto repeated_disconnect = VtableFunction<DisconnectFunction>(config, 1);
     repeated_disconnect(config);
@@ -5496,12 +6364,15 @@ int main(int argument_count, char** arguments)
     if (lifecycle_service || lifecycle_failed_load)
     {
         dispatch_lifecycle();
+
         for (std::uint32_t event = 1; event <= 7; ++event)
         {
             const std::uint32_t expected = lifecycle_service
                 ? (event == KEELS2_LIFECYCLE_GAME_FRAME ? 8 : 7)
                 : 2;
+
             const std::uint32_t count = lifecycle_call_count(event);
+
             if (count != expected)
             {
                 std::fprintf(
@@ -5510,6 +6381,7 @@ int main(int argument_count, char** arguments)
                     event,
                     count,
                     expected);
+
                 return 54;
             }
         }
@@ -5524,10 +6396,12 @@ int main(int argument_count, char** arguments)
     {
         std::ifstream trace(shutdown_trace, std::ios::binary);
         std::ostringstream content;
+
         if (trace)
         {
             content << trace.rdbuf();
         }
+
         const std::string expected =
             "bootstrap disconnect entered\n"
             "bootstrap disconnect lock acquired\n"
@@ -5599,6 +6473,7 @@ int main(int argument_count, char** arguments)
             "bootstrap genuine disconnect begin\n"
             "bootstrap genuine disconnect complete\n"
             "bootstrap disconnect complete\n";
+
         const std::string actual = content.str();
 #if defined(_WIN32)
         const int clear_result = _putenv_s("KEELS2_SHUTDOWN_TRACE_FILE", "");
@@ -5609,6 +6484,7 @@ int main(int argument_count, char** arguments)
         {
             return 40;
         }
+
         if (!trace || actual != expected)
         {
             std::fputs("shutdown trace mismatch\n", stderr);
@@ -5616,6 +6492,7 @@ int main(int argument_count, char** arguments)
             return 41;
         }
     }
+
     if (lifecycle_failed_load)
     {
 #if defined(_WIN32)
@@ -5630,33 +6507,41 @@ int main(int argument_count, char** arguments)
     }
 
     const char* output = messages();
+
     if (!output)
     {
         return 33;
     }
+
     if (!ValidateMessages(scenario, output))
     {
         std::fputs(output, stderr);
         return 33;
     }
+
     if (keelhook)
     {
         const char* benchmark = std::strstr(output, "dispatch benchmark ns/call:");
         const char* end = benchmark ? std::strchr(benchmark, '\n') : nullptr;
+
         if (!benchmark || !end)
         {
             return 108;
         }
+
         std::fwrite(
             benchmark,
             1,
             static_cast<std::size_t>(end - benchmark),
             stdout);
+
         std::fputc('\n', stdout);
     }
+
     if (convar_service || convar_failed_load || convar_facade || convar_authoring || convar_native_access || clean_sample)
     {
         g_cvar.Reset();
+
         if (EngineOutstandingAllocationCount() != 0 ||
             EngineAllocationCount() != EngineFreeCount() ||
             EngineInvalidFreeCount() != 0)
@@ -5664,5 +6549,6 @@ int main(int argument_count, char** arguments)
             return 107;
         }
     }
+
     return 0;
 }

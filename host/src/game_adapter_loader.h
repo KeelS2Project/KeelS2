@@ -25,6 +25,7 @@ public:
         const char* platform,
         const GameAdapterHostApi& host,
         std::string& error);
+
     void Reset() noexcept;
     GameAdapter* Get() const noexcept;
     bool SupportsClientCommands() const noexcept;
@@ -35,14 +36,32 @@ public:
     KeelResult CaptureEntity(const void* instance, GameEntityIdentity& entity) const noexcept;
     KeelResult VisitEntities(const GameEntityAccessRequest* entities, std::uint32_t count,
         KeelEntityAccessCallback callback, void* user_data) const noexcept;
+
     KeelResult EntityToolCapabilities(std::uint32_t& flags) const noexcept;
     KeelResult ApplyEntityTool(const GameEntityIdentity& entity, std::uint32_t kind,
         const KeelEntityTeleport* request, const char* model) const noexcept;
-    const GameAdapterEntityOutputsApi& EntityOutputs() const noexcept { return entity_outputs_; }
-    const GameAdapterEntityInputApi& EntityInput() const noexcept { return entity_input_; }
-    const GameAdapterEntityConstructionApi& EntityConstruction() const noexcept { return entity_construction_; }
+
+    const GameAdapterEntityOutputsApi& EntityOutputs() const noexcept
+    {
+        return entity_outputs_;
+    }
+
+    const GameAdapterEntityInputApi& EntityInput() const noexcept
+    {
+        return entity_input_;
+    }
+
+    const GameAdapterEntityConstructionApi& EntityConstruction() const noexcept
+    {
+        return entity_construction_;
+    }
+
     KeelResult EntityWriteCapabilities(std::uint32_t& capabilities) const noexcept;
-    KeelResult WriteEntityField(const GameEntityIdentity& entity, const GameSchemaField& field, const void* value, std::uint32_t size) const noexcept;
+    KeelResult WriteEntityField(const GameEntityIdentity& entity,
+                                const GameSchemaField& field,
+                                const void* value,
+                                std::uint32_t size) const noexcept;
+
     KeelResult PlayerManagementCapabilities(std::uint32_t& capabilities) const noexcept;
     KeelResult RoundCapabilities(std::uint32_t& capabilities) const noexcept;
     KeelResult PlayerStatCapabilities(std::uint32_t& readable, std::uint32_t& writable) const noexcept;
@@ -55,7 +74,11 @@ public:
     KeelResult ObserveConVar(GameConVarHandle convar, GameConVarCallback callback, void* user_data) const noexcept;
     std::uint32_t PlayerCapacity() const noexcept;
     KeelResult ReadPlayer(std::int32_t slot, KeelPlayerInfo& player) const noexcept;
-    KeelResult ReadPlayerInput(std::int32_t slot, std::uint32_t controller, std::uint64_t& buttons, std::uint64_t& context) const noexcept;
+    KeelResult ReadPlayerInput(std::int32_t slot,
+                               std::uint32_t controller,
+                               std::uint64_t& buttons,
+                               std::uint64_t& context) const noexcept;
+
     const std::filesystem::path& Path() const noexcept;
 
 private:

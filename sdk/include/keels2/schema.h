@@ -62,13 +62,16 @@ typedef struct KeelSchemaApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*resolve_field)(
         KeelPluginHandle plugin,
         const KeelSchemaFieldSpec* spec,
         KeelSchemaFieldHandle* field);
+
     KeelResult (*release_field)(
         KeelPluginHandle plugin,
         KeelSchemaFieldHandle field);
+
     KeelResult (*describe_field)(
         KeelPluginHandle plugin,
         KeelSchemaFieldHandle field,

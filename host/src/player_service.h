@@ -11,6 +11,7 @@ namespace keels2::host
 {
 
 class Host;
+
 class GameAdapterModule;
 
 class PlayerService final
@@ -27,11 +28,14 @@ private:
     static KeelResult NextEntry(KeelPluginHandle plugin, std::int32_t after, KeelPlayerInfo* player);
     static KeelResult ValidateEntry(KeelPluginHandle plugin,
         const KeelPlayerConnection* connection, KeelPlayerInfo* player);
+
     static KeelResult Request(KeelPluginHandle plugin, std::int32_t slot, bool next,
         const KeelPlayerConnection* connection, KeelPlayerInfo* player);
+
     KeelResult Get(KeelPluginHandle plugin, std::int32_t slot, bool next,
         const KeelPlayerConnection* connection, KeelPlayerInfo& player,
         std::unique_lock<std::recursive_mutex>& state_lock, KeelPlayerInput* input = nullptr);
+
     KeelResult Read(std::int32_t slot, KeelPlayerInfo& player);
 
     Host& host_;

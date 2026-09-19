@@ -28,9 +28,15 @@ private:
     {
         const auto value = frame.Argument<std::int32_t>(0);
         KeelResult result = KEEL_RESULT_OK;
-        if (value == 2 && frame.SetArgument(0, std::int32_t{5})) result = hooks.CallOriginal(frame);
-        else if (value == 3 && frame.SetArgument(0, std::int32_t{7})) result = hooks.Recall(frame);
-        if (result != KEEL_RESULT_OK) LogWarning("Original call or recall failed: {}", result);
+
+        if (value == 2 && frame.SetArgument(0, std::int32_t{5}))
+            result = hooks.CallOriginal(frame);
+        else if (value == 3 && frame.SetArgument(0, std::int32_t{7}))
+            result = hooks.Recall(frame);
+
+        if (result != KEEL_RESULT_OK)
+            LogWarning("Original call or recall failed: {}", result);
+
         return PLUGIN_CONTINUE;
     }
 
@@ -38,10 +44,13 @@ private:
     {
         if (frame.Phase() == KH_PHASE_PRE)
         {
-            if (frame.Recalled()) LogMessage("Observer entered the recalled chain.");
+            if (frame.Recalled())
+                LogMessage("Observer entered the recalled chain.");
+
             if (frame.Argument<std::int32_t>(0) == 9 && observer.Reset() != KEEL_RESULT_OK)
                 LogWarning("Observer removal failed.");
         }
+
         return PLUGIN_CONTINUE;
     }
 

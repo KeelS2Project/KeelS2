@@ -24,6 +24,7 @@ typedef struct KeelPlayerActionsApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*apply)(KeelPluginHandle plugin, KeelEntityHandle pawn, const KeelPlayerAction* action);
 } KeelPlayerActionsApi;
 

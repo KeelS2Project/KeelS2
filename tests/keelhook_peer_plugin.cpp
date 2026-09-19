@@ -33,6 +33,7 @@ public:
         const auto spec = keels2::kh::TargetSpec::Symbol(
             module_name,
             "KeelHookFixtureTarget");
+
         if (hooks_.Resolve<std::int32_t(std::int32_t, std::int32_t)>(spec, target_) !=
                 KEEL_RESULT_OK ||
             hooks_.AddCallback<
@@ -46,6 +47,7 @@ public:
         {
             return false;
         }
+
         if (hooks_.Resolve<std::int32_t(std::int32_t, std::int32_t)>(spec, observer_target_) !=
                 KEEL_RESULT_OK || observer_target_.Handle() != target_.Handle() ||
             hooks_.AddCallback<
@@ -70,6 +72,7 @@ public:
         {
             return false;
         }
+
         context.Log(KEEL_LOG_INFO, "shared physical target joined");
         context.Log(KEEL_LOG_INFO, "shared typed lease reset and reuse passed");
         return true;
@@ -81,6 +84,7 @@ public:
         {
             context.Log(KEEL_LOG_INFO, "shared typed callbacks dispatched independently");
         }
+
         context.Log(
             KEEL_LOG_INFO,
             "peer unload callback ran after automatic cleanup");
@@ -97,10 +101,12 @@ private:
             right += 2;
             return keels2::kh::Action::Continue;
         }
+
         if (left == 7001 || left == 9001 || left == 10001 || left == 12001)
         {
             return keels2::kh::Action::Continue;
         }
+
         return call.SetResult(900)
             ? keels2::kh::Action::Override
             : keels2::kh::Action::Continue;

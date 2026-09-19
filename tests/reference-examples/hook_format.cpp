@@ -28,13 +28,19 @@ private:
     Action Text(keels2::kh::Frame& frame)
     {
         const auto text = frame.Argument<const char*>(0);
-        if (!text || !*text) return PLUGIN_CONTINUE;
+
+        if (!text || !*text)
+            return PLUGIN_CONTINUE;
+
         if (std::string_view(*text) == "Score 7, ratio 2.5")
         {
             LogMessage("Formatted input: {}", *text);
             const char* replacement = "Hook kept 100% and %s literal";
-            if (!frame.SetArgument(0, replacement)) LogWarning("Formatted text replacement failed.");
+
+            if (!frame.SetArgument(0, replacement))
+                LogWarning("Formatted text replacement failed.");
         }
+
         return PLUGIN_CONTINUE;
     }
 

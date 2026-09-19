@@ -138,17 +138,21 @@ public:
             KEELS2_SOURCE2_SERVICE_NAME,
             KEELS2_SOURCE2_API_VERSION,
             &service);
+
         if (result != KEEL_RESULT_OK)
         {
             return result;
         }
+
         const auto* api = static_cast<const KeelSource2Api*>(service);
+
         if (!api || api->size != sizeof(KeelSource2Api) ||
             api->api_version != KEELS2_SOURCE2_API_VERSION || !api->query_interface ||
             !api->query_named_interface)
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         context_ = context.State();
         api_ = api;
         return KEEL_RESULT_OK;
@@ -164,20 +168,24 @@ public:
     KeelResult Query(Capability capability, Interface& output) const noexcept
     {
         output.Reset();
+
         if (!*this)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         KeelSource2InterfaceInfo info{};
         info.size = sizeof(info);
         const KeelResult result = api_->query_interface(
             context_->plugin,
             static_cast<KeelSource2Capability>(capability),
             &info);
+
         if (result != KEEL_RESULT_OK)
         {
             return result;
         }
+
         if (!ValidInfo(info) ||
             info.capability != static_cast<KeelSource2Capability>(capability) ||
             (capability == Capability::game_event_manager
@@ -187,6 +195,7 @@ public:
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         output.Adopt(context_, info);
         return KEEL_RESULT_OK;
     }
@@ -197,14 +206,17 @@ public:
         Interface& output) const noexcept
     {
         output.Reset();
+
         if (!interface_name || !interface_name[0])
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         if (!*this)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         KeelSource2InterfaceInfo info{};
         info.size = sizeof(info);
         const KeelResult result = api_->query_named_interface(
@@ -212,10 +224,12 @@ public:
             static_cast<KeelSource2Factory>(factory),
             interface_name,
             &info);
+
         if (result != KEEL_RESULT_OK)
         {
             return result;
         }
+
         if (!ValidInfo(info) ||
             info.capability != KEELS2_SOURCE2_CAPABILITY_NAMED ||
             info.factory != static_cast<KeelSource2Factory>(factory) ||
@@ -223,6 +237,7 @@ public:
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         output.Adopt(context_, info);
         return KEEL_RESULT_OK;
     }

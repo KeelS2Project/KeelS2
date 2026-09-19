@@ -6,8 +6,14 @@ namespace keels2::cs2 {
 KeelResult ResolveEntityOutput(const platform::LoadedModule& module, const std::string& profile,
     void*& function, std::string& error)
 {
-    function = nullptr; error.clear();
-    struct Entry { std::uintptr_t rva; std::array<unsigned char,16> bytes; };
+    function = nullptr;
+    error.clear();
+
+    struct Entry
+    {
+        std::uintptr_t rva;
+        std::array<unsigned char, 16> bytes;
+    };
 #if defined(_WIN32)
     constexpr const char* supported = "cs2-25218825-win64-33042584-2212b672d2410a30";
     constexpr platform::FileFingerprint expected{33042584,0x2212b672d2410a30ull};
@@ -21,23 +27,48 @@ KeelResult ResolveEntityOutput(const platform::LoadedModule& module, const std::
         {0x216c620, {0x55,0x48,0x89,0xe5,0x41,0x57,0x49,0x89,0xff,0x41,0x56,0x41,0x55,0x41,0x54,0x49}},
     }};
 #endif
-    if (profile != supported) { error = "entity output hooks are unavailable for this compatibility profile"; return KEEL_RESULT_UNSUPPORTED; }
+    if (profile != supported)
+    {
+        error = "entity output hooks are unavailable for this compatibility profile";
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+
     platform::FileFingerprint fingerprint;
+
     if (!platform::FingerprintFile(module.path,fingerprint,error) || fingerprint != expected)
-    { error = "entity output server fingerprint changed"; return KEEL_RESULT_INCOMPATIBLE; }
+    {
+        error = "entity output server fingerprint changed";
+        return KEEL_RESULT_INCOMPATIBLE;
+    }
+
     const auto base = reinterpret_cast<std::uintptr_t>(module.base);
     std::array<void*,1> functions{};
+
     for (std::size_t i = 0; i < entries.size(); ++i) {
         const auto& entry = entries[i];
+
         if (!base || entry.rva > UINTPTR_MAX-base || entry.bytes.size()-1 > UINTPTR_MAX-base-entry.rva)
-        { error = "entity output address is outside the module"; return KEEL_RESULT_INCOMPATIBLE; }
+        {
+            error = "entity output address is outside the module";
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
+
         for (std::size_t j = 0; j < entry.bytes.size(); ++j)
             if (!platform::IsExecutableAddress(module,reinterpret_cast<void*>(base+entry.rva+j)))
-            { error = "entity output code is not readable and executable"; return KEEL_RESULT_INCOMPATIBLE; }
+            {
+                error = "entity output code is not readable and executable";
+                return KEEL_RESULT_INCOMPATIBLE;
+            }
+
         functions[i] = reinterpret_cast<void*>(base+entry.rva);
+
         if (std::memcmp(functions[i],entry.bytes.data(),entry.bytes.size()))
-        { error = "entity output code changed"; return KEEL_RESULT_INCOMPATIBLE; }
+        {
+            error = "entity output code changed";
+            return KEEL_RESULT_INCOMPATIBLE;
+        }
     }
+
     function = functions[0];
     return KEEL_RESULT_OK;
 }

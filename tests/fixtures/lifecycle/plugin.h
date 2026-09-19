@@ -24,16 +24,19 @@ public:
         const char* network_id,
         const char* address,
         bool fake_player) override;
+
     void OnClientPutInServer(
         CPlayerSlot slot,
         const char* name,
         int client_type,
         uint64 xuid) override;
+
     void OnClientActive(
         CPlayerSlot slot,
         bool load_game,
         const char* name,
         uint64 xuid) override;
+
     void OnClientFullyConnected(CPlayerSlot slot) override;
     void OnClientDisconnecting(
         CPlayerSlot slot,
@@ -41,6 +44,7 @@ public:
         const char* name,
         uint64 xuid,
         const char* network_id) override;
+
     void OnClientSettingsChanged(CPlayerSlot slot) override;
 
 private:

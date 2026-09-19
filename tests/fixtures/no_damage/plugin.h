@@ -64,6 +64,7 @@ private:
         keels2::kh::Call<std::int64_t>& call,
         DamageInfo* info,
         void* result);
+
     void Status(const CCommandContext&, const CCommand&);
 
     std::atomic<std::uint64_t> seen_{};

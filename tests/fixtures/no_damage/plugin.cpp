@@ -20,8 +20,10 @@ bool NoDamagePlugin::Load()
         LogError("profile-backed damage hook registration failed");
         return false;
     }
+
     LogMessage(
         "ready target=cs2.base_entity.take_damage policy=direct-player-weapons");
+
     return true;
 }
 
@@ -37,6 +39,7 @@ keels2::kh::Action NoDamagePlugin::OnDamage(
     const std::uint32_t victim_handle = valid
         ? static_cast<std::uint32_t>(victim->GetRefEHandle().ToInt())
         : invalid_handle;
+
     const Input input{
         valid,
         classname && std::strcmp(classname, "player") == 0,
@@ -47,6 +50,7 @@ keels2::kh::Action NoDamagePlugin::OnDamage(
         valid ? info->attacker_info.attacker_pawn : invalid_handle,
         valid ? info->damage_type : 0
     };
+
     if (valid)
     {
         last_victim_.store(victim_handle, std::memory_order_relaxed);
@@ -55,6 +59,7 @@ keels2::kh::Action NoDamagePlugin::OnDamage(
         last_source_.store(info->inflictor, std::memory_order_relaxed);
         last_damage_type_.store(info->damage_type, std::memory_order_relaxed);
     }
+
     switch (Classify(input))
     {
         case Decision::block:
@@ -63,24 +68,31 @@ keels2::kh::Action NoDamagePlugin::OnDamage(
                 result_errors_.fetch_add(1, std::memory_order_relaxed);
                 return keels2::kh::Action::Continue;
             }
+
             blocked_.fetch_add(1, std::memory_order_relaxed);
             return keels2::kh::Action::Supersede;
+
         case Decision::invalid:
             invalid_.fetch_add(1, std::memory_order_relaxed);
             break;
+
         case Decision::non_player_victim:
             non_player_victim_.fetch_add(1, std::memory_order_relaxed);
             break;
+
         case Decision::non_player_source:
             non_player_source_.fetch_add(1, std::memory_order_relaxed);
             break;
+
         case Decision::self_damage:
             self_damage_.fetch_add(1, std::memory_order_relaxed);
             break;
+
         case Decision::unrelated_damage:
             unrelated_damage_.fetch_add(1, std::memory_order_relaxed);
             break;
     }
+
     return keels2::kh::Action::Continue;
 }
 

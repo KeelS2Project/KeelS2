@@ -101,6 +101,7 @@ class ConVarRef
 {
 public:
     ConVarRef() : access_index_(0xffffu), padding_(0), registered_index_(0) {}
+
     ConVarRef(std::uint16_t access_index, std::int32_t registered_index)
         : access_index_(access_index), padding_(0), registered_index_(registered_index) {}
 
@@ -132,6 +133,7 @@ using GenericChangeCallback = void (*)(
     std::int32_t split_screen_slot,
     const ConVarValue* new_value,
     const ConVarValue* old_value);
+
 using GenericChangeProvider = void (*)(
     ConVarObject* reference,
     std::int32_t split_screen_slot,
@@ -139,11 +141,13 @@ using GenericChangeProvider = void (*)(
     const ConVarValue* old_value,
     void* unknown,
     GenericChangeCallback callback);
+
 using GenericFilterCallback = bool (*)(
     ConVarObject* reference,
     std::int32_t split_screen_slot,
     const ConVarValue* new_value,
     const ConVarValue* old_value);
+
 using GenericFilterProvider = bool (*)(
     ConVarObject* reference,
     std::int32_t split_screen_slot,
@@ -151,6 +155,7 @@ using GenericFilterProvider = bool (*)(
     const ConVarValue* old_value,
     void* unknown,
     GenericFilterCallback callback);
+
 using CustomDataProvider = void* (*)();
 
 struct ConVarValueInfo
@@ -220,6 +225,7 @@ class CommandRef
 {
 public:
     CommandRef() : access_index_(0xffffu), registered_index_(0) {}
+
     CommandRef(std::uint16_t access_index, std::int32_t registered_index)
         : access_index_(access_index), registered_index_(registered_index) {}
 
@@ -268,6 +274,7 @@ public:
         const ConVarValue* new_value,
         const ConVarValue* old_value,
         void* unknown) = 0;
+
     virtual void Slot15() = 0;
     virtual bool CallFilterCallback(
         ConVarRef reference,
@@ -275,6 +282,7 @@ public:
         const ConVarValue* new_value,
         const ConVarValue* old_value,
         void* unknown) = 0;
+
     virtual void Slot17() = 0;
     virtual void Slot18() = 0;
     virtual void Slot19() = 0;
@@ -287,6 +295,7 @@ public:
         const char* new_value,
         const char* old_value,
         void* unknown) = 0;
+
     virtual void Slot24() = 0;
     virtual void Slot25() = 0;
     virtual void Slot26() = 0;
@@ -306,6 +315,7 @@ public:
         std::uint64_t additional_flags,
         ConVarRef* reference,
         ConVarData** data) = 0;
+
     virtual void UnregisterConVarCallbacks(ConVarRef reference) = 0;
     virtual void Slot40() = 0;
     virtual ConVarData* GetConVarData(ConVarRef reference) = 0;

@@ -98,6 +98,7 @@ int main()
     const auto* linux_profile = keels2::cs2::FindCompatibilityProfile(
         {40344184, 0xd9145056b00162faull},
         "linuxsteamrt64");
+
     if (!linux_profile || std::strcmp(linux_profile->game_version, "2000880") != 0 ||
         std::strcmp(
             linux_profile->id,
@@ -112,6 +113,7 @@ int main()
     const auto* current_linux_profile = keels2::cs2::FindCompatibilityProfile(
         {40352056, 0x023a563a82a10f52ull},
         "linuxsteamrt64");
+
     if (!current_linux_profile ||
         std::strcmp(current_linux_profile->game_version, "2000884") != 0 ||
         std::strcmp(
@@ -127,6 +129,7 @@ int main()
     const auto* next_linux_profile = keels2::cs2::FindCompatibilityProfile(
         {40353400, 0x3aa4e49b8b45ac19ull},
         "linuxsteamrt64");
+
     if (!next_linux_profile ||
         std::strcmp(next_linux_profile->game_version, "2000885") != 0 ||
         std::strcmp(
@@ -143,6 +146,7 @@ int main()
     const auto* latest_linux_profile = keels2::cs2::FindCompatibilityProfile(
         {40541272, 0x6311ef1c33faf243ull},
         "linuxsteamrt64");
+
     if (!latest_linux_profile ||
         std::strcmp(latest_linux_profile->game_version, "2000888") != 0 ||
         std::strcmp(
@@ -159,6 +163,7 @@ int main()
     const auto* updated_linux_profile = keels2::cs2::FindCompatibilityProfile(
         {40541720, 0x9abcbab46e54de8eull},
         "linuxsteamrt64");
+
     if (!updated_linux_profile ||
         std::strcmp(updated_linux_profile->game_version, "2000897") != 0 ||
         std::strcmp(
@@ -175,6 +180,7 @@ int main()
     const auto* damage_linux_profile = keels2::cs2::FindCompatibilityProfile(
         {40540568, 0x542cc63d17821e66ull},
         "linuxsteamrt64");
+
     if (!damage_linux_profile ||
         std::strcmp(damage_linux_profile->game_version, "2000899") != 0 ||
         std::strcmp(
@@ -190,6 +196,7 @@ int main()
     const auto* current_damage_linux_profile = keels2::cs2::FindCompatibilityProfile(
         {40540568, 0xeefe3404272fed75ull},
         "linuxsteamrt64");
+
     if (!current_damage_linux_profile ||
         std::strcmp(current_damage_linux_profile->game_version, "25175329") != 0 ||
         std::strcmp(
@@ -205,6 +212,7 @@ int main()
     const auto* latest_damage_linux_profile = keels2::cs2::FindCompatibilityProfile(
         {40575640, 0xb2ce91a0f330222aull},
         "linuxsteamrt64");
+
     if (!latest_damage_linux_profile ||
         std::strcmp(latest_damage_linux_profile->game_version, "25218825") != 0 ||
         std::strcmp(
@@ -220,6 +228,7 @@ int main()
     const auto* previous_windows_profile = keels2::cs2::FindCompatibilityProfile(
         {32794264, 0x63eca0729c4fd8a9ull},
         "win64");
+
     if (!previous_windows_profile ||
         std::strcmp(previous_windows_profile->game_version, "2000879") != 0)
     {
@@ -229,6 +238,7 @@ int main()
     const auto* windows_profile = keels2::cs2::FindCompatibilityProfile(
         {32818840, 0xda8eb43f77d5c62full},
         "win64");
+
     if (!windows_profile || std::strcmp(windows_profile->game_version, "2000880") != 0 ||
         std::strcmp(
             windows_profile->id,
@@ -243,6 +253,7 @@ int main()
     const auto* current_windows_profile = keels2::cs2::FindCompatibilityProfile(
         {32824984, 0x286e997327894e53ull},
         "win64");
+
     if (!current_windows_profile ||
         std::strcmp(current_windows_profile->game_version, "2000884") != 0 ||
         std::strcmp(
@@ -258,6 +269,7 @@ int main()
     const auto* next_windows_profile = keels2::cs2::FindCompatibilityProfile(
         {32826008, 0xb3f810b3507341c6ull},
         "win64");
+
     if (!next_windows_profile ||
         std::strcmp(next_windows_profile->game_version, "2000885") != 0 ||
         std::strcmp(
@@ -274,6 +286,7 @@ int main()
     const auto* latest_windows_profile = keels2::cs2::FindCompatibilityProfile(
         {33003672, 0x02e0bdaaa3f43453ull},
         "win64");
+
     if (!latest_windows_profile ||
         std::strcmp(latest_windows_profile->game_version, "2000888") != 0 ||
         std::strcmp(
@@ -290,6 +303,7 @@ int main()
     const auto* updated_windows_profile = keels2::cs2::FindCompatibilityProfile(
         {33003672, 0xd94e9db0d5b9b5c9ull},
         "win64");
+
     if (!updated_windows_profile ||
         std::strcmp(updated_windows_profile->game_version, "2000897") != 0 ||
         std::strcmp(
@@ -306,6 +320,7 @@ int main()
     const auto* damage_windows_profile = keels2::cs2::FindCompatibilityProfile(
         {33002648, 0x43286dc938300339ull},
         "win64");
+
     if (!damage_windows_profile ||
         std::strcmp(damage_windows_profile->game_version, "2000899") != 0 ||
         std::strcmp(
@@ -321,6 +336,7 @@ int main()
     const auto* current_damage_windows_profile = keels2::cs2::FindCompatibilityProfile(
         {33002648, 0x859eff2ae36ba752ull},
         "win64");
+
     if (!current_damage_windows_profile ||
         std::strcmp(current_damage_windows_profile->game_version, "25175329") != 0 ||
         std::strcmp(
@@ -336,6 +352,7 @@ int main()
     const auto* latest_damage_windows_profile = keels2::cs2::FindCompatibilityProfile(
         {33042584, 0x2212b672d2410a30ull},
         "win64");
+
     if (!latest_damage_windows_profile ||
         std::strcmp(latest_damage_windows_profile->game_version, "25218825") != 0 ||
         std::strcmp(

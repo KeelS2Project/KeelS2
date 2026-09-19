@@ -26,6 +26,7 @@ void ReleaseCommand(const KeelCommandInvocation*, void*)
         g_host->log(g_plugin, KEEL_LOG_ERROR, "service lease release failed");
         return;
     }
+
     g_released = true;
     g_host->log(g_plugin, KEEL_LOG_INFO, "service lease released");
 }
@@ -33,6 +34,7 @@ void ReleaseCommand(const KeelCommandInvocation*, void*)
 void VerifyGoneCommand(const KeelCommandInvocation*, void*)
 {
     const void* service = reinterpret_cast<const void*>(1);
+
     if (!g_released || g_host->query_service(
             g_plugin,
             KEELS2_TEST_MATH_SERVICE_NAME,
@@ -42,6 +44,7 @@ void VerifyGoneCommand(const KeelCommandInvocation*, void*)
         g_host->log(g_plugin, KEEL_LOG_ERROR, "withdrawn service remained queryable");
         return;
     }
+
     g_host->log(g_plugin, KEEL_LOG_INFO, "withdrawn service is no longer queryable");
 }
 
@@ -71,6 +74,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Query(
     {
         return KEEL_FALSE;
     }
+
     *info = {
         sizeof(KeelPluginInfo),
         KEELS2_PLUGIN_ABI_VERSION,
@@ -92,12 +96,14 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     g_host = api;
     g_plugin = plugin;
     g_released = false;
     const void* services{};
     const void* wrong = reinterpret_cast<const void*>(1);
     const void* value{};
+
     if (api->query_service(
             plugin,
             KEELS2_SERVICES_SERVICE_NAME,
@@ -116,8 +122,10 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     g_services = static_cast<const KeelServicesApi*>(services);
     const auto* math = static_cast<const KeelTestMathService*>(value);
+
     if (math->size != sizeof(KeelTestMathService) ||
         math->version != KEELS2_TEST_MATH_SERVICE_VERSION || !math->add ||
         math->add(20, 22) != 42 ||
@@ -126,6 +134,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     api->log(plugin, KEEL_LOG_INFO, "versioned service consumed");
     return KEEL_TRUE;
 }

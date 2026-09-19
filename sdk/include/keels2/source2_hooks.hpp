@@ -37,6 +37,7 @@ struct ValueAdapter<ConCommandRef>
         const auto registered = static_cast<std::uint32_t>(input.GetRegisteredIndex());
         value.scalar.uint64 = static_cast<std::uint64_t>(input.GetAccessIndex()) |
             (static_cast<std::uint64_t>(registered) << 32);
+
         value.reserved = 0;
         return true;
     }

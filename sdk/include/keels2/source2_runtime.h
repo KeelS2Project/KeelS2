@@ -16,11 +16,14 @@ typedef struct KeelSource2RuntimeApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*server_command)(KeelPluginHandle plugin, const char* command);
+
     KeelResult (*client_console_print)(
         KeelPluginHandle plugin,
         int32_t slot,
         const char* message);
+
     KeelResult (*find_user_message)(
         KeelPluginHandle plugin,
         const char* name,

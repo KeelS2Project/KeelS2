@@ -72,25 +72,33 @@ typedef struct KeelPluginsApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*count)(KeelPluginHandle plugin, uint32_t* count);
+
     KeelResult (*at)(
         KeelPluginHandle plugin,
         uint32_t index,
         KeelPluginSnapshot* snapshot);
+
     KeelResult (*get)(
         KeelPluginHandle plugin,
         KeelPluginHandle target,
         KeelPluginSnapshot* snapshot);
+
     KeelResult (*find)(
         KeelPluginHandle plugin,
         const char* name,
         KeelPluginSnapshot* snapshot);
+
     KeelResult (*pause)(KeelPluginHandle plugin, KeelPluginHandle target);
+
     KeelResult (*resume)(KeelPluginHandle plugin, KeelPluginHandle target);
+
     KeelResult (*subscribe)(
         KeelPluginHandle plugin,
         const KeelPluginSubscriptionSpec* spec,
         KeelPluginSubscriptionHandle* subscription);
+
     KeelResult (*unsubscribe)(
         KeelPluginHandle plugin,
         KeelPluginSubscriptionHandle subscription);

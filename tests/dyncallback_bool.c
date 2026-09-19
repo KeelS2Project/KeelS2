@@ -7,6 +7,7 @@ int KeelTest_DyncallbackBool(void)
     stack_false.stack_ptr = &stack_value;
     stack_false.reg_count.i = numIntRegs;
     stack_false.aggr_return_register = -1;
+
     if (dcbArgBool(&stack_false) != DC_FALSE)
     {
         return 0;
@@ -17,6 +18,7 @@ int KeelTest_DyncallbackBool(void)
     stack_true.stack_ptr = &stack_value;
     stack_true.reg_count.i = numIntRegs;
     stack_true.aggr_return_register = -1;
+
     if (dcbArgBool(&stack_true) != DC_TRUE)
     {
         return 0;
@@ -28,6 +30,7 @@ int KeelTest_DyncallbackBool(void)
     register_false.reg_count.i = 0;
     register_false.aggr_return_register = -1;
     register_false.reg_data.i[0] = 0x100;
+
     if (dcbArgBool(&register_false) != DC_FALSE)
     {
         return 0;

@@ -3,4 +3,7 @@
 #else
 #define EXPORT __attribute__((visibility("default")))
 #endif
-extern "C" EXPORT int KeelDependencyValue() { return 41; }
+extern "C" EXPORT int KeelDependencyValue()
+{
+    return 41;
+}

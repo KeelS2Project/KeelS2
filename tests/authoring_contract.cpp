@@ -87,6 +87,7 @@ bool HasLog(KeelLogLevel level, const char* text)
             return true;
         }
     }
+
     return false;
 }
 
@@ -99,6 +100,7 @@ LifecycleRecord* LifecycleByEvent(KeelLifecycleEventType event)
             return &record;
         }
     }
+
     return nullptr;
 }
 
@@ -111,6 +113,7 @@ CommandRecord* CommandByName(const char* name)
             return &record;
         }
     }
+
     return nullptr;
 }
 
@@ -123,6 +126,7 @@ bool AllResourcesReleased()
             return false;
         }
     }
+
     for (const auto& record : g_command_records)
     {
         if (record.active)
@@ -130,6 +134,7 @@ bool AllResourcesReleased()
             return false;
         }
     }
+
     return true;
 }
 
@@ -157,10 +162,12 @@ KeelResult RegisterCommand(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     if (g_fail_command_registration)
     {
         return KEEL_RESULT_ENGINE_FAILURE;
     }
+
     for (const auto& record : g_command_records)
     {
         if (record.active && record.name == spec->name)
@@ -168,6 +175,7 @@ KeelResult RegisterCommand(
             return KEEL_RESULT_ALREADY_EXISTS;
         }
     }
+
     CommandRecord record;
     record.name = spec->name;
     record.flags = spec->flags;
@@ -191,11 +199,13 @@ KeelResult RegisterSource2Command(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     if (g_fail_command_registration ||
         (g_fail_command_name && std::strcmp(spec->name, g_fail_command_name) == 0))
     {
         return KEEL_RESULT_ENGINE_FAILURE;
     }
+
     for (const auto& record : g_command_records)
     {
         if (record.active && record.name == spec->name)
@@ -203,6 +213,7 @@ KeelResult RegisterSource2Command(
             return KEEL_RESULT_ALREADY_EXISTS;
         }
     }
+
     CommandRecord record;
     record.name = spec->name;
     record.flags = spec->flags;
@@ -247,11 +258,13 @@ KeelResult UnregisterCommand(KeelPluginHandle plugin, KeelCommandHandle command)
             {
                 return KEEL_RESULT_NOT_FOUND;
             }
+
             record.active = false;
             ++g_unregister_count;
             return KEEL_RESULT_OK;
         }
     }
+
     return KEEL_RESULT_NOT_FOUND;
 }
 
@@ -265,10 +278,12 @@ KeelResult Subscribe(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     if (spec->event == g_fail_subscription_event)
     {
         return KEEL_RESULT_ENGINE_FAILURE;
     }
+
     LifecycleRecord record;
     record.spec = *spec;
     record.handle = g_next_subscription++;
@@ -276,6 +291,7 @@ KeelResult Subscribe(
     record.active = true;
     *subscription = record.handle;
     g_lifecycle_records.push_back(record);
+
     if (g_dispatch_during_subscribe)
     {
         if (spec->event == KEELS2_LIFECYCLE_CLIENT_ACTIVE)
@@ -300,6 +316,7 @@ KeelResult Subscribe(
             spec->callback(&event, spec->user_data);
         }
     }
+
     return KEEL_RESULT_OK;
 }
 
@@ -315,11 +332,13 @@ KeelResult Unsubscribe(
             {
                 return KEEL_RESULT_NOT_FOUND;
             }
+
             record.active = false;
             ++g_unsubscribe_count;
             return KEEL_RESULT_OK;
         }
     }
+
     return KEEL_RESULT_NOT_FOUND;
 }
 
@@ -332,11 +351,13 @@ KeelResult QuerySource2(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     ++g_source2_queries;
     void* instance{};
     const char* interface_name{};
     const char* module_name{};
     KeelSource2Factory factory{};
+
     switch (capability)
     {
     case KEELS2_SOURCE2_CAPABILITY_SERVER:
@@ -345,12 +366,14 @@ KeelResult QuerySource2(
         module_name = "server";
         factory = KEELS2_SOURCE2_FACTORY_SERVER;
         break;
+
     case KEELS2_SOURCE2_CAPABILITY_GAME_CLIENTS:
         instance = &g_game_clients;
         interface_name = "Source2GameClients001";
         module_name = "server";
         factory = KEELS2_SOURCE2_FACTORY_SERVER;
         break;
+
     case KEELS2_SOURCE2_CAPABILITY_CVAR:
         instance = &g_cvar;
         interface_name = "VEngineCvar007";
@@ -358,10 +381,13 @@ KeelResult QuerySource2(
         factory = g_wrong_provenance
             ? KEELS2_SOURCE2_FACTORY_SERVER
             : KEELS2_SOURCE2_FACTORY_ENGINE;
+
         break;
+
     default:
         return KEEL_RESULT_UNSUPPORTED;
     }
+
     *info = {
         sizeof(KeelSource2InterfaceInfo), capability, factory,
         KEELS2_SOURCE2_OWNERSHIP_BORROWED, KEELS2_SOURCE2_LIFETIME_HOST, 0,
@@ -383,9 +409,11 @@ KeelResult QueryNamedSource2(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     ++g_source2_named_queries;
     void* instance{};
     const char* module_name{};
+
     if (factory == KEELS2_SOURCE2_FACTORY_ENGINE &&
         std::strcmp(interface_name, "FixtureEngine001") == 0)
     {
@@ -402,6 +430,7 @@ KeelResult QueryNamedSource2(
     {
         return KEEL_RESULT_NOT_FOUND;
     }
+
     *info = {
         sizeof(KeelSource2InterfaceInfo), KEELS2_SOURCE2_CAPABILITY_NAMED, factory,
         KEELS2_SOURCE2_OWNERSHIP_BORROWED, KEELS2_SOURCE2_LIFETIME_HOST, 0,
@@ -443,21 +472,27 @@ KeelResult QueryService(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     *service = nullptr;
+
     if (std::strcmp(name, KEELS2_LIFECYCLE_SERVICE_NAME) == 0)
     {
         ++g_lifecycle_queries;
+
         if (g_lifecycle_unavailable)
         {
             return KEEL_RESULT_NOT_FOUND;
         }
+
         if (version != KEELS2_LIFECYCLE_API_VERSION)
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         *service = &g_lifecycle_api;
         return KEEL_RESULT_OK;
     }
+
     if (std::strcmp(name, KEELS2_SOURCE2_SERVICE_NAME) == 0)
     {
         if (version == KEELS2_SOURCE2_API_VERSION_1)
@@ -465,22 +500,27 @@ KeelResult QueryService(
             *service = &g_source2_api_v1;
             return KEEL_RESULT_OK;
         }
+
         if (version != KEELS2_SOURCE2_API_VERSION)
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         *service = &g_source2_api;
         return KEEL_RESULT_OK;
     }
+
     if (std::strcmp(name, KEELS2_SOURCE2_AUTHORING_SERVICE_NAME) == 0)
     {
         if (version != KEELS2_SOURCE2_AUTHORING_API_VERSION)
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         *service = &g_source2_authoring_api;
         return KEEL_RESULT_OK;
     }
+
     return KEEL_RESULT_NOT_FOUND;
 }
 
@@ -498,8 +538,10 @@ int main(int argument_count, char** arguments)
     {
         return Failure(1, "plugin path is required");
     }
+
     keels2::platform::DynamicLibrary library;
     std::string error;
+
     if (!library.Open(std::filesystem::path(arguments[1]), error))
     {
         return Failure(2, "plugin could not be opened");
@@ -533,6 +575,7 @@ int main(int argument_count, char** arguments)
     const auto destroy_command = Symbol<DestroyCommandFn>(library, "KeelTest_AuthoringDestroyCommand");
     const auto create_context = Symbol<CreateContextFn>(library, "KeelTest_AuthoringCreateCommandContext");
     const auto destroy_context = Symbol<DestroyContextFn>(library, "KeelTest_AuthoringDestroyCommandContext");
+
     if (!query || !load || !unload || !reset || !set_mode || !load_count || !unload_count ||
         !active_count || !settings_count || !self_remove_count || !throw_command_count ||
         !source2_ready || !unload_source2_null || !active_arguments_valid ||
@@ -550,10 +593,12 @@ int main(int argument_count, char** arguments)
     ResetHost();
     reset();
     set_mode(4);
+
     if (load(&api, 99) != KEEL_FALSE || load_count() != 0 || !AllResourcesReleased())
     {
         return Failure(21, "constructor exception escaped the load boundary");
     }
+
     unload(99);
     set_mode(0);
 
@@ -569,37 +614,47 @@ int main(int argument_count, char** arguments)
     invalid_host_query.size = 0;
     KeelPluginInfo invalid_info{};
     invalid_info.size = sizeof(invalid_info);
+
     if (query(&invalid_host_query, &invalid_info) != KEEL_FALSE)
     {
         return Failure(4, "invalid query envelope was accepted");
     }
+
     invalid_info.size = 0;
+
     if (query(&host_query, &invalid_info) != KEEL_FALSE)
     {
         return Failure(5, "invalid metadata envelope was accepted");
     }
+
     set_mode(4);
     invalid_info.size = sizeof(invalid_info);
+
     if (query(&host_query, &invalid_info) != KEEL_TRUE || !invalid_info.name ||
         std::strcmp(invalid_info.name, "Authoring Contract") != 0)
     {
         return Failure(6, "static metadata query constructed the plugin");
     }
+
     set_mode(0);
     KeelPluginInfo info{};
     info.size = sizeof(info);
+
     if (query(&host_query, &info) != KEEL_TRUE || !info.name ||
         std::strcmp(info.name, "Authoring Contract") != 0)
     {
         return Failure(7, "facade query failed");
     }
+
     ResetHost();
     reset();
+
     if (load(&api, 1) != KEEL_TRUE || load_count() != 1 || source2_ready() != KEEL_TRUE ||
         g_source2_queries != 3 || g_source2_named_queries != 3)
     {
         return Failure(8, "successful facade load failed");
     }
+
     if (g_lifecycle_queries != 1 || g_lifecycle_records.size() != 2 ||
         g_lifecycle_records[0].spec.event != KEELS2_LIFECYCLE_CLIENT_ACTIVE ||
         g_lifecycle_records[1].spec.event != KEELS2_LIFECYCLE_CLIENT_SETTINGS_CHANGED ||
@@ -610,10 +665,12 @@ int main(int argument_count, char** arguments)
 
     LifecycleRecord* active = LifecycleByEvent(KEELS2_LIFECYCLE_CLIENT_ACTIVE);
     LifecycleRecord* settings = LifecycleByEvent(KEELS2_LIFECYCLE_CLIENT_SETTINGS_CHANGED);
+
     if (!active || !settings)
     {
         return Failure(10, "expected lifecycle subscriptions are unavailable");
     }
+
     const KeelLifecycleClientActive malformed_payload{
         0, 4, 76561198000000004ull, "Keel", KEEL_FALSE, 0
     };
@@ -638,6 +695,7 @@ int main(int argument_count, char** arguments)
         sizeof(invalid_reserved_payload), 0, &invalid_reserved_payload
     };
     active->spec.callback(&invalid_reserved_payload_event, active->spec.user_data);
+
     if (active_count() != 0)
     {
         return Failure(11, "malformed lifecycle payload was dispatched");
@@ -651,10 +709,12 @@ int main(int argument_count, char** arguments)
         sizeof(throwing_payload), 0, &throwing_payload
     };
     active->spec.callback(&throwing_event, active->spec.user_data);
+
     if (active_count() != 1 || !HasLog(KEEL_LOG_ERROR, "lifecycle callback"))
     {
         return Failure(12, "lifecycle exception was not contained");
     }
+
     const KeelLifecycleClientActive valid_payload{
         sizeof(KeelLifecycleClientActive), 4, 76561198000000004ull, "Keel", KEEL_FALSE, 0
     };
@@ -677,6 +737,7 @@ int main(int argument_count, char** arguments)
         sizeof(settings_payload), 0, &settings_payload
     };
     settings->spec.callback(&settings_event, settings->spec.user_data);
+
     if (active_count() != 2 || settings_count() != 1 ||
         active_arguments_valid() != KEEL_TRUE || settings_arguments_valid() != KEEL_TRUE)
     {
@@ -685,52 +746,66 @@ int main(int argument_count, char** arguments)
 
     CommandRecord* self_remove = CommandByName("authoring_self_remove");
     CommandRecord* throwing_command = CommandByName("authoring_throw");
+
     if (!self_remove || !throwing_command || self_remove->flags != 0 ||
         throwing_command->flags != std::uint64_t{0x2000})
     {
         return Failure(14, "facade commands or raw flags were not registered");
     }
+
     const KeelSource2CommandCallback saved_self_callback = self_remove->callback;
     void* const saved_self_user_data = self_remove->user_data;
     void* command_context = create_context();
     void* self_invocation = create_command("authoring_self_remove");
+
     if (!command_context || !self_invocation)
     {
         return Failure(15, "Source 2 command fixture could not be created");
     }
+
     saved_self_callback(command_context, self_invocation, saved_self_user_data);
+
     if (self_remove_count() != 1 || self_remove_succeeded() != KEEL_TRUE ||
         self_remove->active || g_unregister_count != 1)
     {
         return Failure(15, "self-removing command failed");
     }
+
     saved_self_callback(command_context, self_invocation, saved_self_user_data);
     destroy_command(self_invocation);
+
     if (self_remove_count() != 1)
     {
         return Failure(16, "removed command binding remained dispatchable");
     }
+
     void* throwing_invocation = create_command("authoring_throw");
+
     if (!throwing_invocation)
     {
         return Failure(17, "throwing Source 2 command fixture could not be created");
     }
+
     throwing_command->callback(
         command_context,
         throwing_invocation,
         throwing_command->user_data);
+
     throwing_command->callback(
         command_context,
         throwing_invocation,
         throwing_command->user_data);
+
     destroy_command(throwing_invocation);
     destroy_context(command_context);
+
     if (throw_command_count() != 2 || !HasLog(KEEL_LOG_ERROR, "command callback"))
     {
         return Failure(17, "command exception was not contained");
     }
 
     unload(1);
+
     if (unload_count() != 1 || unload_source2_null() != KEEL_TRUE ||
         g_unsubscribe_count != 2 || g_unregister_count != 2 || !AllResourcesReleased())
     {
@@ -740,12 +815,15 @@ int main(int argument_count, char** arguments)
     ResetHost();
     reset();
     g_wrong_provenance = true;
+
     if (load(&api, 2) != KEEL_TRUE || source2_ready() != KEEL_FALSE ||
         g_source2_queries != 3 || g_source2_named_queries != 3)
     {
         return Failure(19, "incorrect Source2 provenance was accepted");
     }
+
     unload(2);
+
     if (unload_count() != 1 || unload_source2_null() != KEEL_TRUE || !AllResourcesReleased())
     {
         return Failure(20, "provenance-test unload failed");
@@ -755,12 +833,15 @@ int main(int argument_count, char** arguments)
     reset();
     KeelHostApi invalid_api = api;
     invalid_api.query_service = nullptr;
+
     if (load(&invalid_api, 3) != KEEL_FALSE || load_count() != 0 ||
         g_lifecycle_queries != 0 || !AllResourcesReleased())
     {
         return Failure(22, "invalid host API was accepted");
     }
+
     unload(3);
+
     if (unload_count() != 0)
     {
         return Failure(23, "author Unload ran after invalid host API rejection");
@@ -769,12 +850,15 @@ int main(int argument_count, char** arguments)
     ResetHost();
     reset();
     g_lifecycle_unavailable = true;
+
     if (load(&api, 4) != KEEL_FALSE || load_count() != 0 ||
         g_lifecycle_queries != 1 || !AllResourcesReleased())
     {
         return Failure(24, "missing lifecycle service was accepted");
     }
+
     unload(4);
+
     if (unload_count() != 0)
     {
         return Failure(25, "author Unload ran after lifecycle setup failure");
@@ -783,13 +867,16 @@ int main(int argument_count, char** arguments)
     ResetHost();
     reset();
     g_fail_subscription_event = KEELS2_LIFECYCLE_CLIENT_SETTINGS_CHANGED;
+
     if (load(&api, 5) != KEEL_FALSE || load_count() != 0 ||
         g_lifecycle_records.size() != 1 || g_unsubscribe_count != 1 ||
         !AllResourcesReleased())
     {
         return Failure(26, "partial lifecycle setup was not rolled back");
     }
+
     unload(5);
+
     if (unload_count() != 0)
     {
         return Failure(27, "author Unload ran after partial lifecycle setup failure");
@@ -798,13 +885,16 @@ int main(int argument_count, char** arguments)
     ResetHost();
     reset();
     g_fail_command_registration = true;
+
     if (load(&api, 6) != KEEL_FALSE || load_count() != 1 ||
         g_unsubscribe_count != 2 || g_unregister_count != 0 ||
         !AllResourcesReleased())
     {
         return Failure(28, "command registration failure was not rolled back");
     }
+
     unload(6);
+
     if (unload_count() != 0)
     {
         return Failure(29, "author Unload ran after command registration failure");
@@ -813,13 +903,16 @@ int main(int argument_count, char** arguments)
     ResetHost();
     reset();
     g_fail_command_name = "authoring_throw";
+
     if (load(&api, 6) != KEEL_FALSE || load_count() != 1 ||
         g_command_records.size() != 1 || g_unregister_count != 1 ||
         g_unsubscribe_count != 2 || !AllResourcesReleased())
     {
         return Failure(40, "second command failure leaked the first command or lifecycle subscriptions");
     }
+
     unload(6);
+
     if (unload_count() != 0)
     {
         return Failure(41, "author Unload ran after partial command registration failure");
@@ -828,12 +921,15 @@ int main(int argument_count, char** arguments)
     ResetHost();
     reset();
     set_mode(1);
+
     if (load(&api, 7) != KEEL_FALSE || load_count() != 1 || unload_count() != 0 ||
         g_unsubscribe_count != 2 || g_unregister_count != 2 || !AllResourcesReleased())
     {
         return Failure(30, "false Load rollback failed");
     }
+
     unload(7);
+
     if (unload_count() != 0)
     {
         return Failure(31, "author Unload ran after false Load");
@@ -842,12 +938,15 @@ int main(int argument_count, char** arguments)
     ResetHost();
     reset();
     set_mode(2);
+
     if (load(&api, 8) != KEEL_FALSE || load_count() != 1 || unload_count() != 0 ||
         g_unsubscribe_count != 2 || g_unregister_count != 2 || !AllResourcesReleased())
     {
         return Failure(32, "throwing Load rollback failed");
     }
+
     unload(8);
+
     if (unload_count() != 0)
     {
         return Failure(33, "author Unload ran after throwing Load");
@@ -855,12 +954,15 @@ int main(int argument_count, char** arguments)
 
     ResetHost();
     reset();
+
     if (load(&api, 9) != KEEL_TRUE)
     {
         return Failure(34, "unload-exception fixture failed to load");
     }
+
     set_mode(5);
     unload(9);
+
     if (unload_count() != 1 || unload_source2_null() != KEEL_TRUE ||
         !HasLog(KEEL_LOG_ERROR, "unload callback") || !AllResourcesReleased())
     {

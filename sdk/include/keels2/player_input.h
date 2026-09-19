@@ -38,6 +38,7 @@ typedef struct KeelPlayerInputApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*read)(KeelPluginHandle plugin, const KeelPlayerConnection* player, KeelPlayerInput* input);
 } KeelPlayerInputApi;
 

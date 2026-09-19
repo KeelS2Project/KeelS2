@@ -29,6 +29,7 @@ struct Source2CallbacksService::Subscription
 std::atomic<Source2CallbacksService*> Source2CallbacksService::active_{};
 thread_local std::array<const Source2CallbacksService::Subscription*, 64>
     Source2CallbacksService::callback_stack_{};
+
 thread_local std::size_t Source2CallbacksService::callback_depth_{};
 
 Source2CallbacksService::Source2CallbacksService(
@@ -38,10 +39,12 @@ Source2CallbacksService::Source2CallbacksService(
     : host_(host), adapter_(adapter), hooks_(hooks)
 {
     Source2CallbacksService* expected{};
+
     if (!active_.compare_exchange_strong(expected, this, std::memory_order_acq_rel))
     {
         throw std::runtime_error("Source 2 callback service already exists");
     }
+
     api_ = {
         sizeof(KeelSource2CallbacksApi),
         KEELS2_SOURCE2_CALLBACKS_API_VERSION,
@@ -55,6 +58,7 @@ Source2CallbacksService::Source2CallbacksService(
         &DispatchEntry,
         this,
         error);
+
     if (result != KEEL_RESULT_OK)
     {
         active_.store(nullptr, std::memory_order_release);
@@ -77,13 +81,16 @@ const KeelSource2CallbacksApi& Source2CallbacksService::Api() const noexcept
 void Source2CallbacksService::Activate(KeelPluginHandle plugin)
 {
     std::scoped_lock lock(registry_mutex_);
+
     if (shutting_down_)
     {
         return;
     }
+
     for (const auto& [handle, subscription] : subscriptions_)
     {
         static_cast<void>(handle);
+
         if (subscription->owner == plugin)
         {
             subscription->enabled.store(true, std::memory_order_release);
@@ -96,13 +103,16 @@ KeelResult Source2CallbacksService::Deactivate(KeelPluginHandle plugin)
     std::vector<std::shared_ptr<Subscription>> owned;
     {
         std::scoped_lock lock(registry_mutex_);
+
         if (IsCurrentOwner(plugin))
         {
             return KEEL_RESULT_BUSY;
         }
+
         for (const auto& [handle, subscription] : subscriptions_)
         {
             static_cast<void>(handle);
+
             if (subscription->owner == plugin)
             {
                 subscription->enabled.store(false, std::memory_order_release);
@@ -110,20 +120,24 @@ KeelResult Source2CallbacksService::Deactivate(KeelPluginHandle plugin)
             }
         }
     }
+
     for (const auto& subscription : owned)
     {
         WaitForZero(subscription->active);
     }
+
     return KEEL_RESULT_OK;
 }
 
 KeelResult Source2CallbacksService::ReleasePlugin(KeelPluginHandle plugin)
 {
     const KeelResult result = Deactivate(plugin);
+
     if (result != KEEL_RESULT_OK)
     {
         return result;
     }
+
     std::scoped_lock lock(registry_mutex_);
     std::erase_if(subscriptions_, [plugin](const auto& entry) {
         return entry.second->owner == plugin;
@@ -137,12 +151,15 @@ bool Source2CallbacksService::Shutdown()
     bool current{};
     {
         std::scoped_lock lock(registry_mutex_);
+
         if (shutdown_complete_)
         {
             return true;
         }
+
         shutting_down_ = true;
         subscriptions.reserve(subscriptions_.size());
+
         for (const auto& [handle, subscription] : subscriptions_)
         {
             static_cast<void>(handle);
@@ -151,14 +168,17 @@ bool Source2CallbacksService::Shutdown()
             current = current || IsCurrentCallback(subscription.get());
         }
     }
+
     if (current)
     {
         return false;
     }
+
     for (const auto& subscription : subscriptions)
     {
         WaitForZero(subscription->active);
     }
+
     adapter_.ShutdownSource2Callbacks();
     std::scoped_lock lock(registry_mutex_);
     subscriptions_.clear();
@@ -173,10 +193,12 @@ KeelResult Source2CallbacksService::SubscribeEntry(
     KeelSource2SubscriptionHandle* subscription)
 {
     Source2CallbacksService* service = active_.load(std::memory_order_acquire);
+
     if (!service)
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     try
     {
         return service->Subscribe(plugin, spec, subscription);
@@ -193,10 +215,12 @@ KeelResult Source2CallbacksService::UnsubscribeEntry(
     KeelSource2SubscriptionHandle subscription)
 {
     Source2CallbacksService* service = active_.load(std::memory_order_acquire);
+
     if (!service)
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     try
     {
         return service->Unsubscribe(plugin, subscription);
@@ -228,8 +252,10 @@ KeelResult Source2CallbacksService::Subscribe(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     *output = 0;
     std::string game_event;
+
     if (spec->type == KEELS2_SOURCE2_GAME_EVENT)
     {
         if (!ValidEventName(spec->game_event, game_event))
@@ -245,6 +271,7 @@ KeelResult Source2CallbacksService::Subscribe(
     {
         std::scoped_lock host_lock(host_.state_mutex_);
         PluginRecord* owner = host_.PluginByHandle(plugin);
+
         if (!host_.accepting_resources_ || !owner || !owner->accepting_resources)
         {
             return KEEL_RESULT_NOT_READY;
@@ -254,22 +281,27 @@ KeelResult Source2CallbacksService::Subscribe(
     if (!game_event.empty())
     {
         std::scoped_lock lock(registry_mutex_);
+
         if (shutting_down_)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         if (!listened_events_.contains(game_event))
         {
             std::string error;
             const KeelResult result = adapter_.ListenForGameEvent(game_event.c_str(), error);
+
             if (result != KEEL_RESULT_OK)
             {
                 if (!error.empty())
                 {
                     host_.Write(KEEL_LOG_ERROR, error);
                 }
+
                 return result;
             }
+
             listened_events_.insert(game_event);
         }
     }
@@ -277,14 +309,17 @@ KeelResult Source2CallbacksService::Subscribe(
     std::scoped_lock host_lock(host_.state_mutex_);
     std::scoped_lock registry_lock(registry_mutex_);
     PluginRecord* owner = host_.PluginByHandle(plugin);
+
     if (shutting_down_ || !host_.accepting_resources_ || !owner || !owner->accepting_resources)
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     if (next_subscription_ == 0 || next_sequence_ == 0)
     {
         return KEEL_RESULT_ENGINE_FAILURE;
     }
+
     auto subscription = std::make_shared<Subscription>();
     subscription->handle = next_subscription_++;
     subscription->owner = plugin;
@@ -297,6 +332,7 @@ KeelResult Source2CallbacksService::Subscribe(
     subscription->enabled.store(
         owner->state == PluginState::loaded && !owner->loading,
         std::memory_order_release);
+
     const auto handle = subscription->handle;
     subscriptions_.emplace(handle, std::move(subscription));
     *output = handle;
@@ -311,24 +347,30 @@ KeelResult Source2CallbacksService::Unsubscribe(
     {
         std::scoped_lock lock(registry_mutex_);
         const auto iterator = subscriptions_.find(handle);
+
         if (iterator == subscriptions_.end() || iterator->second->owner != plugin)
         {
             return KEEL_RESULT_NOT_FOUND;
         }
+
         subscription = iterator->second;
         subscription->enabled.store(false, std::memory_order_release);
+
         if (IsCurrentCallback(subscription.get()))
         {
             return KEEL_RESULT_BUSY;
         }
     }
+
     WaitForZero(subscription->active);
     std::scoped_lock lock(registry_mutex_);
     const auto iterator = subscriptions_.find(handle);
+
     if (iterator != subscriptions_.end() && iterator->second == subscription)
     {
         subscriptions_.erase(iterator);
     }
+
     return KEEL_RESULT_OK;
 }
 
@@ -338,22 +380,28 @@ KeelBool Source2CallbacksService::Dispatch(KeelSource2CallbackEvent& event)
     {
         return KEEL_TRUE;
     }
+
     const char* event_name{};
+
     if (event.type == KEELS2_SOURCE2_GAME_EVENT)
     {
         const auto* payload = static_cast<const KeelSource2GameEvent*>(event.payload);
         event_name = payload->name;
     }
+
     std::vector<std::shared_ptr<Subscription>> callbacks;
     {
         std::scoped_lock lock(registry_mutex_);
+
         if (shutting_down_)
         {
             return KEEL_TRUE;
         }
+
         for (const auto& [handle, subscription] : subscriptions_)
         {
             static_cast<void>(handle);
+
             if (subscription->type == event.type &&
                 subscription->enabled.load(std::memory_order_acquire) &&
                 (event.type != KEELS2_SOURCE2_GAME_EVENT ||
@@ -363,6 +411,7 @@ KeelBool Source2CallbacksService::Dispatch(KeelSource2CallbackEvent& event)
             }
         }
     }
+
     std::sort(callbacks.begin(), callbacks.end(), [](const auto& left, const auto& right) {
         return left->priority != right->priority
             ? left->priority > right->priority
@@ -371,14 +420,17 @@ KeelBool Source2CallbacksService::Dispatch(KeelSource2CallbackEvent& event)
 
     bool accepted = true;
     std::array<char, KEELS2_SOURCE2_REJECTION_CAPACITY> winning_rejection{};
+
     for (const auto& callback : callbacks)
     {
         callback->active.fetch_add(1, std::memory_order_acq_rel);
+
         if (!callback->enabled.load(std::memory_order_acquire))
         {
             LeaveActive(callback->active);
             continue;
         }
+
         if (callback_depth_ == callback_stack_.size())
         {
             LeaveActive(callback->active);
@@ -389,6 +441,7 @@ KeelBool Source2CallbacksService::Dispatch(KeelSource2CallbackEvent& event)
         KeelSource2CallbackEvent callback_event = event;
         KeelSource2ClientConnect connect_payload{};
         std::array<char, KEELS2_SOURCE2_REJECTION_CAPACITY> local_rejection{};
+
         if (event.type == KEELS2_SOURCE2_CLIENT_CONNECT)
         {
             connect_payload = *static_cast<const KeelSource2ClientConnect*>(event.payload);
@@ -399,6 +452,7 @@ KeelBool Source2CallbacksService::Dispatch(KeelSource2CallbackEvent& event)
 
         callback_stack_[callback_depth_++] = callback.get();
         KeelBool result{KEEL_TRUE};
+
         try
         {
             result = callback->callback(&callback_event, callback->user_data);
@@ -407,6 +461,7 @@ KeelBool Source2CallbacksService::Dispatch(KeelSource2CallbackEvent& event)
         {
             host_.Write(KEEL_LOG_ERROR, "plugin threw during a Source 2 callback");
         }
+
         callback_stack_[--callback_depth_] = nullptr;
         LeaveActive(callback->active);
 
@@ -420,12 +475,15 @@ KeelBool Source2CallbacksService::Dispatch(KeelSource2CallbackEvent& event)
                 const char* source = local_rejection[0]
                     ? local_rejection.data()
                     : "Connection rejected by a KeelS2 plugin";
+
                 const std::size_t length = std::min(
                     std::strlen(source),
                     winning_rejection.size() - 1);
+
                 std::memcpy(winning_rejection.data(), source, length);
                 winning_rejection[length] = '\0';
             }
+
             accepted = false;
         }
     }
@@ -434,15 +492,18 @@ KeelBool Source2CallbacksService::Dispatch(KeelSource2CallbackEvent& event)
     {
         auto* payload = const_cast<KeelSource2ClientConnect*>(
             static_cast<const KeelSource2ClientConnect*>(event.payload));
+
         if (payload->rejection_message && payload->rejection_capacity != 0)
         {
             const std::size_t length = std::min(
                 std::strlen(winning_rejection.data()),
                 static_cast<std::size_t>(payload->rejection_capacity - 1));
+
             std::memcpy(payload->rejection_message, winning_rejection.data(), length);
             payload->rejection_message[length] = '\0';
         }
     }
+
     return accepted ? KEEL_TRUE : KEEL_FALSE;
 }
 
@@ -457,15 +518,19 @@ bool Source2CallbacksService::ValidEventName(const char* name, std::string& outp
     {
         return false;
     }
+
     std::size_t length{};
+
     while (length < 32 && name[length])
     {
         ++length;
     }
+
     if (length == 0 || length == 32)
     {
         return false;
     }
+
     output.assign(name, length);
     return true;
 }
@@ -477,6 +542,7 @@ bool Source2CallbacksService::ValidEnvelope(const KeelSource2CallbackEvent& even
     {
         return false;
     }
+
     switch (event.type)
     {
         case KEELS2_SOURCE2_LEVEL_INIT:
@@ -485,12 +551,14 @@ bool Source2CallbacksService::ValidEnvelope(const KeelSource2CallbackEvent& even
             return event.payload_size == sizeof(KeelSource2LevelInit) &&
                 payload->size == sizeof(KeelSource2LevelInit) && payload->reserved == 0;
         }
+
         case KEELS2_SOURCE2_LEVEL_SHUTDOWN:
         {
             const auto* payload = static_cast<const KeelSource2LevelShutdown*>(event.payload);
             return event.payload_size == sizeof(KeelSource2LevelShutdown) &&
                 payload->size == sizeof(KeelSource2LevelShutdown) && payload->reserved == 0;
         }
+
         case KEELS2_SOURCE2_GAME_EVENT:
         {
             const auto* payload = static_cast<const KeelSource2GameEvent*>(event.payload);
@@ -498,6 +566,7 @@ bool Source2CallbacksService::ValidEnvelope(const KeelSource2CallbackEvent& even
                 payload->size == sizeof(KeelSource2GameEvent) && payload->event &&
                 payload->name && payload->name[0] && payload->reserved == 0;
         }
+
         case KEELS2_SOURCE2_CLIENT_CONNECT:
         {
             const auto* payload = static_cast<const KeelSource2ClientConnect*>(event.payload);
@@ -508,12 +577,14 @@ bool Source2CallbacksService::ValidEnvelope(const KeelSource2CallbackEvent& even
                 (payload->unknown == KEEL_FALSE || payload->unknown == KEEL_TRUE) &&
                 (!payload->rejection_capacity || payload->rejection_message);
         }
+
         case KEELS2_SOURCE2_CLIENT_COMMAND:
         {
             const auto* payload = static_cast<const KeelSource2ClientCommand*>(event.payload);
             return event.payload_size == sizeof(KeelSource2ClientCommand) &&
                 payload->size == sizeof(KeelSource2ClientCommand) && payload->command;
         }
+
         default:
             return false;
     }
@@ -528,6 +599,7 @@ bool Source2CallbacksService::IsCurrentOwner(KeelPluginHandle plugin) noexcept
             return true;
         }
     }
+
     return false;
 }
 
@@ -550,6 +622,7 @@ void Source2CallbacksService::LeaveActive(std::atomic<std::uint32_t>& active) no
 void Source2CallbacksService::WaitForZero(std::atomic<std::uint32_t>& active) noexcept
 {
     std::uint32_t value = active.load(std::memory_order_acquire);
+
     while (value != 0)
     {
         active.wait(value, std::memory_order_acquire);

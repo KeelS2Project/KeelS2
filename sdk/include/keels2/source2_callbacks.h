@@ -93,10 +93,12 @@ typedef struct KeelSource2CallbacksApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*subscribe)(
         KeelPluginHandle plugin,
         const KeelSource2SubscriptionSpec* spec,
         KeelSource2SubscriptionHandle* subscription);
+
     KeelResult (*unsubscribe)(
         KeelPluginHandle plugin,
         KeelSource2SubscriptionHandle subscription);

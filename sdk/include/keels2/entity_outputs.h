@@ -82,8 +82,11 @@ typedef struct KeelEntityOutputsApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*ready)(KeelPluginHandle);
+
     KeelResult (*subscribe)(KeelPluginHandle, const KeelEntityOutputSpec*, KeelEntityOutputHandle*);
+
     KeelResult (*unsubscribe)(KeelPluginHandle, KeelEntityOutputHandle);
 } KeelEntityOutputsApi;
 #ifdef __cplusplus

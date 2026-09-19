@@ -4,9 +4,11 @@ function(keels2_add_game_adapter target game)
     if(ARGC LESS 3)
         message(FATAL_ERROR "keels2_add_game_adapter requires a target, game, and source")
     endif()
+
     if(NOT TARGET KeelS2::AdapterSDK)
         message(FATAL_ERROR "KeelS2::AdapterSDK is unavailable")
     endif()
+
     if(NOT game MATCHES "^[a-z0-9_]+$")
         message(FATAL_ERROR "invalid KeelS2 game adapter name: ${game}")
     endif()

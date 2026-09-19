@@ -30,26 +30,32 @@ typedef struct KeelEntitiesApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*find_by_index)(
         KeelPluginHandle plugin,
         int32_t index,
         KeelEntityHandle* entity);
+
     KeelResult (*find_by_source2_handle)(
         KeelPluginHandle plugin,
         uint32_t source2_handle,
         KeelEntityHandle* entity);
+
     KeelResult (*release)(
         KeelPluginHandle plugin,
         KeelEntityHandle entity);
+
     KeelResult (*describe)(
         KeelPluginHandle plugin,
         KeelEntityHandle entity,
         KeelEntityInfo* info);
+
     KeelResult (*equal)(
         KeelPluginHandle plugin,
         KeelEntityHandle left,
         KeelEntityHandle right,
         KeelBool* equal);
+
     KeelResult (*read_field)(
         KeelPluginHandle plugin,
         KeelEntityHandle entity,

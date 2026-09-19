@@ -34,6 +34,7 @@ bool ContainsLog(const std::string& expected)
             return true;
         }
     }
+
     return false;
 }
 
@@ -70,6 +71,7 @@ KeelResult Subscribe(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     g_specs[g_subscription_count] = *spec;
     *subscription = ++g_subscription_count;
     return KEEL_RESULT_OK;
@@ -81,6 +83,7 @@ KeelResult Unsubscribe(KeelPluginHandle plugin, KeelLifecycleSubscriptionHandle 
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     ++g_unsubscription_count;
     return KEEL_RESULT_OK;
 }
@@ -102,15 +105,19 @@ KeelResult QueryService(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     *service = nullptr;
+
     if (plugin != 1 || !name || std::strcmp(name, KEELS2_LIFECYCLE_SERVICE_NAME) != 0)
     {
         return KEEL_RESULT_NOT_FOUND;
     }
+
     if (version != KEELS2_LIFECYCLE_API_VERSION)
     {
         return KEEL_RESULT_INCOMPATIBLE;
     }
+
     *service = &g_lifecycle;
     return KEEL_RESULT_OK;
 }
@@ -123,19 +130,24 @@ int main(int argument_count, char** arguments)
     {
         return 1;
     }
+
     keels2::platform::DynamicLibrary plugin;
     std::string error;
+
     if (!plugin.Open(std::filesystem::path(arguments[1]), error))
     {
         return 2;
     }
+
     const auto query = reinterpret_cast<KeelPluginQueryFn>(plugin.Symbol("KeelPlugin_Query"));
     const auto load = reinterpret_cast<KeelPluginLoadFn>(plugin.Symbol("KeelPlugin_Load"));
     const auto unload = reinterpret_cast<KeelPluginUnloadFn>(plugin.Symbol("KeelPlugin_Unload"));
+
     if (!query || !load || !unload)
     {
         return 3;
     }
+
     const KeelHostQuery host_query{
         sizeof(KeelHostQuery), KEELS2_PLUGIN_ABI_VERSION, "test-host", "cs2",
 #if defined(_WIN32)
@@ -146,19 +158,23 @@ int main(int argument_count, char** arguments)
     };
     KeelPluginInfo info{};
     info.size = sizeof(KeelPluginInfo);
+
     if (query(&host_query, &info) != KEEL_TRUE || !info.name ||
         std::strcmp(info.name, "KeelS2 Lifecycle Example") != 0)
     {
         return 4;
     }
+
     const KeelHostApi api{
         sizeof(KeelHostApi), KEELS2_PLUGIN_ABI_VERSION, &Log,
         &RegisterCommand, &UnregisterCommand, &QueryService
     };
+
     if (load(&api, 1) != KEEL_TRUE || g_subscription_count != g_specs.size())
     {
         return 5;
     }
+
     for (std::size_t index = 0; index < g_specs.size(); ++index)
     {
         if (g_specs[index].event != index + 1 || !g_specs[index].callback)
@@ -166,6 +182,7 @@ int main(int argument_count, char** arguments)
             return 6;
         }
     }
+
     const KeelLifecycleGameFrame frame{
         sizeof(KeelLifecycleGameFrame), KEEL_TRUE, KEEL_FALSE, KEEL_TRUE
     };
@@ -198,20 +215,26 @@ int main(int argument_count, char** arguments)
     Dispatch(4, KEELS2_LIFECYCLE_CLIENT_FULLY_CONNECTED, fully_connected);
     Dispatch(5, KEELS2_LIFECYCLE_CLIENT_DISCONNECTING, disconnecting);
     Dispatch(6, KEELS2_LIFECYCLE_CLIENT_SETTINGS_CHANGED, settings_changed);
+
     if (!ContainsLog("[Lifecycle Example] GameFrame simulating=1 first_tick=0 last_tick=1") ||
-        !ContainsLog("[Lifecycle Example] ClientConnected slot=-2 xuid=76561198000000001 name=Alice network_id=STEAM_1:1:1 address=127.0.0.1:27005 fake=0") ||
+        !ContainsLog(
+            "[Lifecycle Example] ClientConnected slot=-2 xuid=76561198000000001 name=Alice network_id=STEAM_1:1:1 address=127.0.0.1:27005 fake=0") ||
         !ContainsLog("[Lifecycle Example] ClientPutInServer slot=3 xuid=76561198000000002 name= client_type=7") ||
         !ContainsLog("[Lifecycle Example] ClientActive slot=4 xuid=76561198000000003 name=Bob load_game=1") ||
         !ContainsLog("[Lifecycle Example] ClientFullyConnected slot=5") ||
-        !ContainsLog("[Lifecycle Example] ClientDisconnecting slot=6 xuid=76561198000000004 name=Carol network_id= reason=41") ||
+        !ContainsLog(
+            "[Lifecycle Example] ClientDisconnecting slot=6 xuid=76561198000000004 name=Carol network_id= reason=41") ||
         !ContainsLog("[Lifecycle Example] ClientSettingsChanged slot=7"))
     {
         return 7;
     }
+
     unload(1);
+
     if (g_unsubscription_count != g_specs.size())
     {
         return 8;
     }
+
     return 0;
 }

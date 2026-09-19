@@ -26,10 +26,12 @@ void CopySnapshotText(char (&destination)[Capacity], std::string_view source) no
 {
     static_assert(Capacity != 0);
     const std::size_t length = std::min(source.size(), Capacity - 1);
+
     if (length != 0)
     {
         std::memcpy(destination, source.data(), length);
     }
+
     destination[length] = '\0';
 }
 
@@ -73,10 +75,19 @@ private:
 class BulkPluginOperation final
 {
 public:
-    explicit BulkPluginOperation(bool& active) : active_(active) { active_ = true; }
-    ~BulkPluginOperation() { active_ = false; }
+    explicit BulkPluginOperation(bool& active) : active_(active)
+    {
+        active_ = true;
+    }
+
+    ~BulkPluginOperation()
+    {
+        active_ = false;
+    }
+
     BulkPluginOperation(const BulkPluginOperation&) = delete;
     BulkPluginOperation& operator=(const BulkPluginOperation&) = delete;
+
 private:
     bool& active_;
 };
@@ -88,23 +99,29 @@ bool Host::FindPluginFiles(
     std::vector<std::filesystem::path>& paths)
 {
     std::error_code error;
-    for (std::filesystem::directory_iterator iterator(directory, error), end;
-         !error && iterator != end; iterator.increment(error))
+
+    for (std::filesystem::directory_iterator iterator(directory, error), end; !error && iterator != end;
+
+         iterator.increment(error))
     {
         const auto status = iterator->status(error);
+
         if (error)
             break;
+
         if (std::filesystem::is_regular_file(status) &&
             EqualInsensitive(iterator->path().extension().string(), kPluginExtension))
         {
             paths.push_back(iterator->path());
         }
     }
+
     if (error)
     {
         Write(KEEL_LOG_ERROR, "Could not enumerate plugins: " + error.message());
         return false;
     }
+
     std::sort(paths.begin(), paths.end(), [](const auto& left, const auto& right) {
         return left.filename().string() < right.filename().string();
     });
@@ -116,17 +133,23 @@ void Host::LoadPlugins(
     std::unique_lock<std::recursive_mutex>& state_lock)
 {
     std::error_code error;
+
     if (!std::filesystem::exists(directory, error) && !error)
         return;
+
     std::vector<std::filesystem::path> paths;
+
     if (!FindPluginFiles(directory, paths))
         return;
+
     std::vector<KeelPluginHandle> discovered;
+
     for (const auto& path : paths)
     {
         if (PluginRecord* plugin = DiscoverPlugin(path, state_lock))
             discovered.push_back(plugin->handle);
     }
+
     StartDiscoveredPlugins(discovered, state_lock);
 }
 
@@ -138,38 +161,47 @@ void Host::StartDiscoveredPlugins(
     {
         bool remaining{};
         bool progress{};
+
         for (const auto handle : discovered)
         {
             PluginRecord* plugin = PluginByHandle(handle);
+
             if (!plugin || plugin->state != PluginState::loading)
             {
                 continue;
             }
+
             remaining = true;
             bool waiting{};
             std::string diagnostic;
+
             for (const auto& dependency : plugin->dependencies)
             {
                 const auto target = std::find_if(plugins_.begin(), plugins_.end(), [&](const auto& candidate) {
                     return candidate->selectable &&
                         EqualInsensitive(candidate->name, dependency.name);
                 });
+
                 if (target == plugins_.end())
                 {
                     diagnostic = "missing dependency " + dependency.name + " " + dependency.version;
                     break;
                 }
+
                 if (target->get() == plugin)
                 {
                     diagnostic = "plugin cannot depend on itself";
                     break;
                 }
+
                 if (!DependencyVersionMatches((*target)->version, dependency))
                 {
                     diagnostic = "dependency version mismatch for " + dependency.name +
                         ": found " + (*target)->version + ", required " + dependency.version;
+
                     break;
                 }
+
                 if ((*target)->state == PluginState::loading)
                 {
                     waiting = true;
@@ -180,6 +212,7 @@ void Host::StartDiscoveredPlugins(
                     break;
                 }
             }
+
             if (!diagnostic.empty())
             {
                 RejectUnstartedPlugin(*plugin, std::move(diagnostic));
@@ -191,23 +224,28 @@ void Host::StartDiscoveredPlugins(
                 progress = true;
             }
         }
+
         if (!remaining)
         {
             break;
         }
+
         if (!progress)
         {
             for (const auto handle : discovered)
             {
                 PluginRecord* plugin = PluginByHandle(handle);
+
                 if (plugin && plugin->state == PluginState::loading)
                 {
                     RejectUnstartedPlugin(*plugin, "dependency cycle detected");
                 }
             }
+
             break;
         }
     }
+
     if (plugin_service_)
     {
         state_lock.unlock();
@@ -223,21 +261,26 @@ PluginRecord* Host::LoadPlugin(
     bool activate_dispatch)
 {
     PluginRecord* record = DiscoverPlugin(path, state_lock);
+
     if (!record || record->state != PluginState::loading)
     {
         return record;
     }
+
     if (!expected_name.empty() && !EqualInsensitive(record->name, expected_name))
     {
         RejectUnstartedPlugin(*record, "reload candidate has a different plugin name");
         return record;
     }
+
     std::string diagnostic;
+
     if (!DependenciesReady(*record, diagnostic))
     {
         RejectUnstartedPlugin(*record, std::move(diagnostic));
         return record;
     }
+
     return StartPlugin(*record, state_lock, activate_dispatch);
 }
 
@@ -250,6 +293,7 @@ PluginRecord* Host::DiscoverPlugin(
         Write(KEEL_LOG_ERROR, "plugin handle space is exhausted");
         return nullptr;
     }
+
     auto plugin = std::make_unique<PluginRecord>();
     plugin->handle = next_plugin_++;
     plugin->path = path;
@@ -260,20 +304,25 @@ PluginRecord* Host::DiscoverPlugin(
     std::error_code image_error;
     const std::filesystem::path runtime_directory =
         plugin_directory_ / ".runtime" / std::to_string(record->handle);
+
     std::filesystem::create_directories(runtime_directory, image_error);
+
     if (image_error)
     {
         record->diagnostic =
             "could not create plugin runtime directory: " + image_error.message();
+
         Write(KEEL_LOG_ERROR, record->diagnostic);
         return record;
     }
+
     record->transient_path = runtime_directory / path.filename();
     std::filesystem::copy_file(
         path,
         record->transient_path,
         std::filesystem::copy_options::overwrite_existing,
         image_error);
+
     if (image_error)
     {
         record->diagnostic = "could not stage plugin image: " + image_error.message();
@@ -283,6 +332,7 @@ PluginRecord* Host::DiscoverPlugin(
         Write(KEEL_LOG_ERROR, record->diagnostic + ": " + path.string());
         return record;
     }
+
     if (!record->library.OpenWithDependencies(record->transient_path, plugin_directory_ / "lib", error))
     {
         record->diagnostic = "could not load module: " + error;
@@ -294,8 +344,10 @@ PluginRecord* Host::DiscoverPlugin(
     const auto query = reinterpret_cast<KeelPluginQueryFn>(record->library.Symbol("KeelPlugin_Query"));
     const auto manifest = reinterpret_cast<KeelPluginManifestFn>(
         record->library.Symbol("KeelPlugin_Manifest"));
+
     const auto load = reinterpret_cast<KeelPluginLoadFn>(record->library.Symbol("KeelPlugin_Load"));
     const auto unload = reinterpret_cast<KeelPluginUnloadFn>(record->library.Symbol("KeelPlugin_Unload"));
+
     if (!query || !load || !unload)
     {
         record->state = PluginState::invalid;
@@ -320,17 +372,21 @@ PluginRecord* Host::DiscoverPlugin(
     bool query_succeeded{};
     bool manifest_succeeded{true};
     state_lock.unlock();
+
     try
     {
         query_succeeded = query(&host_query, &info) == KEEL_TRUE;
+
         if (query_succeeded && manifest)
         {
             manifest_succeeded = false;
             manifest_succeeded = manifest(&host_query, &manifest_info) == KEEL_TRUE;
             std::vector<ValidatedPluginDependency> validated;
+
             if (manifest_succeeded && ValidatePluginManifest(manifest_info, validated))
             {
                 dependencies.reserve(validated.size());
+
                 for (auto& dependency : validated)
                 {
                     dependencies.push_back({
@@ -349,7 +405,9 @@ PluginRecord* Host::DiscoverPlugin(
     catch (...)
     {
     }
+
     state_lock.lock();
+
     if (!query_succeeded || !manifest_succeeded || info.size != sizeof(info) ||
         info.abi_version != KEELS2_PLUGIN_ABI_VERSION ||
         !ValidPluginName(info.name) ||
@@ -361,6 +419,7 @@ PluginRecord* Host::DiscoverPlugin(
         record->diagnostic = manifest_succeeded
             ? "query or metadata is incompatible"
             : "dependency manifest is incompatible";
+
         Write(
             KEEL_LOG_ERROR,
             "plugin query was rejected: " + path.string() + ": " + record->diagnostic
@@ -374,6 +433,7 @@ PluginRecord* Host::DiscoverPlugin(
     record->version = info.version;
     record->description = info.description ? info.description : "";
     record->dependencies = std::move(dependencies);
+
     if (std::any_of(record->dependencies.begin(), record->dependencies.end(), [&](const auto& dependency) {
             return EqualInsensitive(dependency.name, record->name);
         }))
@@ -383,13 +443,16 @@ PluginRecord* Host::DiscoverPlugin(
         record->selectable = true;
         Write(KEEL_LOG_ERROR, "plugin dependency was rejected: " + record->name + ": " +
             record->diagnostic);
+
         ClosePluginImage(*record);
         return record;
     }
+
     const auto duplicate = std::find_if(plugins_.begin(), plugins_.end(), [record](const auto& candidate) {
         return candidate.get() != record && candidate->selectable &&
             EqualInsensitive(candidate->name, record->name);
     });
+
     if (duplicate != plugins_.end())
     {
         record->state = PluginState::error;
@@ -422,6 +485,7 @@ PluginRecord* Host::StartPlugin(
     bool loaded{};
     bool load_threw{};
     state_lock.unlock();
+
     try
     {
         loaded = record->load && record->load(&api_, record->handle) == KEEL_TRUE;
@@ -430,30 +494,38 @@ PluginRecord* Host::StartPlugin(
     {
         load_threw = true;
     }
+
     state_lock.lock();
+
     if (load_threw)
     {
         record->diagnostic = "plugin threw during load";
     }
+
     if (loaded)
     {
         std::string dependency_diagnostic;
+
         if (!DependenciesReady(*record, dependency_diagnostic))
         {
             loaded = false;
             record->diagnostic = "dependency changed during load: " + dependency_diagnostic;
         }
     }
+
     record->loading = false;
+
     if (loaded && !activate_dispatch)
     {
         record->accepting_resources = false;
         SetCommandsOwnedEnabled(record->handle, false);
+
         if (!PreparePluginPause(*record, state_lock))
         {
             loaded = false;
             record->state = PluginState::error;
             record->diagnostic = "plugin refused paused replacement preparation";
+
             if (!PreparePluginUnload(*record, state_lock))
             {
                 record->cleanup_pending = true;
@@ -463,6 +535,7 @@ PluginRecord* Host::StartPlugin(
             }
         }
     }
+
     if (!loaded)
     {
         record->accepting_resources = false;
@@ -475,56 +548,66 @@ PluginRecord* Host::StartPlugin(
         KeelResult schema_entities_release = KEEL_RESULT_OK;
         KeelResult release = KEEL_RESULT_OK;
         KeelResult factory_release = KEEL_RESULT_OK;
+
         if (factories_)
         {
             state_lock.unlock();
             factory_release = factories_->ReleasePlugin(record->handle);
             state_lock.lock();
         }
+
         if (plugin_service_)
         {
             state_lock.unlock();
             plugin_service_release = plugin_service_->ReleasePlugin(record->handle);
             state_lock.lock();
         }
+
         if (published_services_)
         {
             state_lock.unlock();
             published_service_release = published_services_->ReleasePlugin(record->handle);
             state_lock.lock();
         }
+
         if (convars_)
         {
             state_lock.unlock();
             convar_release = convars_->ReleasePlugin(record->handle);
             state_lock.lock();
         }
+
         if (lifecycle_)
         {
             state_lock.unlock();
             lifecycle_release = lifecycle_->ReleasePlugin(record->handle);
             state_lock.lock();
         }
+
         if (source2_callbacks_)
         {
             state_lock.unlock();
             source2_callbacks_release = source2_callbacks_->ReleasePlugin(record->handle);
             state_lock.lock();
         }
+
         if (schema_entities_)
         {
             state_lock.unlock();
             schema_entities_release = schema_entities_->ReleasePlugin(record->handle);
             state_lock.lock();
         }
+
         if (keelhook_)
         {
             state_lock.unlock();
             release = keelhook_->ReleasePlugin(record->handle);
             state_lock.lock();
         }
+
         RemoveCommandsOwnedBy(record->handle);
         record->state = PluginState::error;
+
         if (factory_release != KEEL_RESULT_OK || plugin_service_release != KEEL_RESULT_OK ||
             published_service_release != KEEL_RESULT_OK ||
             source2_callbacks_release != KEEL_RESULT_OK || convar_release != KEEL_RESULT_OK ||
@@ -536,8 +619,10 @@ PluginRecord* Host::StartPlugin(
             Write(KEEL_LOG_ERROR, "native resources could not be rolled back: " + record->name);
             return record;
         }
+
         record->cleanup_callback_active = true;
         state_lock.unlock();
+
         try
         {
             record->unload(record->handle);
@@ -545,12 +630,15 @@ PluginRecord* Host::StartPlugin(
         catch (...)
         {
         }
+
         state_lock.lock();
         record->cleanup_callback_active = false;
+
         if (record->diagnostic.empty())
         {
             record->diagnostic = "load callback rejected startup";
         }
+
         Write(KEEL_LOG_ERROR, "plugin load was rejected: " + record->name);
         record->load = nullptr;
         record->unload = nullptr;
@@ -558,20 +646,25 @@ PluginRecord* Host::StartPlugin(
         load_order_.erase(
             std::remove(load_order_.begin(), load_order_.end(), record->handle),
             load_order_.end());
+
         return record;
     }
 
     record->state = activate_dispatch ? PluginState::loaded : PluginState::paused;
     record->accepting_resources = activate_dispatch;
     record->factory_dispatch_enabled = activate_dispatch;
+
     if (activate_dispatch)
         RestorePluginDispatch(*record);
+
     Write(KEEL_LOG_INFO, "plugin loaded: " + record->name + " " + record->version);
     const auto handle = record->handle;
     PublishPluginEvent(KEELS2_PLUGIN_EVENT_LOADED, *record, state_lock);
     record = PluginByHandle(handle);
+
     if (record && !activate_dispatch && record->state == PluginState::paused)
         PublishPluginEvent(KEELS2_PLUGIN_EVENT_PAUSED, *record, state_lock);
+
     return PluginByHandle(handle);
 }
 
@@ -582,28 +675,34 @@ bool Host::DependenciesReady(const PluginRecord& plugin, std::string& diagnostic
         const auto target = std::find_if(plugins_.begin(), plugins_.end(), [&](const auto& candidate) {
             return candidate->selectable && EqualInsensitive(candidate->name, dependency.name);
         });
+
         if (target == plugins_.end())
         {
             diagnostic = "missing dependency " + dependency.name + " " + dependency.version;
             return false;
         }
+
         if (target->get() == &plugin)
         {
             diagnostic = "plugin cannot depend on itself";
             return false;
         }
+
         if (!DependencyVersionMatches((*target)->version, dependency))
         {
             diagnostic = "dependency version mismatch for " + dependency.name +
                 ": found " + (*target)->version + ", required " + dependency.version;
+
             return false;
         }
+
         if ((*target)->state != PluginState::loaded || (*target)->transitioning)
         {
             diagnostic = "dependency is not running: " + dependency.name;
             return false;
         }
     }
+
     diagnostic.clear();
     return true;
 }
@@ -628,11 +727,13 @@ bool Host::HasRunningDependent(const PluginRecord& plugin, std::string& dependen
         dependent = "active native operation";
         return true;
     }
+
     if (PluginCommandActive(plugin.handle))
     {
         dependent = "active plugin command callback";
         return true;
     }
+
     for (const auto& candidate : plugins_)
     {
         if (candidate.get() == &plugin || (candidate->state != PluginState::loaded &&
@@ -640,6 +741,7 @@ bool Host::HasRunningDependent(const PluginRecord& plugin, std::string& dependen
         {
             continue;
         }
+
         if (std::any_of(candidate->dependencies.begin(), candidate->dependencies.end(),
                 [&](const auto& dependency) {
                     return EqualInsensitive(dependency.name, plugin.name);
@@ -649,16 +751,19 @@ bool Host::HasRunningDependent(const PluginRecord& plugin, std::string& dependen
             return true;
         }
     }
+
     if (factories_ && factories_->Pinned(plugin.handle))
     {
         dependent = "process-lifetime factory replacement";
         return true;
     }
+
     if (published_services_ &&
         published_services_->HasLeasedPublication(plugin.handle, dependent))
     {
         return true;
     }
+
     dependent.clear();
     return false;
 }
@@ -692,13 +797,16 @@ bool Host::ResolvePluginPath(std::string_view filename, std::filesystem::path& p
 
     const std::filesystem::path requested(filename);
     const std::string extension = requested.extension().string();
+
     if (!extension.empty() && !EqualInsensitive(extension, kPluginExtension))
     {
         Write(KEEL_LOG_ERROR, "plugin filename has an unsupported extension: " + std::string(filename));
         return false;
     }
+
     const std::string requested_name = requested.filename().string();
     const std::string requested_stem = extension.empty() ? requested_name : requested.stem().string();
+
     if (requested_stem.empty())
     {
         Write(KEEL_LOG_ERROR, "plugin filename is invalid");
@@ -707,45 +815,54 @@ bool Host::ResolvePluginPath(std::string_view filename, std::filesystem::path& p
 
     std::vector<std::filesystem::path> matches;
     std::error_code error;
-    for (std::filesystem::directory_iterator iterator(plugin_directory_, error), end;
-         !error && iterator != end;
+
+    for (std::filesystem::directory_iterator iterator(plugin_directory_, error), end; !error && iterator != end;
+
          iterator.increment(error))
     {
         const auto status = iterator->symlink_status(error);
+
         if (error)
         {
             break;
         }
+
         if (!std::filesystem::is_regular_file(status) ||
             !EqualInsensitive(iterator->path().extension().string(), kPluginExtension))
         {
             continue;
         }
+
         const std::string candidate_name = iterator->path().filename().string();
         const std::string candidate_stem = iterator->path().stem().string();
         const bool match = extension.empty()
             ? EqualInsensitive(candidate_stem, requested_stem)
             : EqualInsensitive(candidate_name, requested_name);
+
         if (match)
         {
             matches.push_back(iterator->path());
         }
     }
+
     if (error)
     {
         Write(KEEL_LOG_ERROR, "could not enumerate plugins: " + error.message());
         return false;
     }
+
     if (matches.empty())
     {
         Write(KEEL_LOG_ERROR, "plugin file \"" + std::string(filename) + "\" was not found");
         return false;
     }
+
     if (matches.size() != 1)
     {
         Write(KEEL_LOG_ERROR, "plugin filename \"" + std::string(filename) + "\" is ambiguous");
         return false;
     }
+
     path = matches.front();
     return true;
 }
@@ -755,6 +872,7 @@ void Host::LoadPluginCommand(
     std::unique_lock<std::recursive_mutex>& state_lock)
 {
     std::filesystem::path path;
+
     if (!ResolvePluginPath(filename, path))
     {
         return;
@@ -763,6 +881,7 @@ void Host::LoadPluginCommand(
     const auto existing = std::find_if(plugins_.begin(), plugins_.end(), [&path](const auto& plugin) {
         return EqualInsensitive(plugin->path.filename().string(), path.filename().string());
     });
+
     if (existing != plugins_.end())
     {
         if ((*existing)->state == PluginState::loaded ||
@@ -775,6 +894,7 @@ void Host::LoadPluginCommand(
             );
             return;
         }
+
         if ((*existing)->cleanup_pending || (*existing)->library.IsOpen())
         {
             Write(
@@ -784,6 +904,7 @@ void Host::LoadPluginCommand(
             );
             return;
         }
+
         RemovePluginRecord((*existing)->handle);
     }
 
@@ -799,22 +920,28 @@ bool Host::UnloadPluginCommand(
     bool disable)
 {
     PluginRecord* plugin = SelectPlugin(selector);
+
     if (!plugin)
     {
         return false;
     }
+
     if (plugin->state != PluginState::loaded && plugin->state != PluginState::paused)
     {
         Write(KEEL_LOG_ERROR, "plugin [" + PluginDisplayId(plugin) + "] is not loaded");
         return false;
     }
+
     PluginTransition transition(*plugin);
+
     if (!transition)
     {
         Write(KEEL_LOG_ERROR, "plugin transition is already active: " + plugin->name);
         return false;
     }
+
     std::string dependent;
+
     if (HasRunningDependent(*plugin, dependent, true))
     {
         Write(
@@ -826,17 +953,20 @@ bool Host::UnloadPluginCommand(
 
     if (disable)
         disabled_plugins_.reserve(disabled_plugins_.size() + 1);
+
     const KeelPluginHandle handle = plugin->handle;
     const std::string display_id = PluginDisplayId(plugin);
     const std::string name = plugin->name;
     const bool was_running = plugin->state == PluginState::loaded;
     plugin->accepting_resources = false;
     SetCommandsOwnedEnabled(handle, false);
+
     if (factories_)
     {
         state_lock.unlock();
         const KeelResult quiescence = factories_->Deactivate(handle);
         state_lock.lock();
+
         if (quiescence != KEEL_RESULT_OK)
         {
             RestorePluginDispatch(*plugin);
@@ -844,11 +974,13 @@ bool Host::UnloadPluginCommand(
             return false;
         }
     }
+
     if (was_running && source2_callbacks_)
     {
         state_lock.unlock();
         const KeelResult quiescence = source2_callbacks_->Deactivate(handle);
         state_lock.lock();
+
         if (quiescence != KEEL_RESULT_OK)
         {
             plugin->accepting_resources = true;
@@ -858,11 +990,13 @@ bool Host::UnloadPluginCommand(
             return false;
         }
     }
+
     if (was_running && lifecycle_)
     {
         state_lock.unlock();
         const KeelResult quiescence = lifecycle_->Deactivate(handle);
         state_lock.lock();
+
         if (quiescence != KEEL_RESULT_OK)
         {
             RestorePluginDispatch(*plugin);
@@ -870,11 +1004,13 @@ bool Host::UnloadPluginCommand(
             return false;
         }
     }
+
     if (was_running && convars_)
     {
         state_lock.unlock();
         const KeelResult quiescence = convars_->Deactivate(handle);
         state_lock.lock();
+
         if (quiescence != KEEL_RESULT_OK)
         {
             RestorePluginDispatch(*plugin);
@@ -882,11 +1018,13 @@ bool Host::UnloadPluginCommand(
             return false;
         }
     }
+
     if (was_running && plugin_service_)
     {
         state_lock.unlock();
         const KeelResult quiescence = plugin_service_->Deactivate(handle);
         state_lock.lock();
+
         if (quiescence != KEEL_RESULT_OK)
         {
             RestorePluginDispatch(*plugin);
@@ -894,11 +1032,13 @@ bool Host::UnloadPluginCommand(
             return false;
         }
     }
+
     if (was_running && keelhook_)
     {
         state_lock.unlock();
         const KeelResult quiescence = keelhook_->Deactivate(handle);
         state_lock.lock();
+
         if (quiescence != KEEL_RESULT_OK)
         {
             RestorePluginDispatch(*plugin);
@@ -906,19 +1046,23 @@ bool Host::UnloadPluginCommand(
             return false;
         }
     }
+
     if (!PreparePluginUnload(*plugin, state_lock))
     {
         if (was_running)
         {
             RestorePluginDispatch(*plugin);
         }
+
         return false;
     }
+
     if (keelhook_)
     {
         state_lock.unlock();
         const KeelResult release = keelhook_->ReleasePlugin(handle);
         state_lock.lock();
+
         if (release != KEEL_RESULT_OK)
         {
             if (release == KEEL_RESULT_BUSY && !plugin->cleanup_pending && was_running)
@@ -930,6 +1074,7 @@ bool Host::UnloadPluginCommand(
                 plugin->cleanup_pending = true;
                 plugin->diagnostic = "KeelHook cleanup is incomplete; plugin is quarantined";
             }
+
             Write(
                 KEEL_LOG_ERROR,
                 release == KEEL_RESULT_BUSY
@@ -939,11 +1084,13 @@ bool Host::UnloadPluginCommand(
             return false;
         }
     }
+
     if (lifecycle_)
     {
         state_lock.unlock();
         const KeelResult release = lifecycle_->ReleasePlugin(handle);
         state_lock.lock();
+
         if (release != KEEL_RESULT_OK)
         {
             plugin->cleanup_pending = true;
@@ -952,11 +1099,13 @@ bool Host::UnloadPluginCommand(
             return false;
         }
     }
+
     if (source2_callbacks_)
     {
         state_lock.unlock();
         const KeelResult release = source2_callbacks_->ReleasePlugin(handle);
         state_lock.lock();
+
         if (release != KEEL_RESULT_OK)
         {
             plugin->cleanup_pending = true;
@@ -965,11 +1114,13 @@ bool Host::UnloadPluginCommand(
             return false;
         }
     }
+
     if (convars_)
     {
         state_lock.unlock();
         const KeelResult release = convars_->ReleasePlugin(handle);
         state_lock.lock();
+
         if (release != KEEL_RESULT_OK)
         {
             plugin->cleanup_pending = true;
@@ -978,11 +1129,13 @@ bool Host::UnloadPluginCommand(
             return false;
         }
     }
+
     if (schema_entities_)
     {
         state_lock.unlock();
         const KeelResult release = schema_entities_->ReleasePlugin(handle);
         state_lock.lock();
+
         if (release != KEEL_RESULT_OK)
         {
             plugin->cleanup_pending = true;
@@ -990,14 +1143,17 @@ bool Host::UnloadPluginCommand(
             Write(
                 KEEL_LOG_ERROR,
                 "plugin unload could not release schema and entity resources: " + name);
+
             return false;
         }
     }
+
     if (plugin_service_)
     {
         state_lock.unlock();
         const KeelResult release = plugin_service_->ReleasePlugin(handle);
         state_lock.lock();
+
         if (release != KEEL_RESULT_OK)
         {
             plugin->cleanup_pending = true;
@@ -1006,11 +1162,13 @@ bool Host::UnloadPluginCommand(
             return false;
         }
     }
+
     if (published_services_)
     {
         state_lock.unlock();
         const KeelResult release = published_services_->ReleasePlugin(handle);
         state_lock.lock();
+
         if (release != KEEL_RESULT_OK)
         {
             RestorePluginDispatch(*plugin);
@@ -1018,11 +1176,13 @@ bool Host::UnloadPluginCommand(
             return false;
         }
     }
+
     if (factories_)
     {
         state_lock.unlock();
         const KeelResult release = factories_->ReleasePlugin(handle);
         state_lock.lock();
+
         if (release != KEEL_RESULT_OK)
         {
             plugin->cleanup_pending = true;
@@ -1030,11 +1190,14 @@ bool Host::UnloadPluginCommand(
             return false;
         }
     }
+
     RemoveCommandsOwnedBy(handle);
+
     if (plugin->unload)
     {
         plugin->cleanup_callback_active = true;
         state_lock.unlock();
+
         try
         {
             plugin->unload(handle);
@@ -1043,9 +1206,11 @@ bool Host::UnloadPluginCommand(
         {
             Write(KEEL_LOG_ERROR, "plugin threw during unload: " + name);
         }
+
         state_lock.lock();
         plugin->cleanup_callback_active = false;
     }
+
     plugin->load = nullptr;
     plugin->unload = nullptr;
     ClosePluginImage(*plugin);
@@ -1053,6 +1218,7 @@ bool Host::UnloadPluginCommand(
     FillPluginSnapshot(*plugin, snapshot);
     snapshot.state = KEELS2_PLUGIN_STATE_UNKNOWN;
     transition.Disarm();
+
     if (disable)
     {
         plugin->state = PluginState::disabled;
@@ -1071,12 +1237,14 @@ bool Host::UnloadPluginCommand(
     {
         RemovePluginRecord(handle);
     }
+
     if (plugin_service_)
     {
         state_lock.unlock();
         plugin_service_->Publish(KEELS2_PLUGIN_EVENT_UNLOADED, snapshot);
         state_lock.lock();
     }
+
     Write(KEEL_LOG_INFO, "plugin unloaded: [" + display_id + "] " + name);
     return true;
 }
@@ -1086,25 +1254,31 @@ bool Host::ReloadPluginCommand(
     std::unique_lock<std::recursive_mutex>& state_lock)
 {
     PluginRecord* plugin = SelectPlugin(selector);
+
     if (!plugin)
     {
         return false;
     }
+
     if (plugin->state != PluginState::loaded && plugin->state != PluginState::paused)
     {
         Write(KEEL_LOG_ERROR, "plugin [" + PluginDisplayId(plugin) + "] is not loaded");
         return false;
     }
+
     std::string dependent;
+
     if (HasRunningDependent(*plugin, dependent, true))
     {
         Write(
             KEEL_LOG_ERROR,
             "plugin reload is blocked by dependent " + dependent + ": " + plugin->name);
+
         return false;
     }
 
     std::string dependency_diagnostic;
+
     if (!DependenciesReady(*plugin, dependency_diagnostic))
     {
         Write(KEEL_LOG_ERROR, "plugin reload is blocked: " + plugin->name + ": " + dependency_diagnostic);
@@ -1115,6 +1289,7 @@ bool Host::ReloadPluginCommand(
     const std::filesystem::path source_path = plugin->transient_path.empty()
         ? plugin->path
         : plugin->transient_path;
+
     const std::string original_name = plugin->name;
     const bool was_paused = plugin->state == PluginState::paused;
     const std::string unload_selector = PluginDisplayId(plugin);
@@ -1122,19 +1297,23 @@ bool Host::ReloadPluginCommand(
 
     const std::filesystem::path reload_directory =
         plugin_directory_ / ".reload" / std::to_string(old_handle);
+
     std::error_code error;
     std::filesystem::create_directories(reload_directory, error);
+
     if (error)
     {
         Write(KEEL_LOG_ERROR, "plugin reload could not create its rollback directory: " + error.message());
         return false;
     }
+
     const std::filesystem::path backup = reload_directory / logical_path.filename();
     std::filesystem::copy_file(
         source_path,
         backup,
         std::filesystem::copy_options::overwrite_existing,
         error);
+
     if (error)
     {
         Write(KEEL_LOG_ERROR, "plugin reload could not create a rollback image: " + error.message());
@@ -1152,6 +1331,7 @@ bool Host::ReloadPluginCommand(
     const bool candidate_ready = candidate &&
         candidate->state == (was_paused ? PluginState::paused : PluginState::loaded) &&
         EqualInsensitive(candidate->name, original_name);
+
     if (candidate_ready)
     {
         std::filesystem::remove(backup, error);
@@ -1167,7 +1347,9 @@ bool Host::ReloadPluginCommand(
             Write(KEEL_LOG_ERROR, "plugin reload rollback is blocked by retained replacement resources: " + original_name);
             return false;
         }
+
         const KeelPluginHandle candidate_handle = candidate->handle;
+
         if (candidate->state == PluginState::loaded || candidate->state == PluginState::paused)
         {
             static_cast<void>(UnloadPluginCommand(PluginDisplayId(candidate), state_lock, false));
@@ -1179,6 +1361,7 @@ bool Host::ReloadPluginCommand(
     }
 
     PluginRecord* rollback = LoadPlugin(backup, state_lock, original_name, !was_paused);
+
     if (rollback && rollback->state == (was_paused ? PluginState::paused : PluginState::loaded) &&
         EqualInsensitive(rollback->name, original_name))
     {
@@ -1197,16 +1380,20 @@ bool Host::PluginImageChanged(const PluginRecord& plugin, bool& changed)
 {
     std::ifstream current(plugin.path, std::ios::binary);
     std::ifstream loaded(plugin.transient_path, std::ios::binary);
+
     if (!current || !loaded)
         return false;
+
     std::array<char, 65536> current_bytes{};
     std::array<char, 65536> loaded_bytes{};
     do
     {
         current.read(current_bytes.data(), current_bytes.size());
         loaded.read(loaded_bytes.data(), loaded_bytes.size());
+
         if (current.bad() || loaded.bad())
             return false;
+
         if (current.gcount() != loaded.gcount() ||
             !std::equal(current_bytes.begin(), current_bytes.begin() + current.gcount(), loaded_bytes.begin()))
         {
@@ -1222,10 +1409,13 @@ void Host::RefreshPluginsCommand(std::unique_lock<std::recursive_mutex>& state_l
 {
     BulkPluginOperation operation(bulk_plugin_operation_);
     std::vector<std::filesystem::path> paths;
+
     if (!FindPluginFiles(plugin_directory_, paths))
         return;
+
     const auto known = KnownPlugins();
     std::vector<std::filesystem::path> new_paths;
+
     for (const auto& path : paths)
     {
         if (std::none_of(known.begin(), known.end(), [&path](const auto* plugin) {
@@ -1235,8 +1425,10 @@ void Host::RefreshPluginsCommand(std::unique_lock<std::recursive_mutex>& state_l
             new_paths.push_back(path);
         }
     }
+
     std::vector<KeelPluginHandle> running;
     std::size_t failed{};
+
     for (const auto& plugin : plugins_)
     {
         if (plugin->state == PluginState::loaded || plugin->state == PluginState::paused)
@@ -1244,27 +1436,34 @@ void Host::RefreshPluginsCommand(std::unique_lock<std::recursive_mutex>& state_l
         else
             ++failed;
     }
+
     std::size_t reloaded{};
     std::size_t unchanged{};
     std::size_t missing{};
+
     for (const auto handle : running)
     {
         const auto* plugin = PluginByHandle(handle);
+
         if (!plugin)
         {
             ++failed;
             continue;
         }
+
         if (std::none_of(paths.begin(), paths.end(), [plugin](const auto& path) {
                 return EqualInsensitive(plugin->path.filename().string(), path.filename().string());
             }))
         {
             Write(KEEL_LOG_WARNING, plugin->path.filename().string() +
                 " is still loaded; its file is missing.");
+
             ++missing;
             continue;
         }
+
         bool changed{};
+
         if (!PluginImageChanged(*plugin, changed))
         {
             Write(KEEL_LOG_ERROR, "Could not compare the loaded image of " + plugin->path.filename().string() + ".");
@@ -1283,7 +1482,9 @@ void Host::RefreshPluginsCommand(std::unique_lock<std::recursive_mutex>& state_l
             ++failed;
         }
     }
+
     std::vector<KeelPluginHandle> discovered;
+
     for (const auto& path : new_paths)
     {
         if (const auto* plugin = DiscoverPlugin(path, state_lock))
@@ -1291,17 +1492,22 @@ void Host::RefreshPluginsCommand(std::unique_lock<std::recursive_mutex>& state_l
         else
             ++failed;
     }
+
     if (!discovered.empty())
         StartDiscoveredPlugins(discovered, state_lock);
+
     std::size_t loaded{};
+
     for (const auto handle : discovered)
     {
         const auto* plugin = PluginByHandle(handle);
+
         if (plugin && plugin->state == PluginState::loaded)
             ++loaded;
         else
             ++failed;
     }
+
     Write(KEEL_LOG_INFO, "Refreshed plugins: " + std::to_string(loaded) + " loaded, " +
         std::to_string(reloaded) + " reloaded, " + std::to_string(unchanged) + " unchanged, " +
         std::to_string(disabled_plugins_.size()) + " disabled, " + std::to_string(missing) +
@@ -1318,17 +1524,23 @@ void Host::UnloadAllPluginsCommand(std::unique_lock<std::recursive_mutex>& state
     do
     {
         progress = false;
+
         for (const auto handle : order)
         {
             const auto* plugin = PluginByHandle(handle);
+
             if (!plugin || !plugin->library.IsOpen() ||
                 (plugin->state != PluginState::loaded && plugin->state != PluginState::paused) ||
                 std::find(attempted.begin(), attempted.end(), handle) != attempted.end())
                 continue;
+
             std::string dependent;
+
             if (HasRunningDependent(*plugin, dependent, true))
                 continue;
+
             attempted.push_back(handle);
+
             if (UnloadPluginCommand(PluginDisplayId(plugin), state_lock))
             {
                 ++unloaded;
@@ -1337,20 +1549,25 @@ void Host::UnloadAllPluginsCommand(std::unique_lock<std::recursive_mutex>& state
         }
     } while (progress);
     std::size_t retained{};
+
     for (const auto& plugin : plugins_)
     {
         if (!plugin->library.IsOpen())
             continue;
+
         ++retained;
         std::string reason;
+
         if (HasRunningDependent(*plugin, reason, true))
             reason = "required by " + reason;
         else if (!plugin->diagnostic.empty())
             reason = plugin->diagnostic;
         else
             reason = "unload did not complete";
+
         Write(KEEL_LOG_WARNING, plugin->name + " remains loaded: " + reason + ".");
     }
+
     Write(KEEL_LOG_INFO, "Unloaded plugins: " + std::to_string(unloaded) + "; " +
         std::to_string(retained) + " remain loaded.");
 }
@@ -1360,24 +1577,29 @@ void Host::RetryPluginCommand(
     std::unique_lock<std::recursive_mutex>& state_lock)
 {
     PluginRecord* plugin = SelectPlugin(selector);
+
     if (!plugin)
     {
         return;
     }
+
     if (plugin->state != PluginState::error && plugin->state != PluginState::invalid)
     {
         Write(KEEL_LOG_ERROR, "plugin [" + PluginDisplayId(plugin) + "] is not failed");
         return;
     }
+
     if (plugin->cleanup_pending || plugin->library.IsOpen())
     {
         Write(KEEL_LOG_ERROR, "plugin retry is blocked until native cleanup completes: " + plugin->name);
         return;
     }
+
     const std::filesystem::path path = plugin->path;
     const KeelPluginHandle handle = plugin->handle;
     RemovePluginRecord(handle);
     PluginRecord* retried = LoadPlugin(path, state_lock);
+
     if (retried && retried->state == PluginState::loaded)
     {
         Write(KEEL_LOG_INFO, "plugin retry succeeded: " + retried->name);
@@ -1393,6 +1615,7 @@ void Host::PausePluginCommand(
     std::unique_lock<std::recursive_mutex>& state_lock)
 {
     PluginRecord* plugin = SelectPlugin(selector);
+
     if (plugin)
     {
         static_cast<void>(PausePlugin(plugin->handle, state_lock, true));
@@ -1404,6 +1627,7 @@ void Host::ResumePluginCommand(
     std::unique_lock<std::recursive_mutex>& state_lock)
 {
     PluginRecord* plugin = SelectPlugin(selector);
+
     if (plugin)
     {
         static_cast<void>(ResumePlugin(plugin->handle, state_lock, true));
@@ -1416,32 +1640,41 @@ KeelResult Host::PausePlugin(
     bool report)
 {
     PluginRecord* plugin = PluginByHandle(target);
+
     if (!plugin)
     {
         return KEEL_RESULT_NOT_FOUND;
     }
+
     if (plugin->state == PluginState::paused)
     {
         return KEEL_RESULT_ALREADY_EXISTS;
     }
+
     if (plugin->state != PluginState::loaded)
     {
         if (report)
         {
             Write(KEEL_LOG_ERROR, "plugin [" + PluginDisplayId(plugin) + "] is not running");
         }
+
         return KEEL_RESULT_NOT_READY;
     }
+
     PluginTransition transition(*plugin);
+
     if (!transition)
     {
         if (report)
         {
             Write(KEEL_LOG_ERROR, "plugin transition is already active: " + plugin->name);
         }
+
         return KEEL_RESULT_BUSY;
     }
+
     std::string dependent;
+
     if (HasRunningDependent(*plugin, dependent))
     {
         if (report)
@@ -1451,6 +1684,7 @@ KeelResult Host::PausePlugin(
                 "plugin pause is blocked by running dependent " + dependent + ": " + plugin->name
             );
         }
+
         return KEEL_RESULT_BUSY;
     }
 
@@ -1458,67 +1692,81 @@ KeelResult Host::PausePlugin(
     SetCommandsOwnedEnabled(target, false);
     const auto fail = [&](KeelResult result, const char* layer) {
         RestorePluginDispatch(*plugin);
+
         if (report)
         {
             Write(KEEL_LOG_ERROR, "plugin pause is busy in " + std::string(layer) + ": " + plugin->name);
         }
+
         return result;
     };
+
     if (factories_)
     {
         state_lock.unlock();
         const KeelResult result = factories_->Deactivate(target);
         state_lock.lock();
+
         if (result != KEEL_RESULT_OK)
         {
             return fail(result, "factory callbacks or process-lifetime replacement");
         }
     }
+
     if (source2_callbacks_)
     {
         state_lock.unlock();
         const KeelResult result = source2_callbacks_->Deactivate(target);
         state_lock.lock();
+
         if (result != KEEL_RESULT_OK)
         {
             return fail(result, "a Source 2 callback");
         }
     }
+
     if (lifecycle_)
     {
         state_lock.unlock();
         const KeelResult result = lifecycle_->Deactivate(target);
         state_lock.lock();
+
         if (result != KEEL_RESULT_OK)
         {
             return fail(result, "a lifecycle callback");
         }
     }
+
     if (convars_)
     {
         state_lock.unlock();
         const KeelResult result = convars_->Deactivate(target);
         state_lock.lock();
+
         if (result != KEEL_RESULT_OK)
         {
             return fail(result, "a ConVar callback");
         }
     }
+
     if (plugin_service_)
     {
         state_lock.unlock();
         const KeelResult result = plugin_service_->Deactivate(target);
         state_lock.lock();
+
         if (result != KEEL_RESULT_OK)
         {
             return fail(result, "a plugin event callback");
         }
     }
+
     if (keelhook_)
     {
         state_lock.unlock();
         const KeelResult result = keelhook_->Deactivate(target);
         state_lock.lock();
+
         if (result != KEEL_RESULT_OK)
         {
             return fail(result, "KeelHook");
@@ -1529,6 +1777,7 @@ KeelResult Host::PausePlugin(
     {
         return fail(KEEL_RESULT_BUSY, "plugin pause preparation");
     }
+
     plugin->state = PluginState::paused;
     Write(KEEL_LOG_INFO, "plugin paused: [" + PluginDisplayId(plugin) + "] " + plugin->name);
     PublishPluginEvent(KEELS2_PLUGIN_EVENT_PAUSED, *plugin, state_lock);
@@ -1541,40 +1790,51 @@ KeelResult Host::ResumePlugin(
     bool report)
 {
     PluginRecord* plugin = PluginByHandle(target);
+
     if (!plugin)
     {
         return KEEL_RESULT_NOT_FOUND;
     }
+
     if (plugin->state == PluginState::loaded)
     {
         return KEEL_RESULT_ALREADY_EXISTS;
     }
+
     if (plugin->state != PluginState::paused)
     {
         if (report)
         {
             Write(KEEL_LOG_ERROR, "plugin [" + PluginDisplayId(plugin) + "] is not paused");
         }
+
         return KEEL_RESULT_NOT_READY;
     }
+
     PluginTransition transition(*plugin);
+
     if (!transition)
     {
         if (report)
         {
             Write(KEEL_LOG_ERROR, "plugin transition is already active: " + plugin->name);
         }
+
         return KEEL_RESULT_BUSY;
     }
+
     std::string diagnostic;
+
     if (!DependenciesReady(*plugin, diagnostic))
     {
         if (report)
         {
             Write(KEEL_LOG_ERROR, "plugin resume was rejected: " + plugin->name + ": " + diagnostic);
         }
+
         return KEEL_RESULT_NOT_READY;
     }
+
     plugin->state = PluginState::loaded;
     RestorePluginDispatch(*plugin);
     Write(KEEL_LOG_INFO, "plugin resumed: [" + PluginDisplayId(plugin) + "] " + plugin->name);
@@ -1587,26 +1847,32 @@ void Host::RestorePluginDispatch(PluginRecord& plugin)
     plugin.accepting_resources = true;
     SetCommandsOwnedEnabled(plugin.handle, true);
     plugin.factory_dispatch_enabled = true;
+
     if (factories_)
     {
         factories_->Activate(plugin.handle);
     }
+
     if (keelhook_)
     {
         keelhook_->Activate(plugin.handle);
     }
+
     if (lifecycle_)
     {
         lifecycle_->Activate(plugin.handle);
     }
+
     if (convars_)
     {
         convars_->Activate(plugin.handle);
     }
+
     if (plugin_service_)
     {
         plugin_service_->Activate(plugin.handle);
     }
+
     if (source2_callbacks_)
     {
         source2_callbacks_->Activate(plugin.handle);
@@ -1622,6 +1888,7 @@ void Host::PublishPluginEvent(
     {
         return;
     }
+
     KeelPluginSnapshot snapshot{};
     FillPluginSnapshot(plugin, snapshot);
     state_lock.unlock();
@@ -1652,10 +1919,12 @@ void Host::ClosePluginImage(PluginRecord& plugin) noexcept
     plugin.prepare_unload = nullptr;
     plugin.prepare_unload_data = nullptr;
     plugin.library.Close();
+
     if (plugin.transient_path.empty())
     {
         return;
     }
+
     std::error_code error;
     const std::filesystem::path runtime_directory = plugin.transient_path.parent_path();
     std::filesystem::remove(plugin.transient_path, error);
@@ -1683,12 +1952,15 @@ void Host::RemoveCommandsOwnedBy(KeelPluginHandle owner)
             ++iterator;
             continue;
         }
+
         std::unique_ptr<CommandRecord> command = std::move(iterator->second);
         command->enabled.store(false, std::memory_order_release);
+
         if (adapter_)
         {
             adapter_->UnregisterCommand(command->game_handle);
         }
+
         command->callback = nullptr;
         command->native_callback = nullptr;
         command->user_data = nullptr;
@@ -1702,6 +1974,7 @@ void Host::SetCommandsOwnedEnabled(KeelPluginHandle owner, bool enabled)
     for (auto& [handle, command] : commands_)
     {
         static_cast<void>(handle);
+
         if (command->owner == owner)
         {
             command->enabled.store(enabled, std::memory_order_release);
@@ -1729,16 +2002,20 @@ std::vector<PluginRecord*> Host::KnownPlugins() const
 {
     std::vector<PluginRecord*> result;
     result.reserve(plugins_.size() + disabled_plugins_.size());
+
     for (const auto& plugin : plugins_)
         result.push_back(plugin.get());
+
     for (const auto& plugin : disabled_plugins_)
         result.push_back(plugin.get());
+
     return result;
 }
 
 PluginRecord* Host::SelectPlugin(std::string_view selector)
 {
     const auto known = KnownPlugins();
+
     if (selector.empty())
     {
         Write(KEEL_LOG_ERROR, "plugin selector is required");
@@ -1748,6 +2025,7 @@ PluginRecord* Host::SelectPlugin(std::string_view selector)
     const bool numeric = std::all_of(selector.begin(), selector.end(), [](unsigned char character) {
         return std::isdigit(character) != 0;
     });
+
     if (numeric)
     {
         std::size_t index{};
@@ -1756,14 +2034,17 @@ PluginRecord* Host::SelectPlugin(std::string_view selector)
                 index != 0 && index <= known.size()
             ? known[index - 1]
             : nullptr;
+
         if (!plugin)
         {
             Write(KEEL_LOG_ERROR, "plugin \"" + std::string(selector) + "\" was not found");
         }
+
         return plugin;
     }
 
     std::vector<PluginRecord*> matches;
+
     for (auto* plugin : known)
     {
         if ((plugin->selectable && EqualInsensitive(plugin->name, selector)) ||
@@ -1772,6 +2053,7 @@ PluginRecord* Host::SelectPlugin(std::string_view selector)
             return plugin;
         }
     }
+
     for (auto* plugin : known)
     {
         if (plugin->selectable && StartsWithInsensitive(plugin->name, selector))
@@ -1779,6 +2061,7 @@ PluginRecord* Host::SelectPlugin(std::string_view selector)
             matches.push_back(plugin);
         }
     }
+
     if (matches.empty())
     {
         for (auto* plugin : known)
@@ -1789,10 +2072,12 @@ PluginRecord* Host::SelectPlugin(std::string_view selector)
             }
         }
     }
+
     if (matches.size() == 1)
     {
         return matches.front();
     }
+
     if (matches.empty())
     {
         Write(KEEL_LOG_ERROR, "plugin \"" + std::string(selector) + "\" was not found");
@@ -1800,10 +2085,12 @@ PluginRecord* Host::SelectPlugin(std::string_view selector)
     }
 
     Write(KEEL_LOG_ERROR, "plugin selector \"" + std::string(selector) + "\" is ambiguous:");
+
     for (const PluginRecord* plugin : matches)
     {
         WriteLine("  [" + PluginDisplayId(plugin) + "] " + plugin->name);
     }
+
     return nullptr;
 }
 
@@ -1834,6 +2121,7 @@ std::string Host::ResourceOwnerLabel(KeelPluginHandle owner) const
     {
         return "host";
     }
+
     const PluginRecord* plugin = PluginByHandle(owner);
     return plugin
         ? plugin->name + " [" + std::to_string(owner) + "]"
@@ -1869,6 +2157,7 @@ bool Host::ContainsInsensitive(std::string_view text, std::string_view part)
     {
         return true;
     }
+
     for (std::size_t position{}; position + part.size() <= text.size(); ++position)
     {
         if (EqualInsensitive(text.substr(position, part.size()), part))
@@ -1876,16 +2165,19 @@ bool Host::ContainsInsensitive(std::string_view text, std::string_view part)
             return true;
         }
     }
+
     return false;
 }
 
 std::string Host::FormatPluginIndex(std::size_t index)
 {
     std::string result = std::to_string(index);
+
     if (result.size() < 2)
     {
         result.insert(result.begin(), '0');
     }
+
     return result;
 }
 
@@ -1895,20 +2187,25 @@ const char* Host::PluginStateLabel(PluginState state)
     {
         return "loading";
     }
+
     if (state == PluginState::loaded)
     {
         return "loaded";
     }
+
     if (state == PluginState::paused)
     {
         return "paused";
     }
+
     if (state == PluginState::disabled)
         return "disabled";
+
     if (state == PluginState::invalid)
     {
         return "invalid";
     }
+
     return "error";
 }
 
@@ -1918,17 +2215,23 @@ KeelPluginRuntimeState Host::PublicPluginState(PluginState state) noexcept
     {
         case PluginState::loading:
             return KEELS2_PLUGIN_STATE_LOADING;
+
         case PluginState::loaded:
             return KEELS2_PLUGIN_STATE_RUNNING;
+
         case PluginState::paused:
             return KEELS2_PLUGIN_STATE_PAUSED;
+
         case PluginState::invalid:
             return KEELS2_PLUGIN_STATE_INVALID;
+
         case PluginState::error:
             return KEELS2_PLUGIN_STATE_ERROR;
+
         case PluginState::disabled:
             return KEELS2_PLUGIN_STATE_UNKNOWN;
     }
+
     return KEELS2_PLUGIN_STATE_UNKNOWN;
 }
 
@@ -1945,19 +2248,23 @@ bool Host::DependencyVersionMatches(
 {
     std::array<std::uint32_t, 3> actual_version{};
     std::array<std::uint32_t, 3> required_version{};
+
     if (!ParseSemanticVersion(actual, actual_version) ||
         !ParseSemanticVersion(dependency.version, required_version))
     {
         return false;
     }
+
     if (dependency.requirement == KEELS2_PLUGIN_DEPENDENCY_EXACT)
     {
         return actual_version == required_version;
     }
+
     if (dependency.requirement == KEELS2_PLUGIN_DEPENDENCY_AT_LEAST)
     {
         return actual_version >= required_version;
     }
+
     return false;
 }
 

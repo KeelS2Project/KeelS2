@@ -104,6 +104,7 @@ struct CompatibilityProfile
 const CompatibilityProfile* FindCompatibilityProfile(
     const platform::FileFingerprint& server,
     const char* platform_name);
+
 const CompatibilityProfile& FixtureCompatibilityProfile(const char* platform_name);
 
 }

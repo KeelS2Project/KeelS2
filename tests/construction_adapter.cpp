@@ -6,20 +6,44 @@
 #include <stdexcept>
 
 namespace {
-void Check(bool value, int line) { if (!value) throw std::runtime_error("construction adapter check "+std::to_string(line)); }
-#define CHECK(value) Check((value),__LINE__)
-template<class T> T Function(void* address) { T value{}; static_assert(sizeof(value) == sizeof(address)); std::memcpy(&value,&address,sizeof(value)); return value; }
+void Check(bool value, int line)
+{
+    if (!value)
+        throw std::runtime_error("construction adapter check " + std::to_string(line));
 }
+#define CHECK(value) Check((value),__LINE__)
+template <class T> T Function(void* address)
+{
+    T value{};
+    static_assert(sizeof(value) == sizeof(address));
+    std::memcpy(&value, &address, sizeof(value));
+    return value;
+}
+}
+
 int main(int argc, char** argv)
 {
-    if (argc != 4) return 1;
+    if (argc != 4)
+        return 1;
+
     try {
         namespace fs = std::filesystem;
         using namespace keels2::host;
         const auto directory = fs::temp_directory_path() / ("keels2-construction-"+
             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+
         fs::create_directories(directory);
-        struct Cleanup { fs::path path; ~Cleanup() { std::error_code ignored; fs::remove_all(path,ignored); } } cleanup{directory};
+
+        struct Cleanup
+        {
+            fs::path path;
+
+            ~Cleanup()
+            {
+                std::error_code ignored;
+                fs::remove_all(path, ignored);
+            }
+        } cleanup{directory};
         const auto adapter_path = directory/fs::path(argv[2]).filename();
         fs::copy_file(argv[2],adapter_path);
         keels2::platform::DynamicLibrary tier0, library;
@@ -27,7 +51,10 @@ int main(int argc, char** argv)
         CHECK(tier0.Open(argv[1],error));
         CHECK(!library.Open(adapter_path,error));
         fs::copy_file(argv[3],directory/fs::path(argv[3]).filename());
-        if (!library.Open(adapter_path,error)) throw std::runtime_error(error);
+
+        if (!library.Open(adapter_path, error))
+            throw std::runtime_error(error);
+
         const auto query = Function<GameAdapterQueryEntityConstructionFn>(library.Symbol(kGameAdapterEntityConstructionSymbol));
         CHECK(query);
         GameAdapterEntityConstructionApi api{};
@@ -38,6 +65,7 @@ int main(int argc, char** argv)
         api.size = sizeof(api);
         CHECK(query(1,&api) == KEEL_RESULT_OK && api.size == sizeof(api) && api.api_version == 1 &&
             api.ready && api.create && api.describe && api.set && api.teleport && api.spawn && api.cancel && api.visit);
+
         const auto query_input = Function<GameAdapterQueryEntityInputFn>(library.Symbol(kGameAdapterEntityInputSymbol));
         CHECK(query_input);
         GameAdapterEntityInputApi input{};
@@ -46,7 +74,9 @@ int main(int argc, char** argv)
         input.size = sizeof(input);
         CHECK(query_input(99,&input) == KEEL_RESULT_INCOMPATIBLE && !input.size && !input.dispatch);
         input.size = sizeof(input);
-        CHECK(query_input(1,&input) == KEEL_RESULT_OK && input.size == sizeof(input) && input.api_version == 1 && input.capabilities && input.dispatch);
+        CHECK(query_input(1, &input) == KEEL_RESULT_OK && input.size == sizeof(input) && input.api_version == 1 &&
+              input.capabilities && input.dispatch);
+
         const auto query_outputs = Function<GameAdapterQueryEntityOutputsFn>(library.Symbol(kGameAdapterEntityOutputsSymbol));
         CHECK(query_outputs);
         GameAdapterEntityOutputsApi outputs{};
@@ -56,21 +86,40 @@ int main(int argc, char** argv)
         CHECK(query_outputs(99,&outputs) == KEEL_RESULT_INCOMPATIBLE && !outputs.size && !outputs.start);
         outputs.size = sizeof(outputs);
         CHECK(query_outputs(1,&outputs) == KEEL_RESULT_OK && outputs.api_version == 1 && outputs.start && outputs.stop);
-        const GameAdapterHostApi host{sizeof(host),kGameAdapterAbiVersion,[]() noexcept { return 1u; },[]() noexcept {}};
+        const GameAdapterHostApi host{sizeof(host),
+                                      kGameAdapterAbiVersion,
+                                      []() noexcept
+                                      {
+                                          return 1u;
+                                      },
+                                      []() noexcept
+                                      {
+                                      }};
 #if defined(_WIN32)
         constexpr const char* platform = "win64";
 #else
         constexpr const char* platform = "linuxsteamrt64";
 #endif
         GameAdapterModule module;
-        if (!module.Load(directory,"cs2",platform,host,error)) throw std::runtime_error(error);
+
+        if (!module.Load(directory, "cs2", platform, host, error))
+            throw std::runtime_error(error);
+
         CHECK(module.EntityConstruction().api_version == 1 && module.EntityConstruction().create == api.create);
         CHECK(module.EntityInput().dispatch == input.dispatch && module.EntityInput().api_version == 1);
         CHECK(module.EntityOutputs().start == outputs.start && module.EntityOutputs().api_version == 1);
         auto* adapter = module.Get();
         KeelHookApi hooks{};
-        const auto defer = +[](KeelHookFrame*,void (*)(void*),void*) noexcept -> KeelResult { return KEEL_RESULT_OK; };
-        const auto callback = +[](const KeelEntityOutputEvent*,std::uint64_t,void*) -> std::uint32_t { return KEELS2_OUTPUT_CONTINUE; };
+
+        const auto defer = +[](KeelHookFrame*, void (*)(void*), void*) noexcept -> KeelResult
+        {
+            return KEEL_RESULT_OK;
+        };
+
+        const auto callback = +[](const KeelEntityOutputEvent*, std::uint64_t, void*) -> std::uint32_t
+        {
+            return KEELS2_OUTPUT_CONTINUE;
+        };
         CHECK(outputs.start(nullptr,&hooks,defer,callback,nullptr) == KEEL_RESULT_INVALID_ARGUMENT);
         CHECK(outputs.start(adapter,nullptr,defer,callback,nullptr) == KEEL_RESULT_INVALID_ARGUMENT);
         CHECK(outputs.start(adapter,&hooks,nullptr,callback,nullptr) == KEEL_RESULT_INVALID_ARGUMENT);
@@ -96,20 +145,38 @@ int main(int argc, char** argv)
         CHECK(api.ready(adapter) == KEEL_RESULT_WRONG_THREAD);
         CHECK(api.create(adapter,"prop_dynamic",&token,&identity) == KEEL_RESULT_WRONG_THREAD && !token && !identity.epoch);
         CHECK(api.describe(adapter,1,&identity) == KEEL_RESULT_WRONG_THREAD && !identity.epoch);
-        KeelEntityKeyValue key{}; key.size = sizeof(key); key.type = KEELS2_ENTITY_KEY_INT32; key.name = "value";
-        KeelEntityTeleport request{sizeof(request),KEELS2_TELEPORT_POSITION,{1,2,3},{},{}};
+        KeelEntityKeyValue key{};
+        key.size = sizeof(key);
+        key.type = KEELS2_ENTITY_KEY_INT32;
+        key.name = "value";
+        KeelEntityTeleport request{sizeof(request), KEELS2_TELEPORT_POSITION, {1, 2, 3}, {}, {}};
         CHECK(api.set(adapter,1,&key) == KEEL_RESULT_WRONG_THREAD);
         CHECK(api.teleport(adapter,1,&request) == KEEL_RESULT_WRONG_THREAD);
         CHECK(api.spawn(adapter,1,&invoked) == KEEL_RESULT_WRONG_THREAD && !invoked);
         CHECK(api.cancel(adapter,1) == KEEL_RESULT_WRONG_THREAD);
         bool visited{};
-        CHECK(api.visit(adapter,1,"CBaseEntity",[](void* data,void* const*,std::uint32_t) -> KeelResult {
-            *static_cast<bool*>(data) = true; return KEEL_RESULT_OK;
-        },&visited) == KEEL_RESULT_WRONG_THREAD && !visited);
-        adapter->Stop(); module.Reset();
+        CHECK(api.visit(
+                  adapter,
+                  1,
+                  "CBaseEntity",
+                  [](void* data, void* const*, std::uint32_t) -> KeelResult
+                  {
+                      *static_cast<bool*>(data) = true;
+                      return KEEL_RESULT_OK;
+                  },
+                  &visited) == KEEL_RESULT_WRONG_THREAD &&
+              !visited);
+
+        adapter->Stop();
+        module.Reset();
         CHECK(!module.EntityOutputs().size && !module.EntityOutputs().start);
         CHECK(!module.EntityInput().size && !module.EntityInput().dispatch);
         CHECK(!module.EntityConstruction().size && !module.EntityConstruction().create);
         return 0;
-    } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 2; }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << error.what() << '\n';
+        return 2;
+    }
 }

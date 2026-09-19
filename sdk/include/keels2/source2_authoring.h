@@ -39,13 +39,16 @@ typedef struct KeelSource2AuthoringApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*register_command)(
         KeelPluginHandle plugin,
         const KeelSource2CommandSpec* spec,
         KeelCommandHandle* command);
+
     KeelResult (*unregister_command)(
         KeelPluginHandle plugin,
         KeelCommandHandle command);
+
     KeelResult (*create_convar)(
         KeelPluginHandle plugin,
         const KeelConVarSpec* spec,
@@ -53,12 +56,14 @@ typedef struct KeelSource2AuthoringApi
         void* user_data,
         KeelConVarHandle* convar,
         void** native_convar);
+
     KeelResult (*find_convar)(
         KeelPluginHandle plugin,
         const char* name,
         KeelConVarType expected_type,
         KeelConVarHandle* convar,
         void** native_convar);
+
     KeelResult (*release_convar)(
         KeelPluginHandle plugin,
         KeelConVarHandle convar);

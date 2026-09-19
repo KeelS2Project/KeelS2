@@ -59,11 +59,13 @@ public:
     bool Load() override
     {
         current = this;
+
         if (failLoad)
         {
             CreateCommand("partial", "partial load", &Probe::Command);
             return false;
         }
+
         return true;
     }
 
@@ -121,9 +123,13 @@ KeelResult GetPlayer(KeelPluginHandle, int32, KeelPlayerInfo*)
 KeelResult ReadInput(KeelPluginHandle plugin, const KeelPlayerConnection* player, KeelPlayerInput* input)
 {
     ++inputCalls;
-    if (throwInput) throw std::runtime_error("injected input failure");
+
+    if (throwInput)
+        throw std::runtime_error("injected input failure");
+
     if (plugin != 77 || !player || player->slot != 7 || player->reserved || player->generation != 17 ||
         !input || input->size != sizeof(*input)) return KEEL_RESULT_INVALID_ARGUMENT;
+
     *input = inputValue;
     return inputResult;
 }
@@ -134,14 +140,17 @@ KeelResult NextPlayer(KeelPluginHandle, int32 after, KeelPlayerInfo* player)
     {
         throw std::runtime_error("injected player lookup failure");
     }
+
     if (playerResult != KEEL_RESULT_OK)
     {
         return playerResult;
     }
+
     if (after >= 7 && !repeatPlayer)
     {
         return KEEL_RESULT_NOT_FOUND;
     }
+
     *player = {};
     player->size = sizeof(*player);
     player->slot = after < 0 || repeatPlayer ? 0 : 7;
@@ -197,6 +206,7 @@ KeelResult ApplyAction(KeelPluginHandle plugin, KeelEntityHandle entity, const K
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     ++actionCalls;
     lastAction = *action;
     return retiredEntity ? KEEL_RESULT_NOT_FOUND : actionResult;
@@ -208,10 +218,12 @@ KeelResult Register(KeelPluginHandle, const KeelSource2CommandSpec* spec, KeelCo
     {
         throw std::runtime_error("injected registration failure");
     }
+
     if (std::strcmp(spec->name, "reserved") == 0)
     {
         return KEEL_RESULT_RESERVED_NAME;
     }
+
     *handle = ++registrations;
     return KEEL_RESULT_OK;
 }
@@ -254,6 +266,7 @@ KeelPlayerActionsApi actionsApi;
 KeelResult Query(KeelPluginHandle, const char* name, uint32, const void** output)
 {
     *output = nullptr;
+
     if (std::strcmp(name, KEELS2_NATIVE_RUNTIME_SERVICE_NAME) == 0)
     {
         *output = &nativeApi;
@@ -282,6 +295,7 @@ KeelResult Query(KeelPluginHandle, const char* name, uint32, const void** output
     {
         *output = &actionsApi;
     }
+
     return *output ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
 }
 
@@ -319,6 +333,7 @@ int main()
     callbacksApi.unsubscribe = &Remove;
     entitiesApi = {sizeof(entitiesApi), KEELS2_ENTITIES_API_VERSION,
         &FindEntity, &FindSource2Entity, &ReleaseEntity, &DescribeEntity, &EqualEntities, &ReadEntity};
+
     actionsApi = {sizeof(actionsApi), KEELS2_PLAYER_ACTIONS_API_VERSION, &ApplyAction};
     KeelHostApi host{};
     host.size = sizeof(host);
@@ -327,44 +342,70 @@ int main()
     host.register_command = &RegisterLegacy;
     host.unregister_command = &Remove;
     host.query_service = &Query;
+
     if (!Adapter::Load(&host, 77))
     {
         return Failure(1, "minimal plugin load failed");
     }
+
     auto& plugin = *Probe::current;
     const CPlayerSlot slot(7);
     const PlayerConnection inputPlayer{slot, 17};
     PlayerInput input;
+
     if (!plugin.GetPlayerInput(inputPlayer, input) || input.context != 29 || !input.Down(PlayerButton::Use) ||
         !input.Down(PlayerButton::Forward) || input.Down(PlayerButton::Attack) || plugin.LastResult() != KEEL_RESULT_OK)
         return Failure(22, "input arguments or action bits were changed");
+
     const auto inputFailure = [&](KeelResult expected) {
         input = {UINT64_MAX, UINT64_MAX};
-        return !plugin.GetPlayerInput(inputPlayer, input) && plugin.LastResult() == expected && !input.buttons && !input.context;
+        return !plugin.GetPlayerInput(inputPlayer, input) && plugin.LastResult() == expected && !input.buttons &&
+               !input.context;
     };
     inputResult = KEEL_RESULT_WRONG_THREAD;
-    if (!inputFailure(inputResult)) return Failure(23, "failed input retained state or lost its result");
+
+    if (!inputFailure(inputResult))
+        return Failure(23, "failed input retained state or lost its result");
+
     inputResult = KEEL_RESULT_OK;
     throwInput = true;
-    if (!inputFailure(KEEL_RESULT_ENGINE_FAILURE)) return Failure(24, "input exception escaped or retained state");
+
+    if (!inputFailure(KEEL_RESULT_ENGINE_FAILURE))
+        return Failure(24, "input exception escaped or retained state");
+
     throwInput = false;
     inputValue.context = 0;
-    if (!inputFailure(KEEL_RESULT_INCOMPATIBLE)) return Failure(25, "input with no context was accepted");
+
+    if (!inputFailure(KEEL_RESULT_INCOMPATIBLE))
+        return Failure(25, "input with no context was accepted");
+
     inputValue.context = 29;
     inputValue.buttons = UINT64_MAX;
-    if (!inputFailure(KEEL_RESULT_INCOMPATIBLE)) return Failure(26, "unknown normalized input bits were accepted");
+
+    if (!inputFailure(KEEL_RESULT_INCOMPATIBLE))
+        return Failure(26, "unknown normalized input bits were accepted");
+
     inputValue.buttons = KEELS2_BUTTON_USE;
     inputValue.reserved = 1;
-    if (!inputFailure(KEEL_RESULT_INCOMPATIBLE)) return Failure(27, "malformed input was accepted");
+
+    if (!inputFailure(KEEL_RESULT_INCOMPATIBLE))
+        return Failure(27, "malformed input was accepted");
+
     inputValue.reserved = 0;
     const auto previousInputCalls = inputCalls;
     ++inputApi.api_version;
+
     if (!inputFailure(KEEL_RESULT_INCOMPATIBLE) || inputCalls != previousInputCalls)
         return Failure(28, "incompatible input service was called");
+
     --inputApi.api_version;
     missingInput = true;
-    if (!inputFailure(KEEL_RESULT_NOT_FOUND)) return Failure(29, "unavailable input service retained state");
+
+    if (!inputFailure(KEEL_RESULT_NOT_FOUND))
+        return Failure(29, "unavailable input service retained state");
+
     missingInput = false;
+
     if (!plugin.SendToChat(slot, "100% {literal}; quit") || delivered != "100% {literal}; quit" ||
         !plugin.SendToConsole(slot, "{} {} {{literal}}", "100%;quit", 42) ||
         delivered != "100%;quit 42 {literal}" || !plugin.SendToChatAll("hello {}", "everyone") ||
@@ -372,7 +413,9 @@ int main()
     {
         return Failure(2, "Boolean success or literal/brace formatting changed text");
     }
+
     const unsigned before = deliveries;
+
     if (plugin.SendToChat(slot, "{} {}", 42) || plugin.LastResult() != KEEL_RESULT_INVALID_ARGUMENT ||
         !std::strstr(plugin.LastError(), "format") || plugin.SendToChat(slot, "") ||
         plugin.SendToChat(slot, std::string(513, 'x').c_str()) ||
@@ -382,23 +425,29 @@ int main()
     {
         return Failure(3, "invalid formatting or oversized text reached the transport");
     }
+
     transportResult = KEEL_RESULT_WRONG_THREAD;
+
     if (plugin.SendToChat(slot, "text") || plugin.LastResult() != KEEL_RESULT_WRONG_THREAD ||
         !std::strstr(plugin.LastError(), "game thread") ||
         plugin.PrintToConsole(slot, "text") != KEEL_RESULT_WRONG_THREAD)
     {
         return Failure(4, "transport failure lost its diagnostic or old result convention");
     }
+
     PlayerInfo player;
     player.user_id = 123;
     const std::string previousLog = logText;
+
     if (plugin.GetPlayer(slot, player) || player.user_id != -1 ||
         plugin.LastResult() != KEEL_RESULT_NOT_FOUND || logText != previousLog ||
         plugin.GetNextPlayer(CPlayerSlot(-1), player) || plugin.LastResult() != KEEL_RESULT_NOT_FOUND)
     {
         return Failure(5, "missing players were logged or confused with success");
     }
+
     playerResult = KEEL_RESULT_OK;
+
     if (!plugin.GetPlayerByUserId(42, player) || player.slot.Get() != 7 || player.user_id != 42 ||
         !plugin.GetPlayerByUserId(7, player) || player.slot.Get() != 0 || player.user_id != 7 ||
         plugin.GetPlayerByUserId(123, player) || player.user_id != -1 || player.name.Length() ||
@@ -407,28 +456,36 @@ int main()
     {
         return Failure(12, "user ID lookup confused identities, retained absent data, or logged absence");
     }
+
     repeatPlayer = true;
+
     if (plugin.GetPlayerByUserId(42, player) || plugin.LastResult() != KEEL_RESULT_INCOMPATIBLE ||
         player.user_id != -1 || player.connection)
     {
         return Failure(13, "malformed player iteration was accepted");
     }
+
     repeatPlayer = false;
     throwPlayer = true;
+
     if (plugin.GetPlayerByUserId(42, player) || plugin.LastResult() != KEEL_RESULT_ENGINE_FAILURE ||
         player.user_id != -1 || player.name.Length())
     {
         return Failure(14, "player lookup exception escaped or retained output");
     }
+
     throwPlayer = false;
     playerResult = KEEL_RESULT_WRONG_THREAD;
+
     if (plugin.GetPlayer(slot, player) || plugin.LastResult() != KEEL_RESULT_WRONG_THREAD ||
         plugin.GetPlayerByUserId(42, player) || plugin.LastResult() != KEEL_RESULT_WRONG_THREAD ||
         !std::strstr(plugin.LastError(), "game thread"))
     {
         return Failure(6, "player failure was confused with ordinary absence");
     }
+
     Entity pawn;
+
     if (pawn.TryKill() || pawn.LastResult() != KEEL_RESULT_NOT_READY || actionCalls ||
         !plugin.FindEntity(7, pawn) || !pawn.TryApplyImpulse(Vector(1, 2, 3), 5) ||
         lastAction.kind != KEELS2_PLAYER_ACTION_IMPULSE || lastAction.impulse[0] != 1 ||
@@ -438,42 +495,56 @@ int main()
     {
         return Failure(15, "Boolean actions lost arguments, inverted success, or broke the result API");
     }
+
     actionResult = KEEL_RESULT_WRONG_THREAD;
+
     if (pawn.TryKill() || pawn.LastResult() != KEEL_RESULT_WRONG_THREAD ||
         !std::strstr(pawn.LastError(), "game thread") || pawn.Kill() != KEEL_RESULT_WRONG_THREAD)
     {
         return Failure(16, "entity action lost its failure diagnostic or legacy result");
     }
+
     Entity moved(std::move(pawn));
+
     if (pawn || pawn.LastResult() != KEEL_RESULT_NOT_READY || entityReleases ||
         moved.LastResult() != KEEL_RESULT_WRONG_THREAD)
     {
         return Failure(17, "moving an entity lost the action diagnostic or released its handle");
     }
+
     actionResult = KEEL_RESULT_INVALID_ARGUMENT;
+
     if (moved.TryApplyImpulse(Vector(1, 2, 3), -1) ||
         moved.LastResult() != KEEL_RESULT_INVALID_ARGUMENT || !moved.LastError()[0])
     {
         return Failure(18, "invalid impulse was reported as success");
     }
+
     actionResult = KEEL_RESULT_OK;
+
     if (!moved.TryKill() || moved.LastResult() != KEEL_RESULT_OK || moved.LastError()[0])
     {
         return Failure(19, "successful action retained a previous error");
     }
+
     ++actionsApi.api_version;
     const unsigned beforeIncompatible = actionCalls;
+
     if (moved.TryKill() || moved.LastResult() != KEEL_RESULT_INCOMPATIBLE || actionCalls != beforeIncompatible)
     {
         return Failure(20, "incompatible action service was invoked");
     }
+
     --actionsApi.api_version;
     retiredEntity = true;
+
     if (moved.TryKill() || moved.LastResult() != KEEL_RESULT_NOT_FOUND)
     {
         return Failure(21, "retired pawn was reported as a successful action");
     }
+
     retiredEntity = false;
+
     if (plugin.CreateCommand("reserved", "test", &Probe::Command) ||
         plugin.LastResult() != KEEL_RESULT_RESERVED_NAME ||
         logText.find("command 'reserved': name is reserved") == std::string::npos ||
@@ -482,24 +553,32 @@ int main()
     {
         return Failure(7, "registration diagnostics omitted the resource or reason");
     }
+
     throwRegistration = true;
+
     if (plugin.CreateCommand("throws", "test", &Probe::Command) ||
         plugin.LastResult() != KEEL_RESULT_ENGINE_FAILURE || registrations != 0)
     {
         return Failure(8, "registration exception was not contained");
     }
+
     throwRegistration = false;
+
     if (!plugin.CreateCommand("owned", "test", &Probe::Command) ||
         plugin.CreateCommand("owned", "test", &Probe::Command) ||
         plugin.LastResult() != KEEL_RESULT_ALREADY_EXISTS)
     {
         return Failure(9, "command ownership or duplicate rejection failed");
     }
+
     Adapter::Unload(77);
     const auto unloadedInputCalls = inputCalls;
+
     if (!inputFailure(KEEL_RESULT_NOT_READY) || inputCalls != unloadedInputCalls)
         return Failure(30, "input service was called after unload");
+
     const unsigned beforeUnloadedAction = actionCalls;
+
     if (removals != 1 || plugin.SendToChat(slot, "after unload") ||
         plugin.LastResult() != KEEL_RESULT_NOT_READY || moved.TryKill() ||
         moved.LastResult() != KEEL_RESULT_NOT_READY || actionCalls != beforeUnloadedAction ||
@@ -507,10 +586,13 @@ int main()
     {
         return Failure(10, "unload did not retire the command or disable text");
     }
+
     failLoad = true;
+
     if (Adapter::Load(&host, 77) || registrations != 2 || removals != 2)
     {
         return Failure(11, "partial load did not retire the command");
     }
+
     return 0;
 }

@@ -52,6 +52,7 @@ KeelResult TestUnregisterCommand(KeelPluginHandle plugin, KeelCommandHandle comm
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     ++g_unregister_count;
     return KEEL_RESULT_OK;
 }
@@ -114,20 +115,25 @@ KeelResult TestQueryService(
     const void** service)
 {
     ++g_service_query_count;
+
     if (!plugin || !name || !service)
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     *service = nullptr;
+
     if (std::strcmp(name, KEELS2_SOURCE2_AUTHORING_SERVICE_NAME) == 0)
     {
         if (version != KEELS2_SOURCE2_AUTHORING_API_VERSION)
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         *service = &g_source2_authoring_api;
         return KEEL_RESULT_OK;
     }
+
     return KEEL_RESULT_NOT_FOUND;
 }
 
@@ -147,6 +153,7 @@ int main(int argument_count, char** arguments)
 
     keels2::platform::DynamicLibrary plugin;
     std::string error;
+
     if (!plugin.Open(std::filesystem::path(arguments[1]), error))
     {
         return 2;
@@ -155,6 +162,7 @@ int main(int argument_count, char** arguments)
     const auto query = reinterpret_cast<KeelPluginQueryFn>(plugin.Symbol("KeelPlugin_Query"));
     const auto load = reinterpret_cast<KeelPluginLoadFn>(plugin.Symbol("KeelPlugin_Load"));
     const auto unload = reinterpret_cast<KeelPluginUnloadFn>(plugin.Symbol("KeelPlugin_Unload"));
+
     if (!query || !load || !unload)
     {
         return 3;
@@ -173,6 +181,7 @@ int main(int argument_count, char** arguments)
     };
     KeelPluginInfo info{};
     info.size = sizeof(info);
+
     if (query(&host_query, &info) != KEEL_TRUE ||
         info.abi_version != KEELS2_PLUGIN_ABI_VERSION ||
         !info.name || std::strcmp(info.name, "KeelS2 Basic") != 0)
@@ -188,6 +197,7 @@ int main(int argument_count, char** arguments)
         &TestUnregisterCommand,
         &TestQueryService
     };
+
     if (load(&api, 1) != KEEL_TRUE || g_command_name != "keel_test" ||
         g_command_description != "Verifies the KeelS2 native plugin command path" ||
         g_command_flags != 0 || !g_callback || g_service_query_count != 1)
@@ -199,6 +209,7 @@ int main(int argument_count, char** arguments)
     const CCommandContext context{CT_NO_TARGET, CPlayerSlot{-1}};
     const CCommand invocation{2, invocation_arguments};
     g_callback(&context, &invocation, g_user_data);
+
     if (g_log_message != "KeelS2 1.0.0 is active. The basic native plugin is responding.")
     {
         return 6;
@@ -207,12 +218,14 @@ int main(int argument_count, char** arguments)
     const char* unregister_arguments[]{"keel_test", "unregister"};
     const CCommand unregister_invocation{2, unregister_arguments};
     g_callback(&context, &unregister_invocation, g_user_data);
+
     if (g_unregister_count != 1 || g_log_message != "keel_test command unregistered.")
     {
         return 7;
     }
 
     unload(1);
+
     if (g_log_message != "unload callback completed")
     {
         return 8;

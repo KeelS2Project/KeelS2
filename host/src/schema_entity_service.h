@@ -50,23 +50,34 @@ private:
     friend struct SchemaEntityServiceTest;
     static KeelResult InputCapabilitiesEntry(KeelPluginHandle, std::uint32_t*, std::uint32_t*);
     static KeelResult DispatchInputEntry(KeelPluginHandle, KeelEntityHandle, const KeelEntityInputRequest*, KeelBool*);
-    KeelResult EntityInput(KeelPluginHandle, KeelEntityHandle, const KeelEntityInputRequest*, std::uint32_t*, std::uint32_t*, KeelBool*);
+    KeelResult EntityInput(
+        KeelPluginHandle, KeelEntityHandle, const KeelEntityInputRequest*, std::uint32_t*, std::uint32_t*, KeelBool*);
+
     static KeelResult ReadDamageEntry(KeelPluginHandle plugin, const void* record, KeelDamageInfo* output);
     static KeelResult WriteDamageEntry(KeelPluginHandle plugin, void* record, const KeelDamageEdit* edit);
-    static KeelResult WeaponMatchesEntry(KeelPluginHandle plugin, KeelEntityHandle pawn, const void* candidate, KeelBool* matches);
-    KeelResult AccessDamage(KeelPluginHandle plugin, const void* record, KeelDamageInfo* output, const KeelDamageEdit* edit);
+    static KeelResult
+    WeaponMatchesEntry(KeelPluginHandle plugin, KeelEntityHandle pawn, const void* candidate, KeelBool* matches);
+    KeelResult
+    AccessDamage(KeelPluginHandle plugin, const void* record, KeelDamageInfo* output, const KeelDamageEdit* edit);
     KeelResult WeaponMatches(KeelPluginHandle plugin, KeelEntityHandle pawn, const void* candidate, KeelBool* matches);
     static KeelResult CaptureEntityEntry(KeelPluginHandle plugin, const void* instance, KeelEntityHandle* output);
     KeelResult CaptureEntity(KeelPluginHandle plugin, const void* instance, KeelEntityHandle* output);
     static KeelResult VisitEntitiesEntry(KeelPluginHandle plugin, const KeelEntityAccessSpec* entities,
         std::uint32_t count, KeelEntityAccessCallback callback, void* user_data);
+
     KeelResult VisitEntities(KeelPluginHandle plugin, const KeelEntityAccessSpec* entities,
         std::uint32_t count, KeelEntityAccessCallback callback, void* user_data);
-    static KeelResult PlayerStatCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* readable, std::uint32_t* writable);
-    static KeelResult ReadPlayerStatEntry(KeelPluginHandle plugin, KeelEntityHandle entity, std::uint32_t key, std::int32_t* value);
-    static KeelResult WritePlayerStatEntry(KeelPluginHandle plugin, KeelEntityHandle entity, std::uint32_t key, std::int32_t value);
+
+    static KeelResult
+    PlayerStatCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* readable, std::uint32_t* writable);
+    static KeelResult
+    ReadPlayerStatEntry(KeelPluginHandle plugin, KeelEntityHandle entity, std::uint32_t key, std::int32_t* value);
+    static KeelResult
+    WritePlayerStatEntry(KeelPluginHandle plugin, KeelEntityHandle entity, std::uint32_t key, std::int32_t value);
     KeelResult PlayerStatCapabilities(KeelPluginHandle plugin, std::uint32_t* readable, std::uint32_t* writable);
-    KeelResult AccessPlayerStat(KeelPluginHandle plugin, KeelEntityHandle entity, std::uint32_t key, std::int32_t& value, bool write);
+    KeelResult AccessPlayerStat(
+        KeelPluginHandle plugin, KeelEntityHandle entity, std::uint32_t key, std::int32_t& value, bool write);
+
     static KeelResult RoundCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* capabilities);
     static KeelResult TerminateRoundEntry(KeelPluginHandle plugin, const KeelRoundTermination* request);
     KeelResult RoundCapabilities(KeelPluginHandle plugin, std::uint32_t* capabilities);
@@ -77,16 +88,29 @@ private:
     static KeelResult RemoveEntry(KeelPluginHandle plugin, KeelEntityHandle entity);
     KeelResult EntityTool(KeelPluginHandle plugin, KeelEntityHandle entity, std::uint32_t kind,
         const KeelEntityTeleport* request, const char* model, std::uint32_t* capabilities);
+
     static KeelResult WriteCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* capabilities);
-    static KeelResult WriteFieldEntry(KeelPluginHandle plugin, KeelEntityHandle entity, KeelSchemaFieldHandle field, const void* value, std::uint32_t size);
+    static KeelResult WriteFieldEntry(KeelPluginHandle plugin,
+                                      KeelEntityHandle entity,
+                                      KeelSchemaFieldHandle field,
+                                      const void* value,
+                                      std::uint32_t size);
+
     KeelResult WriteCapabilities(KeelPluginHandle plugin, std::uint32_t* capabilities);
-    KeelResult WriteField(KeelPluginHandle plugin, KeelEntityHandle entity, KeelSchemaFieldHandle field, const void* value, std::uint32_t size);
+    KeelResult WriteField(KeelPluginHandle plugin,
+                          KeelEntityHandle entity,
+                          KeelSchemaFieldHandle field,
+                          const void* value,
+                          std::uint32_t size);
+
     static KeelResult ManagementCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* capabilities);
-    static KeelResult ManagePlayerEntry(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelPlayerManagementAction* action);
+    static KeelResult
+    ManagePlayerEntry(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelPlayerManagementAction* action);
     KeelResult ManagementCapabilities(KeelPluginHandle plugin, std::uint32_t* capabilities);
     KeelResult ManagePlayer(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelPlayerManagementAction* action);
     static KeelResult PlayerActionEntry(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelPlayerAction* action);
     KeelResult PlayerAction(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelPlayerAction* action);
+
     struct FieldRecord
     {
         KeelPluginHandle owner{};
@@ -97,6 +121,7 @@ private:
     {
         KeelPluginHandle owner{};
         GameEntityIdentity entity;
+
         struct Construction
         {
             std::atomic<bool> closed{};
@@ -109,6 +134,7 @@ private:
         bool construction_owner{};
     };
     using Construction = EntityRecord::Construction;
+
     struct OutputRecord
     {
         KeelPluginHandle owner{};
@@ -122,7 +148,11 @@ private:
         void* user_data{};
         bool enabled{true};
     };
-    struct OutputInvocation { std::vector<std::shared_ptr<OutputRecord>> callbacks; };
+
+    struct OutputInvocation
+    {
+        std::vector<std::shared_ptr<OutputRecord>> callbacks;
+    };
     static KeelResult OutputsReadyEntry(KeelPluginHandle);
     static KeelResult SubscribeOutputEntry(KeelPluginHandle, const KeelEntityOutputSpec*, KeelEntityOutputHandle*);
     static KeelResult UnsubscribeOutputEntry(KeelPluginHandle, KeelEntityOutputHandle);
@@ -133,6 +163,7 @@ private:
     void ReleaseOutputs(KeelPluginHandle);
     bool StopOutputs();
     std::uint32_t DispatchOutputs(const KeelEntityOutputEvent*, std::uint64_t);
+
     class ConstructionOperation;
     static bool EntityAccessible(const EntityRecord& record, KeelPluginHandle plugin) noexcept;
     static KeelResult ConstructionReadyEntry(KeelPluginHandle);
@@ -142,11 +173,14 @@ private:
     static KeelResult TeleportConstructionEntry(KeelPluginHandle, KeelEntityHandle, const KeelEntityTeleport*);
     static KeelResult SpawnConstructionEntry(KeelPluginHandle, KeelEntityHandle, KeelBool*);
     static KeelResult ObserveConstructionEntry(KeelPluginHandle, std::uint32_t, KeelEntityHandle*);
-    static KeelResult VisitConstructionEntry(KeelPluginHandle, KeelEntityHandle, const char*, KeelEntityAccessCallback, void*);
+    static KeelResult
+    VisitConstructionEntry(KeelPluginHandle, KeelEntityHandle, const char*, KeelEntityAccessCallback, void*);
     KeelResult ConstructionReady(KeelPluginHandle);
     KeelResult CreateEntity(KeelPluginHandle, const char*, KeelEntityHandle*);
     KeelResult DescribeConstruction(KeelPluginHandle, KeelEntityHandle, KeelEntityInfo*);
-    KeelResult ChangeConstruction(KeelPluginHandle, KeelEntityHandle, const KeelEntityKeyValue*, const KeelEntityTeleport*, KeelBool*);
+    KeelResult ChangeConstruction(
+        KeelPluginHandle, KeelEntityHandle, const KeelEntityKeyValue*, const KeelEntityTeleport*, KeelBool*);
+
     KeelResult ObserveConstruction(KeelPluginHandle, std::uint32_t, KeelEntityHandle*);
     KeelResult VisitConstruction(KeelPluginHandle, KeelEntityHandle, const char*, KeelEntityAccessCallback, void*);
     void PruneConstructions(KeelPluginHandle);
@@ -156,33 +190,41 @@ private:
         KeelPluginHandle plugin,
         const KeelSchemaFieldSpec* spec,
         KeelSchemaFieldHandle* field);
+
     static KeelResult ReleaseFieldEntry(
         KeelPluginHandle plugin,
         KeelSchemaFieldHandle field);
+
     static KeelResult DescribeFieldEntry(
         KeelPluginHandle plugin,
         KeelSchemaFieldHandle field,
         KeelSchemaFieldInfo* info);
+
     static KeelResult FindEntityByIndexEntry(
         KeelPluginHandle plugin,
         std::int32_t index,
         KeelEntityHandle* entity);
+
     static KeelResult FindEntityBySource2HandleEntry(
         KeelPluginHandle plugin,
         std::uint32_t source2_handle,
         KeelEntityHandle* entity);
+
     static KeelResult ReleaseEntityEntry(
         KeelPluginHandle plugin,
         KeelEntityHandle entity);
+
     static KeelResult DescribeEntityEntry(
         KeelPluginHandle plugin,
         KeelEntityHandle entity,
         KeelEntityInfo* info);
+
     static KeelResult EqualEntityEntry(
         KeelPluginHandle plugin,
         KeelEntityHandle left,
         KeelEntityHandle right,
         KeelBool* equal);
+
     static KeelResult ReadEntityFieldEntry(
         KeelPluginHandle plugin,
         KeelEntityHandle entity,
@@ -194,33 +236,41 @@ private:
         KeelPluginHandle plugin,
         const KeelSchemaFieldSpec* spec,
         KeelSchemaFieldHandle* field);
+
     KeelResult ReleaseField(
         KeelPluginHandle plugin,
         KeelSchemaFieldHandle field);
+
     KeelResult DescribeField(
         KeelPluginHandle plugin,
         KeelSchemaFieldHandle field,
         KeelSchemaFieldInfo* info);
+
     KeelResult FindEntityByIndex(
         KeelPluginHandle plugin,
         std::int32_t index,
         KeelEntityHandle* entity);
+
     KeelResult FindEntityBySource2Handle(
         KeelPluginHandle plugin,
         std::uint32_t source2_handle,
         KeelEntityHandle* entity);
+
     KeelResult ReleaseEntity(
         KeelPluginHandle plugin,
         KeelEntityHandle entity);
+
     KeelResult DescribeEntity(
         KeelPluginHandle plugin,
         KeelEntityHandle entity,
         KeelEntityInfo* info);
+
     KeelResult EqualEntity(
         KeelPluginHandle plugin,
         KeelEntityHandle left,
         KeelEntityHandle right,
         KeelBool* equal);
+
     KeelResult ReadEntityField(
         KeelPluginHandle plugin,
         KeelEntityHandle entity,
@@ -231,6 +281,7 @@ private:
     bool PluginReady(KeelPluginHandle plugin) const noexcept;
     static bool ValidSchemaName(const char* name) noexcept;
     static bool ValidValueType(KeelSchemaValueType type) noexcept;
+
     static std::string FieldCacheKey(
         const std::string& profile,
         const KeelSchemaFieldSpec& spec);

@@ -18,7 +18,9 @@ public:
     bool Load() override
     {
         const auto& context = HostContext();
-        if (runtime.Connect(context) != KEEL_RESULT_OK) return false;
+
+        if (runtime.Connect(context) != KEEL_RESULT_OK)
+            return false;
 
         const KeelCommandSpec spec{
             .size = sizeof(KeelCommandSpec),
@@ -30,18 +32,25 @@ public:
             },
             .user_data = this
         };
-        if (context.RegisterCommand(spec, portable) != KEEL_RESULT_OK) return false;
+
+        if (context.RegisterCommand(spec, portable) != KEEL_RESULT_OK)
+            return false;
 
         keels2::Command pending;
+
         if (context.RegisterCommand<&CommandAbi::Portable>(pending,
                 "keel_docs_member", "Print portable arguments through a member callback", *this)
             != KEEL_RESULT_OK) return false;
+
         member = std::move(pending);
 
         const void* service{};
+
         if (context.QueryService(KEELS2_SOURCE2_AUTHORING_SERVICE_NAME,
                 KEELS2_SOURCE2_AUTHORING_API_VERSION, &service) != KEEL_RESULT_OK) return false;
+
         native_api = static_cast<const KeelSource2AuthoringApi*>(service);
+
         if (!native_api || native_api->size != sizeof(KeelSource2AuthoringApi) ||
             native_api->api_version != KEELS2_SOURCE2_AUTHORING_API_VERSION ||
             !native_api->register_command || !native_api->unregister_command) return false;
@@ -52,8 +61,12 @@ public:
         native.name = "keel_docs_native";
         native.description = "Show native arguments; server console may echo or retire commands";
         native.flags = 0;
-        native.callback = [](const void* caller, const void* command, void* user_data) {
-            if (!caller || !command || !user_data) return;
+
+        native.callback = [](const void* caller, const void* command, void* user_data)
+        {
+            if (!caller || !command || !user_data)
+                return;
+
             static_cast<CommandAbi*>(user_data)->Native(
                 *static_cast<const CCommandContext*>(caller),
                 *static_cast<const CCommand*>(command));
@@ -74,8 +87,11 @@ public:
 private:
     void Portable(const keels2::CommandInvocation& invocation)
     {
-        if (!invocation || !invocation.Name()) return;
+        if (!invocation || !invocation.Name())
+            return;
+
         LogMessage("{}: {} arguments", invocation.Name(), invocation.Size());
+
         for (std::size_t index = 0; index < invocation.Size(); ++index)
             if (const char* argument = invocation[index])
                 LogMessage("Argument {}: {}", index, argument);
@@ -84,7 +100,10 @@ private:
     void Native(const CCommandContext& caller, const CCommand& command)
     {
         LogMessage("Native caller slot {}; ArgC {}", caller.GetPlayerSlot().Get(), command.ArgC());
-        if (caller.GetPlayerSlot().Get() != -1 || command.ArgC() != 2) return;
+
+        if (caller.GetPlayerSlot().Get() != -1 || command.ArgC() != 2)
+            return;
+
         if (std::strcmp(command[1], "echo") == 0)
         {
             LogMessage("Server command result: {}",
@@ -96,7 +115,10 @@ private:
             const KeelResult second = member.Reset();
             const KeelResult third = native_api->unregister_command(
                 HostContext().PluginHandle(), native_handle);
-            if (third == KEEL_RESULT_OK || third == KEEL_RESULT_NOT_FOUND) native_handle = 0;
+
+            if (third == KEEL_RESULT_OK || third == KEEL_RESULT_NOT_FOUND)
+                native_handle = 0;
+
             LogMessage("Retirement results: {}, {}, {}", first, second, third);
         }
     }

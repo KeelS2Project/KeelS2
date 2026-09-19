@@ -28,17 +28,22 @@ function(keels2_provide_source_sdk)
             URL_HASH "SHA256=${KEELS2_SOURCE_SDK_ARCHIVE_SHA256}"
             DOWNLOAD_EXTRACT_TIMESTAMP FALSE
         )
+
         if(POLICY CMP0169)
             cmake_policy(PUSH)
             cmake_policy(SET CMP0169 OLD)
         endif()
+
         FetchContent_GetProperties(keels2_hl2sdk_cs2)
+
         if(NOT keels2_hl2sdk_cs2_POPULATED)
             FetchContent_Populate(keels2_hl2sdk_cs2)
         endif()
+
         if(POLICY CMP0169)
             cmake_policy(POP)
         endif()
+
         set(_keels2_source_sdk_root "${keels2_hl2sdk_cs2_SOURCE_DIR}")
     endif()
 
@@ -66,15 +71,19 @@ function(keels2_provide_source_sdk)
         "public/tier1/memblockallocator.h|0c3682cd75fa11ef127efc12406cb99d6a10f52e6ca976304d0c812e33280e06"
         "public/tier1/utlbuffer.h|23325eea4837b53badf00ff357442e48c552819fc13f9d7bc24941fd74fe2dba"
     )
+
     foreach(_keels2_source_sdk_check IN LISTS _keels2_source_sdk_checks)
         string(REPLACE "|" ";" _keels2_source_sdk_check_parts "${_keels2_source_sdk_check}")
         list(GET _keels2_source_sdk_check_parts 0 _keels2_source_sdk_path)
         list(GET _keels2_source_sdk_check_parts 1 _keels2_source_sdk_expected)
         set(_keels2_source_sdk_file "${_keels2_source_sdk_root}/${_keels2_source_sdk_path}")
+
         if(NOT EXISTS "${_keels2_source_sdk_file}")
             message(FATAL_ERROR "Pinned Source 2 SDK file is missing: ${_keels2_source_sdk_path}")
         endif()
+
         file(SHA256 "${_keels2_source_sdk_file}" _keels2_source_sdk_actual)
+
         if(NOT _keels2_source_sdk_actual STREQUAL _keels2_source_sdk_expected)
             message(FATAL_ERROR "Pinned Source 2 SDK file differs: ${_keels2_source_sdk_path}")
         endif()
@@ -93,7 +102,9 @@ function(keels2_provide_source_sdk)
     if(NOT EXISTS "${_keels2_source_sdk_protoc}")
         message(FATAL_ERROR "Pinned Source 2 SDK protoc is missing")
     endif()
+
     file(SHA256 "${_keels2_source_sdk_protoc}" _keels2_source_sdk_protoc_actual)
+
     if(NOT _keels2_source_sdk_protoc_actual STREQUAL _keels2_source_sdk_protoc_sha256)
         message(FATAL_ERROR "Pinned Source 2 SDK protoc differs")
     endif()
@@ -103,6 +114,7 @@ function(keels2_provide_source_sdk)
         "${CMAKE_BINARY_DIR}/_keels2/source-sdk/${KEELS2_SOURCE_SDK_REVISION}/generated"
     )
     file(MAKE_DIRECTORY "${_keels2_source_sdk_generated}")
+
     if(NOT EXISTS "${_keels2_source_sdk_generated}/network_connection.pb.h")
         file(GLOB _keels2_source_sdk_protos "${_keels2_source_sdk_root}/common/*.proto")
         list(SORT _keels2_source_sdk_protos)
@@ -117,10 +129,12 @@ function(keels2_provide_source_sdk)
             OUTPUT_VARIABLE _keels2_source_sdk_protoc_output
             ERROR_VARIABLE _keels2_source_sdk_protoc_error
         )
+
         if(NOT _keels2_source_sdk_protoc_result EQUAL 0)
             message(FATAL_ERROR "Pinned Source 2 SDK protobuf generation failed:\n${_keels2_source_sdk_protoc_output}\n${_keels2_source_sdk_protoc_error}")
         endif()
     endif()
+
     if(NOT EXISTS "${_keels2_source_sdk_generated}/network_connection.pb.h")
         message(FATAL_ERROR "Pinned Source 2 SDK protobuf generation was incomplete")
     endif()
@@ -204,6 +218,7 @@ function(keels2_provide_source_sdk)
     add_library(keels2_source_sdk STATIC "${_keels2_source_sdk_root}/tier1/convar.cpp")
     add_library(KeelS2::SourceSDK ALIAS keels2_source_sdk)
     set_target_properties(keels2_source_sdk PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
     if(MSVC)
         set_target_properties(keels2_source_sdk PROPERTIES
             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
@@ -214,6 +229,7 @@ function(keels2_provide_source_sdk)
             /INCREMENTAL:NO
         )
     endif()
+
     # ConVar calls cross into a game-owned C++ interface. Integration tests use
     # an ABI-faithful vtable fixture, which intentionally has no compatible RTTI;
     # vptr instrumentation therefore cannot validate this external boundary.
@@ -221,6 +237,7 @@ function(keels2_provide_source_sdk)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(keels2_source_sdk PRIVATE -fno-sanitize=vptr)
     endif()
+
     target_link_libraries(keels2_source_sdk PUBLIC
         KeelS2::SourceSDKHeaders
         ${_keels2_source_sdk_libraries}

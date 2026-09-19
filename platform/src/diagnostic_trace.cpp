@@ -31,6 +31,7 @@ std::size_t AppendText(
     {
         return offset;
     }
+
     const std::size_t available = kMaximumTraceLine - 1 - offset;
     const std::size_t length = std::min(text.size(), available);
     std::memcpy(line + offset, text.data(), length);
@@ -48,22 +49,26 @@ void AppendShutdownTrace(std::string_view event, std::string_view detail) noexce
 
     char line[kMaximumTraceLine]{};
     std::size_t length = AppendText(line, 0, event);
+
     if (!detail.empty())
     {
         length = AppendText(line, length, ": ");
         length = AppendText(line, length, detail);
     }
+
     line[length++] = '\n';
 
 #if defined(_WIN32)
     wchar_t* path{};
     std::size_t path_size{};
+
     if (_wdupenv_s(&path, &path_size, L"KEELS2_SHUTDOWN_TRACE_FILE") != 0 ||
         !path || path[0] == L'\0')
     {
         std::free(path);
         return;
     }
+
     const HANDLE file = CreateFileW(
         path,
         FILE_APPEND_DATA,
@@ -72,36 +77,47 @@ void AppendShutdownTrace(std::string_view event, std::string_view detail) noexce
         OPEN_ALWAYS,
         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH,
         nullptr);
+
     std::free(path);
+
     if (file == INVALID_HANDLE_VALUE)
     {
         return;
     }
+
     DWORD written{};
     static_cast<void>(WriteFile(file, line, static_cast<DWORD>(length), &written, nullptr));
     static_cast<void>(FlushFileBuffers(file));
     CloseHandle(file);
 #else
     const char* path = std::getenv("KEELS2_SHUTDOWN_TRACE_FILE");
+
     if (!path || path[0] == '\0')
     {
         return;
     }
+
     const int file = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
+
     if (file < 0)
     {
         return;
     }
+
     std::size_t offset{};
+
     while (offset < length)
     {
         const ssize_t written = write(file, line + offset, length - offset);
+
         if (written <= 0)
         {
             break;
         }
+
         offset += static_cast<std::size_t>(written);
     }
+
     static_cast<void>(fsync(file));
     close(file);
 #endif

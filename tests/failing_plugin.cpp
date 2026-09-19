@@ -17,6 +17,7 @@ extern "C" KeelBool KeelPlugin_Query(const KeelHostQuery* query, KeelPluginInfo*
     {
         return KEEL_FALSE;
     }
+
     info->size = sizeof(KeelPluginInfo);
     info->abi_version = KEELS2_PLUGIN_ABI_VERSION;
     info->name = "Failing Test Plugin";
@@ -30,6 +31,7 @@ extern "C" KeelBool KeelPlugin_Load(const KeelHostApi* api, KeelPluginHandle plu
     {
         return KEEL_FALSE;
     }
+
     api->log(plugin, KEEL_LOG_WARNING, "intentional warning severity probe");
     api->log(plugin, KEEL_LOG_ERROR, "intentional error severity probe");
     const KeelCommandSpec command{

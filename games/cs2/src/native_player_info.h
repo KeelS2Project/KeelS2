@@ -17,7 +17,10 @@ public:
     {
     }
 
-    CMsgPlayerInfo& Get() noexcept { return *message_; }
+    CMsgPlayerInfo& Get() noexcept
+    {
+        return *message_;
+    }
 
 private:
     static google::protobuf::ArenaOptions Options()
@@ -26,8 +29,15 @@ private:
         // CS2 and this adapter use different allocators on Windows. The arena
         // retains the engine's string cleanup callbacks, while every arena
         // block returns through the adapter's allocation callbacks.
-        options.block_alloc = [](std::size_t size) { return ::operator new(size); };
-        options.block_dealloc = [](void* block, std::size_t) { ::operator delete(block); };
+        options.block_alloc = [](std::size_t size)
+        {
+            return ::operator new(size);
+        };
+
+        options.block_dealloc = [](void* block, std::size_t)
+        {
+            ::operator delete(block);
+        };
         return options;
     }
 

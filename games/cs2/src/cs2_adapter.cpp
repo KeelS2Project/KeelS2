@@ -43,7 +43,10 @@
 namespace keels2::host
 {
 
-class Cs2Adapter final : public GameAdapter, private cs2::ConstructionEnvironment, private cs2::InputEnvironment, private cs2::OutputEnvironment
+class Cs2Adapter final : public GameAdapter,
+                         private cs2::ConstructionEnvironment,
+                         private cs2::InputEnvironment,
+                         private cs2::OutputEnvironment
 {
 private:
     struct InputContext
@@ -95,6 +98,7 @@ private:
             {
                 return;
             }
+
             struct DispatchScope
             {
                 void (*end)() noexcept;
@@ -110,6 +114,7 @@ private:
             invocation.command = command;
             std::int32_t argument_count{};
             const char* const* arguments{};
+
             if (command)
             {
                 const auto* bytes = static_cast<const unsigned char*>(command);
@@ -124,6 +129,7 @@ private:
                     sizeof(arguments)
                 );
             }
+
             if (argument_count >= 0 &&
                 argument_count <= static_cast<std::int32_t>(cs2::kCommandMaximumArguments) &&
                 (argument_count == 0 || arguments))
@@ -131,6 +137,7 @@ private:
                 invocation.argument_count = static_cast<std::uint32_t>(argument_count);
                 invocation.arguments = arguments;
             }
+
             callback_(invocation, user_data_);
         }
 
@@ -239,16 +246,19 @@ public:
         std::string& error) override
     {
         Stop();
+
         if (!engine_factory)
         {
             error = "engine interface factory is null";
             return false;
         }
+
         if (!server_factory)
         {
             error = "server interface factory is null";
             return false;
         }
+
         if (!ValidCompatibility(compatibility))
         {
             error = "compatibility profile does not match the compiled CS2 interface and command ABI";
@@ -262,6 +272,7 @@ public:
         InterfaceEntry schema_system;
         InterfaceEntry game_resource;
         const bool schema_entities = compatibility.schema_interface != nullptr;
+
         if (!ResolveInterface(
                 server_factory,
                 KEELS2_SOURCE2_CAPABILITY_SERVER,
@@ -301,6 +312,7 @@ public:
         {
             return false;
         }
+
         if (schema_entities &&
             (!ResolveInterface(
                  engine_factory,
@@ -325,6 +337,7 @@ public:
         }
 
         platform::LoadedModule game_event_module;
+
         if (platform::FindLoadedModule(
                 server.module_path,
                 game_event_module,
@@ -333,17 +346,21 @@ public:
             error = "CGameEventManager module could not be resolved: " + error;
             return false;
         }
+
         platform::LoadedModulePin game_event_module_pin;
+
         if (!game_event_module_pin.Acquire(game_event_module, error))
         {
             error = "CGameEventManager module could not be pinned: " + error;
             return false;
         }
+
         void** game_event_manager_vtable{};
         const std::size_t game_event_entry_count =
             static_cast<std::size_t>((std::max)(
                 compatibility.game_event_load_events_slot,
                 compatibility.game_event_add_listener_slot)) + 1;
+
         if (platform::FindPrimaryVtable(
                 game_event_module,
                 compatibility.game_event_manager_class,
@@ -354,8 +371,10 @@ public:
             error = "CGameEventManager RTTI lookup failed: " + error;
             return false;
         }
+
         std::filesystem::path game_event_load_module;
         std::filesystem::path game_event_add_module;
+
         if (!ValidateTarget(
                 game_event_manager_vtable[compatibility.game_event_load_events_slot],
                 compatibility.game_event_module,
@@ -393,6 +412,7 @@ public:
                        error) &&
                 SameModule(cvar.module_path, module, "CVar interface", error);
         };
+
         if (!validate_cvar_slot(compatibility.find_convar_slot, "FindConVar") ||
             !validate_cvar_slot(compatibility.register_convar_slot, "RegisterConVar") ||
             !validate_cvar_slot(compatibility.unregister_convar_slot, "UnregisterConVarCallbacks") ||
@@ -466,22 +486,27 @@ public:
             cvar_vtable[compatibility.register_convar_slot],
             "MemAlloc_StrDupFunc",
             error);
+
         if (!string_duplicate_address)
         {
             error = "MemAlloc_StrDupFunc is unavailable from VEngineCvar007's module: " + error;
             return false;
         }
+
         void* memory_free_address = platform::ModuleSymbolFromAddress(
             cvar_vtable[compatibility.register_convar_slot],
             "MemAlloc_FreeFunc",
             error);
+
         if (!memory_free_address)
         {
             error = "MemAlloc_FreeFunc is unavailable from VEngineCvar007's module: " + error;
             return false;
         }
+
         std::filesystem::path string_duplicate_module;
         std::filesystem::path memory_free_module;
+
         if (!ValidateTarget(
                 string_duplicate_address,
                 compatibility.cvar_module,
@@ -542,9 +567,11 @@ public:
         schema_server_module_ = compatibility.schema_server_module
             ? compatibility.schema_server_module
             : "";
+
         entity_system_module_ = compatibility.entity_system_module
             ? compatibility.entity_system_module
             : "";
+
         if (!entity_system_module_.empty())
         {
             if (entity_system_module_ == server_.module)
@@ -560,6 +587,7 @@ public:
                 entity_system_module_path_ = game_resource_.module_path;
             }
         }
+
         game_entity_system_offset_ = compatibility.game_entity_system_offset;
         main_thread_ = std::this_thread::get_id();
         entity_epoch_ = 1;
@@ -571,21 +599,25 @@ public:
     bool CompleteStartup(std::string& error) override
     {
         std::scoped_lock lock(source2_mutex_);
+
         if (!game_event_error_.empty())
         {
             error = game_event_error_;
             return false;
         }
+
         if (!game_event_manager_ || !game_event_listener_)
         {
             error = "CGameEventManager::LoadEventsFromFile was not observed during Source2Server001::Init";
             return false;
         }
+
         if (bound_game_events_.size() != requested_game_events_.size())
         {
             error = "not every staged IGameEventManager2 listener was bound";
             return false;
         }
+
         error.clear();
         return true;
     }
@@ -597,6 +629,7 @@ public:
         ShutdownSource2Callbacks();
         const bool trace = cvar_ || server_.instance || game_clients_.instance ||
             cvar_interface_.instance || !compatibility_profile_.empty();
+
         if (trace)
         {
             platform::AppendShutdownTrace("cs2 adapter stop begin");
@@ -606,6 +639,7 @@ public:
         {
             UnregisterCommand(commands_.begin()->first);
         }
+
         if (trace)
         {
             platform::AppendShutdownTrace("cs2 active command release complete");
@@ -615,24 +649,30 @@ public:
         {
             ReleaseConVar(convars_.begin()->first);
         }
+
         if (trace)
         {
             platform::AppendShutdownTrace("cs2 active ConVar release complete");
             platform::AppendShutdownTrace("cs2 retired command release begin");
         }
+
         retired_commands_.clear();
+
         if (trace)
         {
             platform::AppendShutdownTrace("cs2 retired command release complete");
             platform::AppendShutdownTrace("cs2 retired ConVar release begin");
         }
+
         WaitForConVarProviders(global_observers_active_);
         retired_convars_.clear();
+
         if (trace)
         {
             platform::AppendShutdownTrace("cs2 retired ConVar release complete");
             platform::AppendShutdownTrace("cs2 interface invalidation begin");
         }
+
         string_duplicate_ = nullptr;
         memory_free_ = nullptr;
         cvar_ = nullptr;
@@ -654,6 +694,7 @@ public:
             game_entity_system_offset_ = 0;
             main_thread_ = {};
         }
+
         cvar_interface_ = {};
         game_clients_ = {};
         server_ = {};
@@ -666,14 +707,19 @@ public:
         entity_write_notify_ = nullptr;
         entity_input_bindings_ = {};
         entity_output_function_ = {};
-        entity_tool_bindings_ = {}; entity_tool_module_ = {}; entity_tool_classes_.clear();
-        construction_bindings_ = {}; construction_epoch_ = 0;
+        entity_tool_bindings_ = {};
+        entity_tool_module_ = {};
+        entity_tool_classes_.clear();
+        construction_bindings_ = {};
+        construction_epoch_ = 0;
         construction_stopping_ = construction_map_shutdown_ = false;
+
         if (trace)
         {
             platform::AppendShutdownTrace("cs2 interface invalidation complete");
             platform::AppendShutdownTrace("cs2 lifecycle state reset begin");
         }
+
         lifecycle_hooks_ = {};
         lifecycle_callback_ = nullptr;
         lifecycle_user_data_ = nullptr;
@@ -703,6 +749,7 @@ public:
         hooked_loop_vtables_.clear();
         source2_hooks_api_ = nullptr;
         source2_hook_owner_ = 0;
+
         if (trace)
         {
             platform::AppendShutdownTrace("cs2 lifecycle state reset complete");
@@ -722,13 +769,17 @@ public:
         if (capability == KEELS2_SOURCE2_CAPABILITY_GAME_EVENT_MANAGER)
         {
             std::scoped_lock lock(source2_mutex_);
+
             if (!game_event_error_.empty() || !game_event_listener_)
             {
                 return KEEL_RESULT_NOT_READY;
             }
+
             return DescribeInterface(game_event_interface_, info);
         }
+
         const InterfaceEntry* entry{};
+
         if (capability == KEELS2_SOURCE2_CAPABILITY_SERVER)
         {
             entry = &server_;
@@ -745,10 +796,12 @@ public:
         {
             return KEEL_RESULT_UNSUPPORTED;
         }
+
         if (!entry->instance || compatibility_profile_.empty())
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         return DescribeInterface(*entry, info);
     }
 
@@ -763,15 +816,19 @@ public:
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         KeelCreateInterfaceFn interface_factory = factory == KEELS2_SOURCE2_FACTORY_SERVER
             ? server_factory_
             : engine_factory_;
+
         if (!interface_factory || compatibility_profile_.empty())
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         std::pair<KeelSource2Factory, std::string> key{factory, interface_name};
         const auto cached = named_interfaces_.find(key);
+
         if (cached != named_interfaces_.end())
         {
             return DescribeInterface(cached->second, info);
@@ -779,26 +836,33 @@ public:
 
         int return_code = 1;
         void* instance = interface_factory(interface_name, &return_code);
+
         if (!instance)
         {
             return return_code == 0 ? KEEL_RESULT_ENGINE_FAILURE : KEEL_RESULT_NOT_FOUND;
         }
+
         if (return_code != 0)
         {
             return KEEL_RESULT_ENGINE_FAILURE;
         }
+
         auto** vtable = *reinterpret_cast<void***>(instance);
+
         if (!vtable || !vtable[0])
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         std::filesystem::path module;
         std::string error;
+
         if (!platform::ModulePathFromAddress(vtable[0], module, error) ||
             module.filename().empty())
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         InterfaceEntry entry{
             KEELS2_SOURCE2_CAPABILITY_NAMED,
             factory,
@@ -818,11 +882,13 @@ public:
             KEELS2_SOURCE2_FACTORY_ENGINE,
             "Source2EngineToServer001",
             info);
+
         if (query != KEEL_RESULT_OK)
         {
             error = "Source2EngineToServer001 is unavailable";
             return query;
         }
+
         return KeelCs2_ServerCommand(info.instance, command);
     }
 
@@ -846,19 +912,23 @@ public:
         append(cvar_interface_);
         append(engine_service_);
         append(schema_system_);
+
         append(game_resource_);
         {
             std::scoped_lock lock(source2_mutex_);
+
             if (game_event_error_.empty() && game_event_listener_)
             {
                 append(game_event_interface_);
             }
         }
+
         for (const auto& [key, entry] : named_interfaces_)
         {
             static_cast<void>(key);
             append(entry);
         }
+
         std::sort(output.begin(), output.end(), [](const auto& left, const auto& right) {
             return left.name != right.name
                 ? left.name < right.name
@@ -877,11 +947,13 @@ public:
             KEELS2_SOURCE2_FACTORY_ENGINE,
             "Source2EngineToServer001",
             info);
+
         if (query != KEEL_RESULT_OK)
         {
             error = "Source2EngineToServer001 is unavailable";
             return query;
         }
+
         return KeelCs2_ClientConsolePrint(info.instance, slot, message);
     }
 
@@ -895,11 +967,13 @@ public:
             KEELS2_SOURCE2_FACTORY_NETWORK,
             "NetworkMessagesVersion001",
             info);
+
         if (query != KEEL_RESULT_OK)
         {
             error = "NetworkMessagesVersion001 is unavailable";
             return query;
         }
+
         return KeelCs2_FindUserMessage(info.instance, name, &message_id);
     }
 
@@ -918,12 +992,15 @@ public:
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         if (lifecycle_callback_ &&
             (lifecycle_callback_ != callback || lifecycle_user_data_ != user_data))
         {
             return KEEL_RESULT_BUSY;
         }
+
         LifecycleHook& state = lifecycle_hooks_[event];
+
         if (state.callback)
         {
             return KEEL_RESULT_OK;
@@ -934,6 +1011,7 @@ public:
         const KeelHookPrototype* prototype{};
         KeelHookCallback hook_callback{};
         std::uint32_t phase{KH_PHASE_POST};
+
         switch (event)
         {
             case KEELS2_LIFECYCLE_GAME_FRAME:
@@ -942,47 +1020,58 @@ public:
                 prototype = &kh::MethodPrototype<void(bool, bool, bool)>::value;
                 hook_callback = &GameFrame;
                 break;
+
             case KEELS2_LIFECYCLE_CLIENT_CONNECTED:
                 instance = game_clients_.instance;
                 slot = client_connected_slot_;
                 prototype = &kh::MethodPrototype<
                     void(std::int32_t, const char*, std::uint64_t, const char*, const char*, bool)>::value;
+
                 hook_callback = &ClientConnected;
                 break;
+
             case KEELS2_LIFECYCLE_CLIENT_PUT_IN_SERVER:
                 instance = game_clients_.instance;
                 slot = client_put_in_server_slot_;
                 prototype = &kh::MethodPrototype<
                     void(std::int32_t, const char*, std::int32_t, std::uint64_t)>::value;
+
                 hook_callback = &ClientPutInServer;
                 break;
+
             case KEELS2_LIFECYCLE_CLIENT_ACTIVE:
                 instance = game_clients_.instance;
                 slot = client_active_slot_;
                 prototype = &kh::MethodPrototype<
                     void(std::int32_t, bool, const char*, std::uint64_t)>::value;
+
                 hook_callback = &ClientActive;
                 break;
+
             case KEELS2_LIFECYCLE_CLIENT_FULLY_CONNECTED:
                 instance = game_clients_.instance;
                 slot = client_fully_connected_slot_;
                 prototype = &kh::MethodPrototype<void(std::int32_t)>::value;
                 hook_callback = &ClientFullyConnected;
                 break;
+
             case KEELS2_LIFECYCLE_CLIENT_DISCONNECTING:
                 instance = game_clients_.instance;
                 slot = client_disconnecting_slot_;
                 prototype = &kh::MethodPrototype<
                     void(std::int32_t, std::int32_t, const char*, std::uint64_t, const char*)>::value;
+
                 hook_callback = &ClientDisconnecting;
                 phase = KH_PHASE_PRE;
                 break;
+
             case KEELS2_LIFECYCLE_CLIENT_SETTINGS_CHANGED:
                 instance = game_clients_.instance;
                 slot = client_settings_changed_slot_;
                 prototype = &kh::MethodPrototype<void(std::int32_t)>::value;
                 hook_callback = &ClientSettingsChanged;
                 break;
+
             default:
                 return KEEL_RESULT_UNSUPPORTED;
         }
@@ -1001,6 +1090,7 @@ public:
         };
         KeelHookTargetHandle target{};
         KeelResult result = hooks.resolve_virtual_target(owner, &target_spec, prototype, &target);
+
         if (result != KEEL_RESULT_OK)
         {
             error = "lifecycle target resolution failed";
@@ -1019,23 +1109,29 @@ public:
         };
         KeelHookCallbackHandle callback_handle{};
         result = hooks.add_callback(owner, target, &callback_spec, &callback_handle);
+
         if (result != KEEL_RESULT_OK)
         {
             static_cast<void>(hooks.release_target(owner, target));
+
             if (!AnyLifecycleHook())
             {
                 lifecycle_callback_ = nullptr;
                 lifecycle_user_data_ = nullptr;
             }
+
             error = "lifecycle callback installation failed";
             return result;
         }
+
         state = {target, callback_handle};
+
         if (event == KEELS2_LIFECYCLE_GAME_FRAME)
         {
             platform::WriteEngineConsole(
                 "[KeelS2] lifecycle GameFrame hook armed: Source2Server001 slot 19, shared vtable\n");
         }
+
         error.clear();
         return KEEL_RESULT_OK;
     }
@@ -1055,6 +1151,7 @@ public:
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         if (source2_callback_)
         {
             return source2_callback_ == callback && source2_user_data_ == user_data
@@ -1081,6 +1178,7 @@ public:
                 phase,
                 hook,
                 error);
+
             if (result == KEEL_RESULT_OK)
             {
                 source2_hooks_.push_back(hook);
@@ -1089,6 +1187,7 @@ public:
             {
                 error = std::string(operation) + " hook installation failed";
             }
+
             return result;
         };
 
@@ -1100,6 +1199,7 @@ public:
             &LoadEventsFromFile,
             KH_PHASE_POST,
             "CGameEventManager::LoadEventsFromFile");
+
         if (result == KEEL_RESULT_OK)
         {
             result = install(
@@ -1110,6 +1210,7 @@ public:
                 KH_PHASE_POST,
                 "RegisterLoopMode");
         }
+
         if (result == KEEL_RESULT_OK)
         {
             result = install(
@@ -1120,6 +1221,7 @@ public:
                 KH_PHASE_PRE,
                 "UnregisterLoopMode");
         }
+
         if (result == KEEL_RESULT_OK)
         {
             result = install(
@@ -1131,6 +1233,7 @@ public:
                 KH_PHASE_PRE,
                 "ClientConnect");
         }
+
         if (result == KEEL_RESULT_OK)
         {
             result = install(
@@ -1141,6 +1244,7 @@ public:
                 KH_PHASE_PRE,
                 "ClientCommand");
         }
+
         if (result != KEEL_RESULT_OK)
         {
             RollbackSource2Hooks();
@@ -1149,6 +1253,7 @@ public:
             source2_hooks_api_ = nullptr;
             return result;
         }
+
         error.clear();
         return KEEL_RESULT_OK;
     }
@@ -1159,11 +1264,13 @@ public:
             std::scoped_lock lock(source2_mutex_);
             source2_callback_ = nullptr;
             source2_user_data_ = nullptr;
+
             if (game_event_listener_)
             {
                 KeelCs2_DestroyGameEventListener(game_event_listener_);
                 game_event_listener_ = nullptr;
             }
+
             game_event_manager_ = nullptr;
             game_event_interface_.instance = nullptr;
             requested_game_events_.clear();
@@ -1179,25 +1286,31 @@ public:
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         std::scoped_lock lock(source2_mutex_);
         const auto [iterator, inserted] = requested_game_event_names_.insert(name);
+
         if (!inserted)
         {
             error.clear();
             return KEEL_RESULT_OK;
         }
+
         requested_game_events_.push_back(*iterator);
+
         if (!game_event_listener_)
         {
             error.clear();
             return KEEL_RESULT_OK;
         }
+
         if (!BindGameEventLocked(*iterator, error))
         {
             requested_game_events_.pop_back();
             requested_game_event_names_.erase(iterator);
             return KEEL_RESULT_ENGINE_FAILURE;
         }
+
         error.clear();
         return KEEL_RESULT_OK;
     }
@@ -1209,6 +1322,7 @@ public:
             error = "CS2 command system is not ready";
             return false;
         }
+
         if (!spec.name || !spec.name[0] || !spec.callback)
         {
             error = "command definition is invalid";
@@ -1224,6 +1338,7 @@ public:
         creation.callback_info.is_interface = true;
 
         entry->reference = cvar_->RegisterConCommand(creation, 0);
+
         if (!entry->reference.IsValid())
         {
             error = "VEngineCvar007 rejected the command";
@@ -1240,14 +1355,17 @@ public:
     void UnregisterCommand(GameCommandHandle command) noexcept override
     {
         const auto iterator = commands_.find(command);
+
         if (iterator == commands_.end())
         {
             return;
         }
+
         if (cvar_)
         {
             cvar_->UnregisterConCommandCallbacks(iterator->second->reference);
         }
+
         retired_commands_.push_back(std::move(iterator->second));
         commands_.erase(iterator);
     }
@@ -1277,6 +1395,7 @@ public:
             error = "ConVar definition is invalid";
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         if (next_convar_ == 0)
         {
             error = "CS2 ConVar handle space is exhausted";
@@ -1296,10 +1415,12 @@ public:
         entry->native_callback = native_callback;
         entry->user_data = user_data;
         RetainPublicValue(spec.default_value, entry->default_value, entry->default_string);
+
         if (entry->has_minimum)
         {
             RetainPublicValue(spec.minimum_value, entry->minimum_value, entry->minimum_string);
         }
+
         if (entry->has_maximum)
         {
             RetainPublicValue(spec.maximum_value, entry->maximum_value, entry->maximum_string);
@@ -1314,10 +1435,12 @@ public:
         creation.value_info.has_minimum = entry->has_minimum;
         creation.value_info.has_maximum = entry->has_maximum;
         StoreEngineValue(entry->default_value, creation.value_info.default_value);
+
         if (entry->has_minimum)
         {
             StoreEngineValue(entry->minimum_value, creation.value_info.minimum_value);
         }
+
         if (entry->has_maximum)
         {
             StoreEngineValue(entry->maximum_value, creation.value_info.maximum_value);
@@ -1326,6 +1449,7 @@ public:
         std::unique_ptr<char, MemAllocFree> engine_default_string(nullptr, memory_free_);
         std::unique_ptr<char, MemAllocFree> engine_minimum_string(nullptr, memory_free_);
         std::unique_ptr<char, MemAllocFree> engine_maximum_string(nullptr, memory_free_);
+
         if (entry->type == KEELS2_CONVAR_STRING)
         {
             if (!string_duplicate_ || !memory_free_)
@@ -1336,11 +1460,13 @@ public:
 
             engine_default_string.reset(string_duplicate_(
                 entry->default_value.value.string_value));
+
             if (!engine_default_string)
             {
                 error = "VEngineCvar007 could not allocate the ConVar default string";
                 return KEEL_RESULT_ENGINE_FAILURE;
             }
+
             cs2::ConVarValue default_value{};
             default_value.string = engine_default_string.get();
             std::memcpy(
@@ -1352,11 +1478,13 @@ public:
             {
                 engine_minimum_string.reset(string_duplicate_(
                     entry->minimum_value.value.string_value));
+
                 if (!engine_minimum_string)
                 {
                     error = "VEngineCvar007 could not allocate the ConVar minimum string";
                     return KEEL_RESULT_ENGINE_FAILURE;
                 }
+
                 cs2::ConVarValue minimum_value{};
                 minimum_value.string = engine_minimum_string.get();
                 std::memcpy(
@@ -1364,15 +1492,18 @@ public:
                     &minimum_value,
                     sizeof(minimum_value));
             }
+
             if (entry->has_maximum)
             {
                 engine_maximum_string.reset(string_duplicate_(
                     entry->maximum_value.value.string_value));
+
                 if (!engine_maximum_string)
                 {
                     error = "VEngineCvar007 could not allocate the ConVar maximum string";
                     return KEEL_RESULT_ENGINE_FAILURE;
                 }
+
                 cs2::ConVarValue maximum_value{};
                 maximum_value.string = engine_maximum_string.get();
                 std::memcpy(
@@ -1381,11 +1512,13 @@ public:
                     sizeof(maximum_value));
             }
         }
+
         if (callback || native_callback)
         {
             creation.value_info.change_provider = &ConVarChangeProvider;
             creation.value_info.change_callback = &ConVarChange;
         }
+
         creation.value_info.type = EngineType(entry->type);
 
         cvar_->RegisterConVar(
@@ -1393,10 +1526,12 @@ public:
             0,
             &entry->object.reference,
             &entry->object.data);
+
         static_cast<void>(engine_default_string.release());
         static_cast<void>(engine_minimum_string.release());
         static_cast<void>(engine_maximum_string.release());
         entry->registering.store(false, std::memory_order_release);
+
         if (!entry->object.reference.IsValid() || !entry->object.data ||
             cvar_->GetConVarData(entry->object.reference) != entry->object.data)
         {
@@ -1405,9 +1540,11 @@ public:
                 cvar_->UnregisterConVarCallbacks(entry->object.reference);
                 retired_convars_.push_back(std::move(entry));
             }
+
             error = "VEngineCvar007 rejected the ConVar";
             return KEEL_RESULT_ENGINE_FAILURE;
         }
+
         if (PublicType(entry->object.data->type) != entry->type)
         {
             cvar_->UnregisterConVarCallbacks(entry->object.reference);
@@ -1417,6 +1554,7 @@ public:
         }
 
         bool callback_registered = !entry->callback && !entry->native_callback;
+
         if (entry->callback || entry->native_callback)
         {
             const std::lock_guard lock(convar_callback_mutex_);
@@ -1424,6 +1562,7 @@ public:
                 entry->object.data,
                 entry.get()).second;
         }
+
         if (!callback_registered)
         {
             cvar_->UnregisterConVarCallbacks(entry->object.reference);
@@ -1437,10 +1576,12 @@ public:
         void* native = &entry->object;
         convars_.emplace(handle, std::move(entry));
         convar = handle;
+
         if (native_convar)
         {
             *native_convar = native;
         }
+
         error.clear();
         return KEEL_RESULT_OK;
     }
@@ -1457,18 +1598,22 @@ public:
             error = "ConVar reference request is invalid";
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         if (next_convar_ == 0)
         {
             error = "CS2 ConVar handle space is exhausted";
             return KEEL_RESULT_ENGINE_FAILURE;
         }
+
         const cs2::ConVarRef reference = cvar_->FindConVar(name, false);
         cs2::ConVarData* data = reference.IsValid() ? cvar_->GetConVarData(reference) : nullptr;
+
         if (!reference.IsValid() || !data)
         {
             error = "Source 2 ConVar was not found";
             return KEEL_RESULT_NOT_FOUND;
         }
+
         if (PublicType(data->type) != expected_type)
         {
             error = "Source 2 ConVar type is incompatible";
@@ -1487,10 +1632,12 @@ public:
         void* native = &entry->object;
         convars_.emplace(handle, std::move(entry));
         convar = handle;
+
         if (native_convar)
         {
             *native_convar = native;
         }
+
         error.clear();
         return KEEL_RESULT_OK;
     }
@@ -1501,32 +1648,42 @@ public:
         {
             return KEEL_RESULT_WRONG_THREAD;
         }
+
         if (!cvar_ || !callback)
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         auto* entry = ConVarByHandle(convar);
+
         if (!entry || !entry->object.data)
         {
             return KEEL_RESULT_NOT_FOUND;
         }
+
         KeelConVarValue value{};
         const KeelResult read = ReadConVar(convar, KEELS2_CONVAR_GLOBAL_SLOT, value);
+
         if (read != KEEL_RESULT_OK)
         {
             return read;
         }
+
         std::scoped_lock lock(convar_callback_mutex_);
+
         if (entry->observer)
         {
             return KEEL_RESULT_ALREADY_EXISTS;
         }
+
         RetainPublicValue(value, entry->observed_value, entry->observed_string);
         convar_observers_.reserve(convar_observers_.size() + 1);
+
         if (observer_count_ == 0)
         {
             cvar_->InstallGlobalChangeCallback(&GlobalConVarChanged);
         }
+
         entry->observer = callback;
         entry->observer_data = user_data;
         entry->observer_owner = this;
@@ -1538,38 +1695,47 @@ public:
     void ReleaseConVar(GameConVarHandle convar) noexcept override
     {
         const auto iterator = convars_.find(convar);
+
         if (iterator == convars_.end())
         {
             return;
         }
+
         std::unique_ptr<ConVarEntry> entry = std::move(iterator->second);
+
         entry->active.store(false, std::memory_order_release);
         {
             std::scoped_lock lock(convar_callback_mutex_);
+
             if (entry->observer)
             {
                 std::erase(convar_observers_, entry.get());
                 entry->observer = nullptr;
                 --observer_count_;
+
                 if (observer_count_ == 0 && cvar_)
                 {
                     cvar_->RemoveGlobalChangeCallback(&GlobalConVarChanged);
                 }
             }
         }
+
         if (entry->owned && cvar_ && entry->object.reference.IsValid())
         {
             cvar_->UnregisterConVarCallbacks(entry->object.reference);
         }
+
         if (entry->owned && (entry->callback || entry->native_callback) && entry->object.data)
         {
             const std::lock_guard lock(convar_callback_mutex_);
             const auto callback = convar_callbacks_.find(entry->object.data);
+
             if (callback != convar_callbacks_.end() && callback->second == entry.get())
             {
                 convar_callbacks_.erase(callback);
             }
         }
+
         WaitForConVarProviders(entry->provider_active);
         convars_.erase(iterator);
         retired_convars_.push_back(std::move(entry));
@@ -1581,19 +1747,24 @@ public:
         KeelConVarValue& value) const noexcept override
     {
         const ConVarEntry* entry = ConVarByHandle(convar);
+
         if (!entry || !entry->object.data)
         {
             return KEEL_RESULT_NOT_FOUND;
         }
+
         if (slot != KEELS2_CONVAR_GLOBAL_SLOT && slot != 0)
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         cs2::ConVarValue engine_value{};
+
         if (!LoadLiveEngineValue(entry->type, entry->object.data->values, engine_value))
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         return LoadPublicValue(entry->type, &engine_value, value);
     }
 
@@ -1605,10 +1776,12 @@ public:
         try
         {
             ConVarEntry* entry = ConVarByHandle(convar);
+
             if (!entry || !entry->object.data)
             {
                 return KEEL_RESULT_NOT_FOUND;
             }
+
             if ((slot != KEELS2_CONVAR_GLOBAL_SLOT && slot != 0) ||
                 value.size != sizeof(KeelConVarValue) || value.type != entry->type ||
                 (value.type == KEELS2_CONVAR_STRING && !value.value.string_value))
@@ -1619,6 +1792,7 @@ public:
             cs2::ConVarValue engine_value{};
             PublicToEngine(value, engine_value);
             constexpr std::int32_t engine_global_slot = 0;
+
             if (!OnMainThread())
             {
                 ClampEngineValue(entry->type, *entry->object.data, engine_value);
@@ -1627,12 +1801,15 @@ public:
                     engine_global_slot,
                     nullptr,
                     &engine_value);
+
                 return KEEL_RESULT_OK;
             }
+
             if ((entry->object.data->flags & cs2::kPerformingCallbacksFlag) != 0)
             {
                 ClampEngineValue(entry->type, *entry->object.data, engine_value);
                 cs2::ConVarValue current{};
+
                 if (!LoadLiveEngineValue(
                         entry->type,
                         entry->object.data->values,
@@ -1640,17 +1817,21 @@ public:
                 {
                     return KEEL_RESULT_INCOMPATIBLE;
                 }
+
                 if (EqualEngineValue(entry->type, current, engine_value))
                 {
                     return KEEL_RESULT_OK;
                 }
+
                 cvar_->QueueThreadSetValue(
                     &entry->object,
                     engine_global_slot,
                     nullptr,
                     &engine_value);
+
                 return KEEL_RESULT_OK;
             }
+
             return SetConVarNow(
                 *entry,
                 engine_value,
@@ -1669,13 +1850,16 @@ public:
     {
         const ConVarEntry* entry = ConVarByHandle(convar);
         const cs2::ConVarData* data = entry ? entry->object.data : nullptr;
+
         if (!entry || !data)
         {
             return KEEL_RESULT_NOT_FOUND;
         }
+
         KeelConVarValue default_value{};
         KeelConVarValue minimum_value{};
         KeelConVarValue maximum_value{};
+
         if (LoadPublicValue(entry->type, data->default_value, default_value) != KEEL_RESULT_OK ||
             (data->minimum_value &&
                 LoadPublicValue(entry->type, data->minimum_value, minimum_value) != KEEL_RESULT_OK) ||
@@ -1684,6 +1868,7 @@ public:
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         info = {
             sizeof(KeelConVarInfo),
             entry->type,
@@ -1707,18 +1892,22 @@ public:
         {
             return KEEL_RESULT_WRONG_THREAD;
         }
+
         KeelSource2InterfaceInfo engine{};
         KeelSource2InterfaceInfo messages{};
         KeelSource2InterfaceInfo events{};
         KeelResult result = QueryNamedInterface(KEELS2_SOURCE2_FACTORY_ENGINE, "Source2EngineToServer001", engine);
+
         if (result == KEEL_RESULT_OK)
         {
             result = QueryNamedInterface(KEELS2_SOURCE2_FACTORY_NETWORK, "NetworkMessagesVersion001", messages);
         }
+
         if (result == KEEL_RESULT_OK)
         {
             result = QueryNamedInterface(KEELS2_SOURCE2_FACTORY_ENGINE, "GameEventSystemServerV001", events);
         }
+
         return result == KEEL_RESULT_OK ? KeelCs2_PrintChat(engine.instance, messages.instance, events.instance,
             slot, broadcast, text) : result;
     }
@@ -1729,22 +1918,27 @@ public:
         {
             return KEEL_RESULT_WRONG_THREAD;
         }
+
         KeelSource2InterfaceInfo engine{};
         const KeelResult query = QueryNamedInterface(
             KEELS2_SOURCE2_FACTORY_ENGINE, "Source2EngineToServer001", engine);
+
         if (query != KEEL_RESULT_OK)
         {
             return query;
         }
+
         void* entities{};
         std::string error;
         {
             std::scoped_lock lock(schema_entity_mutex_);
+
             if (CurrentEntitySystemLocked(entities, error) != KEEL_RESULT_OK)
             {
                 entities = nullptr;
             }
         }
+
         return KeelCs2_ReadPlayer(engine.instance, entities, schema_system_.instance,
             schema_server_module_.c_str(), slot, &player);
     }
@@ -1752,34 +1946,59 @@ public:
     KeelResult ReadPlayerInput(std::int32_t slot, std::uint32_t controller, std::uint64_t& buttons, std::uint64_t& context)
     {
         buttons = context = 0;
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
-        if (slot < 0 || static_cast<std::uint32_t>(slot) >= KeelCs2_PlayerCapacity()) return KEEL_RESULT_INVALID_ARGUMENT;
+
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
+        if (slot < 0 || static_cast<std::uint32_t>(slot) >= KeelCs2_PlayerCapacity())
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
         void* system{};
         std::string error;
         std::uint64_t epoch{};
         {
             std::scoped_lock lock(schema_entity_mutex_);
             const auto ready = CurrentEntitySystemLocked(system, error);
-            if (ready != KEEL_RESULT_OK) return ready;
+
+            if (ready != KEEL_RESULT_OK)
+                return ready;
+
             epoch = entity_epoch_;
         }
+
         KeelCs2EntityIdentity entity{};
         auto result = KeelCs2_FindEntityBySource2Handle(system, controller, &entity);
-        if (result != KEEL_RESULT_OK) return result;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
         void* component{};
         std::uint64_t held{};
         std::uint32_t pawn{};
-        result = KeelCs2_ReadControllerInput(system, schema_system_.instance, schema_server_module_.c_str(), &entity, &held, &component, &pawn);
-        if (result != KEEL_RESULT_OK) return result;
+        result = KeelCs2_ReadControllerInput(
+            system, schema_system_.instance, schema_server_module_.c_str(), &entity, &held, &component, &pawn);
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
         std::scoped_lock lock(schema_entity_mutex_);
-        if (epoch != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
-        if (input_contexts_.empty()) input_contexts_.resize(KeelCs2_PlayerCapacity());
+
+        if (epoch != entity_epoch_)
+            return KEEL_RESULT_NOT_FOUND;
+
+        if (input_contexts_.empty())
+            input_contexts_.resize(KeelCs2_PlayerCapacity());
+
         auto& previous = input_contexts_[static_cast<std::size_t>(slot)];
+
         if (!previous.token || previous.epoch != epoch || previous.pawn != pawn || previous.component != component)
         {
-            if (next_input_context_ == UINT64_MAX) return KEEL_RESULT_BUSY;
+            if (next_input_context_ == UINT64_MAX)
+                return KEEL_RESULT_BUSY;
+
             previous = {epoch, ++next_input_context_, pawn, component};
         }
+
         buttons = held;
         context = previous.token;
         return KEEL_RESULT_OK;
@@ -1788,46 +2007,87 @@ public:
     KeelResult PlayerStatCapabilities(std::uint32_t& readable, std::uint32_t& writable)
     {
         readable = writable = 0;
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
         if (!player_statistics_bindings_.notify)
         {
-            if (compatibility_profile_.empty()) return KEEL_RESULT_UNSUPPORTED;
+            if (compatibility_profile_.empty())
+                return KEEL_RESULT_UNSUPPORTED;
+
             platform::LoadedModule module;
             std::string error;
+
             if (platform::FindLoadedModule(server_.module_path,module,error) != platform::ModuleLookup::found)
                 return KEEL_RESULT_NOT_READY;
+
             const auto result = cs2::ResolvePlayerStatistics(module,compatibility_profile_,player_statistics_bindings_,error);
-            if (result != KEEL_RESULT_OK) return result;
+
+            if (result != KEEL_RESULT_OK)
+                return result;
         }
+
         readable = writable = KEELS2_PLAYER_STAT_MONEY | KEELS2_PLAYER_STAT_MATCH_KILLS |
             KEELS2_PLAYER_STAT_MATCH_DEATHS | KEELS2_PLAYER_STAT_MATCH_ASSISTS;
+
         return KEEL_RESULT_OK;
     }
+
     KeelResult AccessPlayerStat(const GameEntityIdentity& entity, std::uint32_t key, std::int32_t& value, bool write)
     {
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
         if ((key != KEELS2_PLAYER_STAT_MONEY && key != KEELS2_PLAYER_STAT_MATCH_KILLS &&
             key != KEELS2_PLAYER_STAT_MATCH_DEATHS && key != KEELS2_PLAYER_STAT_MATCH_ASSISTS) || (write && value < 0))
             return KEEL_RESULT_INVALID_ARGUMENT;
-        if (active_stat_calls_ >= 8) return KEEL_RESULT_BUSY;
+
+        if (active_stat_calls_ >= 8)
+            return KEEL_RESULT_BUSY;
+
         ++active_stat_calls_;
-        struct Hold { unsigned& count; ~Hold() { --count; } } hold{active_stat_calls_};
+
+        struct Hold
+        {
+            unsigned& count;
+
+            ~Hold()
+            {
+                --count;
+            }
+        } hold{active_stat_calls_};
         std::uint32_t readable{},writable{};
         auto result = PlayerStatCapabilities(readable,writable);
-        if (result != KEEL_RESULT_OK) return result;
-        if (!((write ? writable : readable) & key)) return KEEL_RESULT_UNSUPPORTED;
-        if (!schema_system_.instance || schema_server_module_.empty()) return KEEL_RESULT_NOT_READY;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
+        if (!((write ? writable : readable) & key))
+            return KEEL_RESULT_UNSUPPORTED;
+
+        if (!schema_system_.instance || schema_server_module_.empty())
+            return KEEL_RESULT_NOT_READY;
+
         KeelCs2PlayerStatSchema schema{};
         result = KeelCs2_ResolvePlayerStatSchema(schema_system_.instance,schema_server_module_.c_str(),key,&schema);
-        if (result != KEEL_RESULT_OK) return result;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
         void* system{};
         std::string error;
         {
             std::scoped_lock lock(schema_entity_mutex_);
             result = CurrentEntitySystemLocked(system,error);
-            if (result != KEEL_RESULT_OK) return result;
-            if (!entity.epoch || entity.epoch != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+
+            if (result != KEEL_RESULT_OK)
+                return result;
+
+            if (!entity.epoch || entity.epoch != entity_epoch_)
+                return KEEL_RESULT_NOT_FOUND;
         }
+
         const KeelCs2EntityIdentity controller{entity.index,entity.source2_handle};
         return write ? KeelCs2_WritePlayerStat(system,&controller,&schema,&player_statistics_bindings_,value) :
             KeelCs2_ReadPlayerStat(system,&controller,&schema,&player_statistics_bindings_,&value);
@@ -1836,183 +2096,355 @@ public:
     KeelResult RoundCapabilities(std::uint32_t& capabilities)
     {
         capabilities = 0;
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
         if (!round_bindings_.terminate)
         {
-            if (compatibility_profile_.empty()) return KEEL_RESULT_UNSUPPORTED;
+            if (compatibility_profile_.empty())
+                return KEEL_RESULT_UNSUPPORTED;
+
             platform::LoadedModule module;
             std::string error;
+
             if (platform::FindLoadedModule(server_.module_path,module,error) != platform::ModuleLookup::found)
                 return KEEL_RESULT_NOT_READY;
+
             const auto result = cs2::ResolveRoundControl(module,compatibility_profile_,round_bindings_,error);
-            if (result != KEEL_RESULT_OK) return result;
+
+            if (result != KEEL_RESULT_OK)
+                return result;
         }
+
         capabilities = KEELS2_ROUND_CONTROL_TERMINATE;
         return KEEL_RESULT_OK;
     }
 
     KeelResult TerminateRound(const KeelRoundTermination& request)
     {
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
-        if (request.size != sizeof(request)) return KEEL_RESULT_INVALID_ARGUMENT;
-        const bool reason = request.reason == 1 || (request.reason >= 4 && request.reason <= 14) || (request.reason >= 16 && request.reason <= 22);
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
+        if (request.size != sizeof(request))
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
+        const bool reason = request.reason == 1 || (request.reason >= 4 && request.reason <= 14) ||
+                            (request.reason >= 16 && request.reason <= 22);
+
         if (request.reserved || !reason || !std::isfinite(request.delay) ||
             request.delay < 0 || request.delay > 3600 || (request.team != 0 && request.team != 2 && request.team != 3))
             return KEEL_RESULT_INVALID_ARGUMENT;
-        if (active_round_calls_ >= 8) return KEEL_RESULT_BUSY;
+
+        if (active_round_calls_ >= 8)
+            return KEEL_RESULT_BUSY;
+
         ++active_round_calls_;
-        struct Hold { unsigned& count; ~Hold() { --count; } } hold{active_round_calls_};
+
+        struct Hold
+        {
+            unsigned& count;
+
+            ~Hold()
+            {
+                --count;
+            }
+        } hold{active_round_calls_};
         std::uint32_t capabilities{};
         auto result = RoundCapabilities(capabilities);
-        if (result != KEEL_RESULT_OK) return result;
-        if (!(capabilities & KEELS2_ROUND_CONTROL_TERMINATE)) return KEEL_RESULT_UNSUPPORTED;
-        if (!schema_system_.instance || schema_server_module_.empty()) return KEEL_RESULT_NOT_READY;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
+        if (!(capabilities & KEELS2_ROUND_CONTROL_TERMINATE))
+            return KEEL_RESULT_UNSUPPORTED;
+
+        if (!schema_system_.instance || schema_server_module_.empty())
+            return KEEL_RESULT_NOT_READY;
+
         KeelCs2RoundContext context{};
         result = KeelCs2_ResolveRoundSchema(schema_system_.instance,schema_server_module_.c_str(),&context);
-        if (result != KEEL_RESULT_OK) return result;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
         void* system{};
         std::uint64_t epoch{};
         std::string error;
         {
             std::scoped_lock lock(schema_entity_mutex_);
             result = CurrentEntitySystemLocked(system,error);
-            if (result != KEEL_RESULT_OK) return result;
+
+            if (result != KEEL_RESULT_OK)
+                return result;
+
             epoch = entity_epoch_;
         }
+
         // All schema-interface calls precede acquiring the current entity list.
         result = KeelCs2_FindRoundContext(system,&round_bindings_,&context);
-        if (result != KEEL_RESULT_OK) return result;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
         {
             std::scoped_lock lock(schema_entity_mutex_);
             void* current{};
             result = CurrentEntitySystemLocked(current,error);
-            if (result != KEEL_RESULT_OK) return result;
-            if (!epoch || epoch != entity_epoch_ || current != system) return KEEL_RESULT_NOT_FOUND;
+
+            if (result != KEEL_RESULT_OK)
+                return result;
+
+            if (!epoch || epoch != entity_epoch_ || current != system)
+                return KEEL_RESULT_NOT_FOUND;
         }
+
         // No schema registry mutex held while game callbacks can run.
         return KeelCs2_TerminateRound(system,&context,&request,&round_bindings_);
     }
 
-    cs2::OwnedConstructions& Constructions() noexcept { return constructions_; }
+    cs2::OwnedConstructions& Constructions() noexcept
+    {
+        return constructions_;
+    }
+
     KeelResult Ready() override
     {
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
-        if (construction_stopping_ || construction_map_shutdown_) return KEEL_RESULT_NOT_READY;
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
+        if (construction_stopping_ || construction_map_shutdown_)
+            return KEEL_RESULT_NOT_READY;
+
         if (!construction_bindings_.create) {
-            if (compatibility_profile_.empty()) return KEEL_RESULT_UNSUPPORTED;
-            platform::LoadedModule module; std::string error;
+            if (compatibility_profile_.empty())
+                return KEEL_RESULT_UNSUPPORTED;
+
+            platform::LoadedModule module;
+            std::string error;
+
             if (platform::FindLoadedModule(server_.module_path,module,error) != platform::ModuleLookup::found)
                 return KEEL_RESULT_NOT_READY;
+
             const auto result = cs2::ResolveEntityConstruction(module,compatibility_profile_,construction_bindings_,error);
-            if (result != KEEL_RESULT_OK) return result;
+
+            if (result != KEEL_RESULT_OK)
+                return result;
         }
-        void* system{}; std::uint64_t epoch{};
+
+        void* system{};
+        std::uint64_t epoch{};
         const auto result = Current(0,system,epoch);
-        if (result != KEEL_RESULT_OK) return result;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
         if (construction_epoch_ != epoch) {
             construction_epoch_ = epoch;
             constructions_.Reset();
         }
+
         return KEEL_RESULT_OK;
     }
+
     KeelResult ResolveBase(void*& base) override
     {
         base = nullptr;
         const auto result = Ready();
-        if (result != KEEL_RESULT_OK) return result;
-        if (!schema_system_.instance || schema_server_module_.empty()) return KEEL_RESULT_NOT_READY;
-        return KeelCs2_ResolveEntityToolBase(schema_system_.instance,schema_server_module_.c_str(),KEELS2_ENTITY_TOOL_TELEPORT,&base);
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
+        if (!schema_system_.instance || schema_server_module_.empty())
+            return KEEL_RESULT_NOT_READY;
+
+        return KeelCs2_ResolveEntityToolBase(
+            schema_system_.instance, schema_server_module_.c_str(), KEELS2_ENTITY_TOOL_TELEPORT, &base);
     }
+
     KeelResult Current(std::uint64_t expected, void*& system, std::uint64_t& epoch) noexcept override
     {
-        system = nullptr; epoch = 0;
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        system = nullptr;
+        epoch = 0;
+
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
         try {
             std::string error;
             std::scoped_lock lock(schema_entity_mutex_);
-            if (expected && expected != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+
+            if (expected && expected != entity_epoch_)
+                return KEEL_RESULT_NOT_FOUND;
+
             const auto result = CurrentEntitySystemLocked(system,error);
-            if (result != KEEL_RESULT_OK) return result;
-            if (expected && expected != entity_epoch_) { system = nullptr; return KEEL_RESULT_NOT_FOUND; }
-            epoch = entity_epoch_; return KEEL_RESULT_OK;
-        } catch (...) { system = nullptr; return KEEL_RESULT_ENGINE_FAILURE; }
+
+            if (result != KEEL_RESULT_OK)
+                return result;
+
+            if (expected && expected != entity_epoch_)
+            {
+                system = nullptr;
+                return KEEL_RESULT_NOT_FOUND;
+            }
+
+            epoch = entity_epoch_;
+            return KEEL_RESULT_OK;
+        }
+        catch (...)
+        {
+            system = nullptr;
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
     }
-    KeelCs2EntityConstructionBindings Bindings() const noexcept override { return construction_bindings_; }
-    KeelResult TeleportTarget(const char* name, KeelCs2EntityToolBindings& bindings, KeelCs2EntityToolClass& target) override
+
+    KeelCs2EntityConstructionBindings Bindings() const noexcept override
     {
-        bindings = {}; target = {};
+        return construction_bindings_;
+    }
+
+    KeelResult
+    TeleportTarget(const char* name, KeelCs2EntityToolBindings& bindings, KeelCs2EntityToolClass& target) override
+    {
+        bindings = {};
+        target = {};
         std::uint32_t capabilities{};
         auto result = EntityToolCapabilities(capabilities);
-        if (result != KEEL_RESULT_OK) return result;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
         std::string error;
         auto found = entity_tool_classes_.find(name);
-        if (found != entity_tool_classes_.end()) target = found->second;
+
+        if (found != entity_tool_classes_.end())
+            target = found->second;
         else {
             result = cs2::ResolveEntityToolClass(entity_tool_module_,name,entity_tool_bindings_,target,error);
-            if (result != KEEL_RESULT_OK) return result;
-            if (entity_tool_classes_.size() >= 128) entity_tool_classes_.clear();
+
+            if (result != KEEL_RESULT_OK)
+                return result;
+
+            if (entity_tool_classes_.size() >= 128)
+                entity_tool_classes_.clear();
+
             entity_tool_classes_.emplace(name,target);
         }
+
         bindings = entity_tool_bindings_;
         return KEEL_RESULT_OK;
     }
 
-    bool OutputOnThread() const noexcept override { return OnMainThread(); }
+    bool OutputOnThread() const noexcept override
+    {
+        return OnMainThread();
+    }
+
     KeelResult OutputCurrent(std::uint64_t expected, void*& system, std::uint64_t& epoch) noexcept override
     {
         return InputCurrent(expected,system,epoch);
     }
+
     KeelResult StartOutputs(const KeelHookApi& hooks, GameHookDefer defer, GameEntityOutputCallback callback, void* data)
     {
-        void* system{}; std::uint64_t epoch{};
+        void* system{};
+        std::uint64_t epoch{};
         const auto ready = OutputCurrent(0,system,epoch);
-        if (ready != KEEL_RESULT_OK) return ready;
+
+        if (ready != KEEL_RESULT_OK)
+            return ready;
+
         if (!entity_output_function_) {
-            if (compatibility_profile_.empty()) return KEEL_RESULT_UNSUPPORTED;
-            platform::LoadedModule module; std::string error;
-            if (platform::FindLoadedModule(server_.module_path,module,error) != platform::ModuleLookup::found) return KEEL_RESULT_NOT_READY;
+            if (compatibility_profile_.empty())
+                return KEEL_RESULT_UNSUPPORTED;
+
+            platform::LoadedModule module;
+            std::string error;
+
+            if (platform::FindLoadedModule(server_.module_path, module, error) != platform::ModuleLookup::found)
+                return KEEL_RESULT_NOT_READY;
+
             const auto result = cs2::ResolveEntityOutput(module,compatibility_profile_,entity_output_function_,error);
-            if (result != KEEL_RESULT_OK) return result;
+
+            if (result != KEEL_RESULT_OK)
+                return result;
         }
+
         return output_hooks_.Start(entity_output_function_,compatibility_profile_.c_str(),hooks,defer,callback,data);
     }
+
     KeelResult StopOutputs()
     {
-        if (entity_output_function_ && !OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (entity_output_function_ && !OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
         return output_hooks_.Stop();
     }
 
     KeelResult InputCapabilities(std::uint32_t& direct, std::uint32_t& queued) override
     {
         direct = queued = 0;
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
-        if (construction_stopping_ || construction_map_shutdown_) return KEEL_RESULT_NOT_READY;
+
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
+        if (construction_stopping_ || construction_map_shutdown_)
+            return KEEL_RESULT_NOT_READY;
+
         if (!entity_input_bindings_.accept) {
-            if (compatibility_profile_.empty()) return KEEL_RESULT_UNSUPPORTED;
-            platform::LoadedModule module; std::string error;
-            if (platform::FindLoadedModule(server_.module_path,module,error) != platform::ModuleLookup::found) return KEEL_RESULT_NOT_READY;
+            if (compatibility_profile_.empty())
+                return KEEL_RESULT_UNSUPPORTED;
+
+            platform::LoadedModule module;
+            std::string error;
+
+            if (platform::FindLoadedModule(server_.module_path, module, error) != platform::ModuleLookup::found)
+                return KEEL_RESULT_NOT_READY;
+
             const auto result = cs2::ResolveEntityInput(module,compatibility_profile_,entity_input_bindings_,error);
-            if (result != KEEL_RESULT_OK) return result;
+
+            if (result != KEEL_RESULT_OK)
+                return result;
         }
-        void* system{}; std::uint64_t epoch{};
+
+        void* system{};
+        std::uint64_t epoch{};
         const auto result = InputCurrent(0,system,epoch);
-        if (result != KEEL_RESULT_OK) return result;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
         direct = (1u << (KEELS2_INPUT_ENTITY+1))-1;
         queued = direct & ~(1u << KEELS2_INPUT_COLOR);
         return KEEL_RESULT_OK;
     }
+
     KeelResult InputCurrent(std::uint64_t expected, void*& system, std::uint64_t& epoch) noexcept override
     {
-        system = nullptr; epoch = 0;
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
-        if (construction_stopping_ || construction_map_shutdown_) return KEEL_RESULT_NOT_READY;
+        system = nullptr;
+        epoch = 0;
+
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
+        if (construction_stopping_ || construction_map_shutdown_)
+            return KEEL_RESULT_NOT_READY;
+
         return Current(expected,system,epoch);
     }
-    KeelCs2EntityInputBindings InputBindings() const noexcept override { return entity_input_bindings_; }
+
+    KeelCs2EntityInputBindings InputBindings() const noexcept override
+    {
+        return entity_input_bindings_;
+    }
+
     KeelResult DispatchInput(const GameEntityInputRequest& request, KeelBool& invoked)
     {
         invoked = KEEL_FALSE;
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
         cs2::NativeInputBackend backend(*this);
         return backend.Dispatch(request,invoked);
     }
@@ -2020,76 +2452,136 @@ public:
     KeelResult EntityToolCapabilities(std::uint32_t& capabilities)
     {
         capabilities = 0;
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
         if (!entity_tool_bindings_.remove) {
-            if (compatibility_profile_.empty()) return KEEL_RESULT_UNSUPPORTED;
-            platform::LoadedModule module; std::string error;
-            if (platform::FindLoadedModule(server_.module_path,module,error) != platform::ModuleLookup::found) return KEEL_RESULT_NOT_READY;
+            if (compatibility_profile_.empty())
+                return KEEL_RESULT_UNSUPPORTED;
+
+            platform::LoadedModule module;
+            std::string error;
+
+            if (platform::FindLoadedModule(server_.module_path, module, error) != platform::ModuleLookup::found)
+                return KEEL_RESULT_NOT_READY;
+
             KeelCs2EntityToolBindings bindings{};
             const auto result = cs2::ResolveEntityTools(module,compatibility_profile_,bindings,error);
-            if (result != KEEL_RESULT_OK) return result;
-            entity_tool_module_ = std::move(module); entity_tool_bindings_ = bindings;
+
+            if (result != KEEL_RESULT_OK)
+                return result;
+
+            entity_tool_module_ = std::move(module);
+            entity_tool_bindings_ = bindings;
         }
+
         capabilities = KEELS2_ENTITY_TOOL_TELEPORT | KEELS2_ENTITY_TOOL_SET_MODEL | KEELS2_ENTITY_TOOL_REMOVE;
         return KEEL_RESULT_OK;
     }
+
     KeelResult ApplyEntityTool(const GameEntityIdentity& entity, std::uint32_t kind,
         const KeelEntityTeleport* request, const char* model)
     {
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
         std::uint32_t capabilities{};
         auto result = EntityToolCapabilities(capabilities);
-        if (result != KEEL_RESULT_OK) return result;
-        if (!(capabilities & kind)) return KEEL_RESULT_UNSUPPORTED;
-        if (!schema_system_.instance || schema_server_module_.empty()) return KEEL_RESULT_NOT_READY;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
+        if (!(capabilities & kind))
+            return KEEL_RESULT_UNSUPPORTED;
+
+        if (!schema_system_.instance || schema_server_module_.empty())
+            return KEEL_RESULT_NOT_READY;
+
         void* base{};
         result = KeelCs2_ResolveEntityToolBase(schema_system_.instance,schema_server_module_.c_str(),kind,&base);
-        if (result != KEEL_RESULT_OK) return result;
-        void* system{}; std::string error;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
+        void* system{};
+        std::string error;
         {
             std::scoped_lock lock(schema_entity_mutex_);
             result = CurrentEntitySystemLocked(system,error);
-            if (result != KEEL_RESULT_OK) return result;
-            if (!entity.epoch || entity.epoch != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+
+            if (result != KEEL_RESULT_OK)
+                return result;
+
+            if (!entity.epoch || entity.epoch != entity_epoch_)
+                return KEEL_RESULT_NOT_FOUND;
         }
+
         const KeelCs2EntityIdentity native{entity.index,entity.source2_handle};
         KeelCs2EntityToolContext context{};
         result = KeelCs2_PrepareEntityTool(system,&native,base,&context);
-        if (result != KEEL_RESULT_OK) return result;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
         auto found = entity_tool_classes_.find(context.class_name);
         KeelCs2EntityToolClass target{};
-        if (found != entity_tool_classes_.end()) target = found->second;
+
+        if (found != entity_tool_classes_.end())
+            target = found->second;
         else {
             result = cs2::ResolveEntityToolClass(entity_tool_module_,context.class_name,entity_tool_bindings_,target,error);
-            if (result != KEEL_RESULT_OK) return result;
-            if (entity_tool_classes_.size() >= 128) entity_tool_classes_.clear();
+
+            if (result != KEEL_RESULT_OK)
+                return result;
+
+            if (entity_tool_classes_.size() >= 128)
+                entity_tool_classes_.clear();
+
             entity_tool_classes_.emplace(context.class_name,target);
         }
+
         // Snapshot the binding, too: nested game calls may invalidate caches.
         const auto bindings = entity_tool_bindings_;
         {
             std::scoped_lock lock(schema_entity_mutex_);
-            void* current{}; result = CurrentEntitySystemLocked(current,error);
-            if (result != KEEL_RESULT_OK) return result;
-            if (current != system || entity.epoch != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+            void* current{};
+            result = CurrentEntitySystemLocked(current, error);
+
+            if (result != KEEL_RESULT_OK)
+                return result;
+
+            if (current != system || entity.epoch != entity_epoch_)
+                return KEEL_RESULT_NOT_FOUND;
         }
+
         return KeelCs2_ApplyEntityTool(system,&native,&context,&bindings,&target,kind,request,model);
     }
 
     KeelResult EntityWriteCapabilities(std::uint32_t& capabilities)
     {
         capabilities = 0;
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
         if (!entity_write_notify_)
         {
-            if (compatibility_profile_.empty()) return KEEL_RESULT_UNSUPPORTED;
+            if (compatibility_profile_.empty())
+                return KEEL_RESULT_UNSUPPORTED;
+
             platform::LoadedModule module;
             std::string error;
+
             if (platform::FindLoadedModule(server_.module_path, module, error) != platform::ModuleLookup::found)
                 return KEEL_RESULT_NOT_READY;
+
             const auto result = cs2::ResolveEntityWrites(module, compatibility_profile_, entity_write_notify_, error);
-            if (result != KEEL_RESULT_OK) return result;
+
+            if (result != KEEL_RESULT_OK)
+                return result;
         }
+
         capabilities = KEELS2_ENTITY_WRITE_NUMERIC_FIELDS;
         return KEEL_RESULT_OK;
     }
@@ -2097,35 +2589,57 @@ public:
     KeelResult WriteEntityField(const GameEntityIdentity& entity, const GameSchemaField& field,
         const void* value, std::uint32_t size)
     {
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
-        if (!value || size != field.value_size || !size || size > 12) return KEEL_RESULT_INVALID_ARGUMENT;
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
+        if (!value || size != field.value_size || !size || size > 12)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
         std::uint32_t capabilities{};
         auto result = EntityWriteCapabilities(capabilities);
-        if (result != KEEL_RESULT_OK) return result;
-        if (!(capabilities & KEELS2_ENTITY_WRITE_NUMERIC_FIELDS)) return KEEL_RESULT_UNSUPPORTED;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
+        if (!(capabilities & KEELS2_ENTITY_WRITE_NUMERIC_FIELDS))
+            return KEEL_RESULT_UNSUPPORTED;
+
         if (field.module != KEELS2_SCHEMA_MODULE_SERVER || field.compatibility_profile != compatibility_profile_ ||
             field.module_name != schema_server_module_) return KEEL_RESULT_INCOMPATIBLE;
         // Re-resolve metadata before mutation. A retained field cannot authorize
         // writes through changed type/offset/class metadata, even within a map.
         const KeelSchemaFieldSpec spec{sizeof(spec), field.module, field.value_type, 0,
             field.class_name.c_str(), field.field_name.c_str()};
+
         GameSchemaField current;
         std::string error;
         result = ResolveSchemaField(spec, current, error);
-        if (result != KEEL_RESULT_OK) return result;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
         if (current.declaring_class != field.declaring_class || current.offset != field.offset ||
             current.value_size != field.value_size || current.value_alignment != field.value_alignment)
             return KEEL_RESULT_INCOMPATIBLE;
+
         void* base_class{};
         result = KeelCs2_ResolveEntityWriteClass(schema_system_.instance, schema_server_module_.c_str(), &base_class);
-        if (result != KEEL_RESULT_OK) return result;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
         void* system{};
         {
             std::scoped_lock lock(schema_entity_mutex_);
             result = CurrentEntitySystemLocked(system, error);
-            if (result != KEEL_RESULT_OK) return result;
-            if (!entity.epoch || entity.epoch != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+
+            if (result != KEEL_RESULT_OK)
+                return result;
+
+            if (!entity.epoch || entity.epoch != entity_epoch_)
+                return KEEL_RESULT_NOT_FOUND;
         }
+
         const KeelCs2EntityIdentity native_entity{entity.index, entity.source2_handle};
         const KeelCs2SchemaField native_field{current.declaring_class, current.offset,
             current.value_size, current.value_alignment, current.value_type};
@@ -2137,57 +2651,92 @@ public:
     KeelResult PlayerManagementCapabilities(std::uint32_t& capabilities)
     {
         capabilities = 0;
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
         if (!player_management_bindings_.controller_vtable)
         {
-            if (compatibility_profile_.empty()) return KEEL_RESULT_UNSUPPORTED;
+            if (compatibility_profile_.empty())
+                return KEEL_RESULT_UNSUPPORTED;
+
             platform::LoadedModule module;
             std::string error;
+
             if (platform::FindLoadedModule(server_.module_path, module, error) != platform::ModuleLookup::found)
                 return KEEL_RESULT_NOT_READY;
+
             const auto result = cs2::ResolvePlayerManagement(module, compatibility_profile_, player_management_bindings_, error);
-            if (result != KEEL_RESULT_OK) return result;
+
+            if (result != KEEL_RESULT_OK)
+                return result;
         }
+
         capabilities = KEELS2_PLAYER_MANAGEMENT_RESPAWN | KEELS2_PLAYER_MANAGEMENT_CHANGE_TEAM |
             KEELS2_PLAYER_MANAGEMENT_SWITCH_TEAM;
+
         return KEEL_RESULT_OK;
     }
 
     KeelResult ManagePlayer(const GameEntityIdentity& entity, const KeelPlayerManagementAction& action)
     {
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
         if (action.size != sizeof(action) || action.reserved ||
             (action.kind != KEELS2_PLAYER_MANAGEMENT_RESPAWN && action.kind != KEELS2_PLAYER_MANAGEMENT_CHANGE_TEAM &&
              action.kind != KEELS2_PLAYER_MANAGEMENT_SWITCH_TEAM) ||
-            (action.kind == KEELS2_PLAYER_MANAGEMENT_RESPAWN ? action.team != 0 : action.team < (action.kind == KEELS2_PLAYER_MANAGEMENT_SWITCH_TEAM ? 2 : 1) || action.team > 3))
+            (action.kind == KEELS2_PLAYER_MANAGEMENT_RESPAWN
+                 ? action.team != 0
+                 : action.team < (action.kind == KEELS2_PLAYER_MANAGEMENT_SWITCH_TEAM ? 2 : 1) || action.team > 3))
             return KEEL_RESULT_INVALID_ARGUMENT;
+
         std::uint32_t capabilities{};
         auto result = PlayerManagementCapabilities(capabilities);
-        if (result != KEEL_RESULT_OK) return result;
-        if (!(capabilities & action.kind)) return KEEL_RESULT_UNSUPPORTED;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
+        if (!(capabilities & action.kind))
+            return KEEL_RESULT_UNSUPPORTED;
+
         void* system{};
         std::string error;
         const auto current_system = [&]() {
             std::scoped_lock lock(schema_entity_mutex_);
             const auto ready = CurrentEntitySystemLocked(system, error);
-            if (ready != KEEL_RESULT_OK) return ready;
-            if (!entity.epoch || entity.epoch != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+
+            if (ready != KEEL_RESULT_OK)
+                return ready;
+
+            if (!entity.epoch || entity.epoch != entity_epoch_)
+                return KEEL_RESULT_NOT_FOUND;
+
             return KEEL_RESULT_OK;
         };
         result = current_system();
-        if (result != KEEL_RESULT_OK) return result;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
         const KeelCs2EntityIdentity native{entity.index, entity.source2_handle};
         KeelCs2EntityIdentity pawn{};
+
         if (action.kind == KEELS2_PLAYER_MANAGEMENT_RESPAWN)
         {
             result = KeelCs2_PrepareRespawn(system, schema_system_.instance, schema_server_module_.c_str(),
                 &native, &player_management_bindings_, &pawn);
-            if (result != KEEL_RESULT_OK) return result;
+
+            if (result != KEEL_RESULT_OK)
+                return result;
             // SetPawn may synchronously dispatch map/entity callbacks. Acquire the
             // current system again before resolving any captured entity identity.
             result = current_system();
-            if (result != KEEL_RESULT_OK) return result;
+
+            if (result != KEEL_RESULT_OK)
+                return result;
         }
+
         return KeelCs2_ManagePlayer(system, schema_system_.instance, schema_server_module_.c_str(),
             &native, action.kind == KEELS2_PLAYER_MANAGEMENT_RESPAWN ? &pawn : nullptr,
             &action, &player_management_bindings_);
@@ -2197,25 +2746,33 @@ public:
     {
         if (!OnMainThread())
             return KEEL_RESULT_WRONG_THREAD;
+
         void* system{};
         std::string error;
         {
             std::scoped_lock lock(schema_entity_mutex_);
             const auto ready = CurrentEntitySystemLocked(system, error);
+
             if (ready != KEEL_RESULT_OK)
                 return ready;
+
             if (!entity.epoch || entity.epoch != entity_epoch_)
                 return KEEL_RESULT_NOT_FOUND;
         }
+
         if (!player_action_bindings_.damage_construct)
         {
             platform::LoadedModule module;
+
             if (platform::FindLoadedModule(server_.module_path, module, error) != platform::ModuleLookup::found)
                 return KEEL_RESULT_NOT_READY;
+
             const auto ready = cs2::ResolvePlayerActions(module, compatibility_profile_, player_action_bindings_, error);
+
             if (ready != KEEL_RESULT_OK)
                 return ready;
         }
+
         const KeelCs2EntityIdentity native{entity.index, entity.source2_handle};
         return KeelCs2_PlayerAction(system, schema_system_.instance, schema_server_module_.c_str(),
             &native, &action, &player_action_bindings_);
@@ -2227,23 +2784,28 @@ public:
         std::string& error) override
     {
         field = {};
+
         if (!OnMainThread())
         {
             error = "schema access was requested off the game thread";
             return KEEL_RESULT_WRONG_THREAD;
         }
+
         std::scoped_lock lock(schema_entity_mutex_);
+
         if (!schema_system_.instance || schema_server_module_.empty() ||
             compatibility_profile_.empty())
         {
             error = "the compatibility profile does not admit schema access";
             return KEEL_RESULT_UNSUPPORTED;
         }
+
         if (spec.module != KEELS2_SCHEMA_MODULE_SERVER)
         {
             error = "the requested schema module is unsupported";
             return KEEL_RESULT_UNSUPPORTED;
         }
+
         KeelCs2SchemaField native{};
         const KeelResult result = KeelCs2_ResolveSchemaField(
             schema_system_.instance,
@@ -2252,13 +2814,16 @@ public:
             spec.field_name,
             spec.value_type,
             &native);
+
         if (result != KEEL_RESULT_OK)
         {
             error = result == KEEL_RESULT_NOT_FOUND
                 ? "the schema class or field was not found"
                 : "the schema field is incompatible with the requested type";
+
             return result;
         }
+
         field.declaring_class = native.declaring_class;
         field.offset = native.offset;
         field.value_size = native.value_size;
@@ -2279,27 +2844,34 @@ public:
         std::string& error) override
     {
         entity = {};
+
         if (!OnMainThread())
         {
             error = "entity access was requested off the game thread";
             return KEEL_RESULT_WRONG_THREAD;
         }
+
         std::scoped_lock lock(schema_entity_mutex_);
         void* system{};
         const KeelResult ready = CurrentEntitySystemLocked(system, error);
+
         if (ready != KEEL_RESULT_OK)
         {
             return ready;
         }
+
         KeelCs2EntityIdentity native{};
         const KeelResult result = KeelCs2_FindEntityByIndex(system, index, &native);
+
         if (result != KEEL_RESULT_OK)
         {
             error = result == KEEL_RESULT_NOT_FOUND
                 ? "the entity index is not live"
                 : "the entity index is invalid";
+
             return result;
         }
+
         entity = {native.index, native.source2_handle, entity_epoch_};
         error.clear();
         return KEEL_RESULT_OK;
@@ -2311,30 +2883,37 @@ public:
         std::string& error) override
     {
         entity = {};
+
         if (!OnMainThread())
         {
             error = "entity access was requested off the game thread";
             return KEEL_RESULT_WRONG_THREAD;
         }
+
         std::scoped_lock lock(schema_entity_mutex_);
         void* system{};
         const KeelResult ready = CurrentEntitySystemLocked(system, error);
+
         if (ready != KEEL_RESULT_OK)
         {
             return ready;
         }
+
         KeelCs2EntityIdentity native{};
         const KeelResult result = KeelCs2_FindEntityBySource2Handle(
             system,
             source2_handle,
             &native);
+
         if (result != KEEL_RESULT_OK)
         {
             error = result == KEEL_RESULT_NOT_FOUND
                 ? "the Source 2 entity handle is stale"
                 : "the Source 2 entity handle is invalid";
+
             return result;
         }
+
         entity = {native.index, native.source2_handle, entity_epoch_};
         error.clear();
         return KEEL_RESULT_OK;
@@ -2349,18 +2928,22 @@ public:
             error = "entity access was requested off the game thread";
             return KEEL_RESULT_WRONG_THREAD;
         }
+
         std::scoped_lock lock(schema_entity_mutex_);
         void* system{};
         const KeelResult ready = CurrentEntitySystemLocked(system, error);
+
         if (ready != KEEL_RESULT_OK)
         {
             return ready;
         }
+
         if (!entity.epoch || entity.epoch != entity_epoch_)
         {
             error = "the entity handle belongs to an expired map epoch";
             return KEEL_RESULT_NOT_FOUND;
         }
+
         const KeelCs2EntityIdentity native{entity.index, entity.source2_handle};
         const KeelResult result = KeelCs2_ValidateEntity(system, &native);
         error = result == KEEL_RESULT_OK ? "" : "the entity handle is stale";
@@ -2369,45 +2952,83 @@ public:
 
     KeelResult AccessDamage(const void* record, KeelDamageInfo* output, const KeelDamageEdit* edit)
     {
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
-        if (!schema_system_.instance || schema_server_module_.empty()) return KEEL_RESULT_NOT_READY;
-        void* system{}; std::string error; std::uint64_t epoch{};
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
+        if (!schema_system_.instance || schema_server_module_.empty())
+            return KEEL_RESULT_NOT_READY;
+
+        void* system{};
+        std::string error;
+        std::uint64_t epoch{};
         {
             std::scoped_lock lock(schema_entity_mutex_);
             const auto ready = CurrentEntitySystemLocked(system,error);
-            if (ready != KEEL_RESULT_OK) return ready;
+
+            if (ready != KEEL_RESULT_OK)
+                return ready;
+
             epoch = entity_epoch_;
         }
+
         KeelCs2DamageSchema schema{};
         const auto resolved = KeelCs2_ResolveDamageSchema(schema_system_.instance,schema_server_module_.c_str(),&schema);
-        if (resolved != KEEL_RESULT_OK) return resolved;
+
+        if (resolved != KEEL_RESULT_OK)
+            return resolved;
+
         std::scoped_lock lock(schema_entity_mutex_);
         void* current{};
         const auto ready = CurrentEntitySystemLocked(current,error);
-        if (ready != KEEL_RESULT_OK) return ready;
-        if (epoch != entity_epoch_ || current != system) return KEEL_RESULT_NOT_FOUND;
+
+        if (ready != KEEL_RESULT_OK)
+            return ready;
+
+        if (epoch != entity_epoch_ || current != system)
+            return KEEL_RESULT_NOT_FOUND;
+
         return edit ? KeelCs2_WriteDamage(&schema,const_cast<void*>(record),edit) : KeelCs2_ReadDamage(&schema,record,output);
     }
+
     KeelResult WeaponMatches(const GameEntityIdentity& pawn, const void* candidate, KeelBool& matches)
     {
         matches = KEEL_FALSE;
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
-        if (!schema_system_.instance || schema_server_module_.empty()) return KEEL_RESULT_NOT_READY;
-        void* system{}; std::string error;
+
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
+        if (!schema_system_.instance || schema_server_module_.empty())
+            return KEEL_RESULT_NOT_READY;
+
+        void* system{};
+        std::string error;
         {
             std::scoped_lock lock(schema_entity_mutex_);
             const auto ready = CurrentEntitySystemLocked(system,error);
-            if (ready != KEEL_RESULT_OK) return ready;
-            if (!pawn.epoch || pawn.epoch != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+
+            if (ready != KEEL_RESULT_OK)
+                return ready;
+
+            if (!pawn.epoch || pawn.epoch != entity_epoch_)
+                return KEEL_RESULT_NOT_FOUND;
         }
+
         KeelCs2WeaponSchema schema{};
         const auto resolved = KeelCs2_ResolveWeaponSchema(schema_system_.instance,schema_server_module_.c_str(),&schema);
-        if (resolved != KEEL_RESULT_OK) return resolved;
+
+        if (resolved != KEEL_RESULT_OK)
+            return resolved;
+
         std::scoped_lock lock(schema_entity_mutex_);
         void* current{};
         const auto ready = CurrentEntitySystemLocked(current,error);
-        if (ready != KEEL_RESULT_OK) return ready;
-        if (pawn.epoch != entity_epoch_ || current != system) return KEEL_RESULT_NOT_FOUND;
+
+        if (ready != KEEL_RESULT_OK)
+            return ready;
+
+        if (pawn.epoch != entity_epoch_ || current != system)
+            return KEEL_RESULT_NOT_FOUND;
+
         const KeelCs2EntityIdentity identity{pawn.index,pawn.source2_handle};
         return KeelCs2_WeaponMatches(system,&identity,&schema,candidate,&matches);
     }
@@ -2415,16 +3036,27 @@ public:
     KeelResult CaptureEntity(const void* instance, GameEntityIdentity& entity)
     {
         entity = {};
-        if (!instance) return KEEL_RESULT_INVALID_ARGUMENT;
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+
+        if (!instance)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
         std::scoped_lock lock(schema_entity_mutex_);
         void* system{};
         std::string error;
         const auto ready = CurrentEntitySystemLocked(system, error);
-        if (ready != KEEL_RESULT_OK) return ready;
+
+        if (ready != KEEL_RESULT_OK)
+            return ready;
+
         KeelCs2EntityIdentity native{};
         const auto result = KeelCs2_CaptureEntity(system, instance, &native);
-        if (result != KEEL_RESULT_OK) return result;
+
+        if (result != KEEL_RESULT_OK)
+            return result;
+
         entity = {native.index, native.source2_handle, entity_epoch_};
         return KEEL_RESULT_OK;
     }
@@ -2434,29 +3066,44 @@ public:
     {
         if (!requests || !count || count > KEELS2_ENTITY_ACCESS_MAX_COUNT || !callback)
             return KEEL_RESULT_INVALID_ARGUMENT;
-        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+
+        if (!OnMainThread())
+            return KEEL_RESULT_WRONG_THREAD;
+
         std::array<void*, KEELS2_ENTITY_ACCESS_MAX_COUNT> pointers{};
         {
             std::scoped_lock lock(schema_entity_mutex_);
             void* system{};
             std::string error;
             const auto ready = CurrentEntitySystemLocked(system, error);
-            if (ready != KEEL_RESULT_OK) return ready;
+
+            if (ready != KEEL_RESULT_OK)
+                return ready;
+
             for (std::uint32_t i = 0; i < count; ++i)
             {
                 const auto& request = requests[i];
-                if (!request.entity.epoch || request.entity.epoch != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+
+                if (!request.entity.epoch || request.entity.epoch != entity_epoch_)
+                    return KEEL_RESULT_NOT_FOUND;
+
                 const KeelCs2EntityIdentity entity{request.entity.index, request.entity.source2_handle};
                 const auto result = KeelCs2_ResolveEntityPointer(system, &entity, request.class_name, &pointers[i]);
-                if (result != KEEL_RESULT_OK) return result;
+
+                if (result != KEEL_RESULT_OK)
+                    return result;
             }
+
             for (std::uint32_t i = 0; i < count; ++i)
             {
                 const KeelCs2EntityIdentity entity{requests[i].entity.index, requests[i].entity.source2_handle};
                 const auto result = KeelCs2_ValidateEntity(system, &entity);
-                if (result != KEEL_RESULT_OK) return result;
+
+                if (result != KEEL_RESULT_OK)
+                    return result;
             }
         }
+
         return callback(user_data, pointers.data(), count);
     }
 
@@ -2472,18 +3119,22 @@ public:
             error = "entity access was requested off the game thread";
             return KEEL_RESULT_WRONG_THREAD;
         }
+
         std::scoped_lock lock(schema_entity_mutex_);
         void* system{};
         const KeelResult ready = CurrentEntitySystemLocked(system, error);
+
         if (ready != KEEL_RESULT_OK)
         {
             return ready;
         }
+
         if (!entity.epoch || entity.epoch != entity_epoch_)
         {
             error = "the entity handle belongs to an expired map epoch";
             return KEEL_RESULT_NOT_FOUND;
         }
+
         if (!field.declaring_class || field.module != KEELS2_SCHEMA_MODULE_SERVER ||
             field.module_name != schema_server_module_ ||
             field.compatibility_profile != compatibility_profile_)
@@ -2491,6 +3142,7 @@ public:
             error = "the schema field belongs to another compatibility profile";
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         const KeelCs2EntityIdentity native_entity{entity.index, entity.source2_handle};
         const KeelCs2SchemaField native_field{
             field.declaring_class,
@@ -2505,13 +3157,16 @@ public:
             &native_field,
             value,
             value_size);
+
         if (result != KEEL_RESULT_OK)
         {
             error = result == KEEL_RESULT_NOT_FOUND
                 ? "the entity handle is stale"
                 : "the entity class is incompatible with the schema field";
+
             return result;
         }
+
         error.clear();
         return KEEL_RESULT_OK;
     }
@@ -2526,6 +3181,7 @@ private:
     void AdvanceEntityEpochLocked() noexcept
     {
         ++entity_epoch_;
+
         if (entity_epoch_ == 0)
         {
             entity_epoch_ = 1;
@@ -2539,6 +3195,7 @@ private:
             AdvanceEntityEpochLocked();
             current_entity_system_ = nullptr;
         }
+
         constructions_.Reset();
         construction_epoch_ = 0;
     }
@@ -2546,32 +3203,40 @@ private:
     KeelResult CurrentEntitySystemLocked(void*& system, std::string& error)
     {
         system = nullptr;
+
         if (!game_resource_.instance || game_entity_system_offset_ == 0 ||
             entity_system_module_.empty() || entity_system_module_path_.empty())
         {
             error = "the compatibility profile does not admit entity access";
             return KEEL_RESULT_UNSUPPORTED;
         }
+
         void* candidate = KeelCs2_ReadGameEntitySystem(
             game_resource_.instance,
             game_entity_system_offset_);
+
         if (candidate != current_entity_system_)
         {
             current_entity_system_ = candidate;
             AdvanceEntityEpochLocked();
         }
+
         if (!candidate)
         {
             error = "the game entity system is not ready";
             return KEEL_RESULT_NOT_READY;
         }
+
         auto** vtable = *reinterpret_cast<void***>(candidate);
+
         if (!vtable || !vtable[0])
         {
             error = "the game entity system has a null virtual table";
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         std::filesystem::path module;
+
         if (!ValidateTarget(
                 vtable[0],
                 entity_system_module_.c_str(),
@@ -2586,6 +3251,7 @@ private:
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         system = candidate;
         return KEEL_RESULT_OK;
     }
@@ -2602,12 +3268,16 @@ private:
         {
             case KEELS2_CONVAR_BOOL:
                 return cs2::ConVarType::boolean;
+
             case KEELS2_CONVAR_INT32:
                 return cs2::ConVarType::int32;
+
             case KEELS2_CONVAR_FLOAT32:
                 return cs2::ConVarType::float32;
+
             case KEELS2_CONVAR_STRING:
                 return cs2::ConVarType::string;
+
             default:
                 return cs2::ConVarType::invalid;
         }
@@ -2619,12 +3289,16 @@ private:
         {
             case cs2::ConVarType::boolean:
                 return KEELS2_CONVAR_BOOL;
+
             case cs2::ConVarType::int32:
                 return KEELS2_CONVAR_INT32;
+
             case cs2::ConVarType::float32:
                 return KEELS2_CONVAR_FLOAT32;
+
             case cs2::ConVarType::string:
                 return KEELS2_CONVAR_STRING;
+
             default:
                 return 0;
         }
@@ -2636,6 +3310,7 @@ private:
         std::string& string_storage)
     {
         destination = source;
+
         if (source.type == KEELS2_CONVAR_STRING)
         {
             string_storage = source.value.string_value ? source.value.string_value : "";
@@ -2652,15 +3327,19 @@ private:
             case KEELS2_CONVAR_BOOL:
                 destination.boolean = source.value.boolean_value != KEEL_FALSE;
                 break;
+
             case KEELS2_CONVAR_INT32:
                 destination.int32 = source.value.int32_value;
                 break;
+
             case KEELS2_CONVAR_FLOAT32:
                 destination.float32 = source.value.float32_value;
                 break;
+
             case KEELS2_CONVAR_STRING:
                 destination.string = const_cast<char*>(source.value.string_value);
                 break;
+
             default:
                 break;
         }
@@ -2684,21 +3363,27 @@ private:
         {
             return false;
         }
+
         destination = {};
+
         switch (type)
         {
             case KEELS2_CONVAR_BOOL:
                 std::memcpy(&destination.boolean, source, sizeof(destination.boolean));
                 return true;
+
             case KEELS2_CONVAR_INT32:
                 std::memcpy(&destination.int32, source, sizeof(destination.int32));
                 return true;
+
             case KEELS2_CONVAR_FLOAT32:
                 std::memcpy(&destination.float32, source, sizeof(destination.float32));
                 return true;
+
             case KEELS2_CONVAR_STRING:
                 std::memcpy(&destination.string, source, sizeof(destination.string));
                 return true;
+
             default:
                 return false;
         }
@@ -2713,20 +3398,25 @@ private:
         {
             return false;
         }
+
         switch (type)
         {
             case KEELS2_CONVAR_BOOL:
                 std::memcpy(destination, &source.boolean, sizeof(source.boolean));
                 return true;
+
             case KEELS2_CONVAR_INT32:
                 std::memcpy(destination, &source.int32, sizeof(source.int32));
                 return true;
+
             case KEELS2_CONVAR_FLOAT32:
                 std::memcpy(destination, &source.float32, sizeof(source.float32));
                 return true;
+
             case KEELS2_CONVAR_STRING:
                 std::memcpy(destination, &source.string, sizeof(source.string));
                 return true;
+
             default:
                 return false;
         }
@@ -2741,14 +3431,18 @@ private:
         {
             case KEELS2_CONVAR_BOOL:
                 return first.boolean == second.boolean;
+
             case KEELS2_CONVAR_INT32:
                 return first.int32 == second.int32;
+
             case KEELS2_CONVAR_FLOAT32:
                 return first.float32 == second.float32;
+
             case KEELS2_CONVAR_STRING:
                 return std::strcmp(
                     first.string ? first.string : "",
                     second.string ? second.string : "") == 0;
+
             default:
                 return false;
         }
@@ -2765,6 +3459,7 @@ private:
             {
                 value.int32 = std::max(value.int32, data.minimum_value->int32);
             }
+
             if (data.maximum_value)
             {
                 value.int32 = std::min(value.int32, data.maximum_value->int32);
@@ -2776,6 +3471,7 @@ private:
             {
                 value.float32 = std::max(value.float32, data.minimum_value->float32);
             }
+
             if (data.maximum_value)
             {
                 value.float32 = std::min(value.float32, data.maximum_value->float32);
@@ -2788,22 +3484,28 @@ private:
         const cs2::ConVarValue& value)
     {
         std::array<char, 64> buffer{};
+
         switch (type)
         {
             case KEELS2_CONVAR_BOOL:
                 return value.boolean ? "true" : "false";
+
             case KEELS2_CONVAR_INT32:
                 std::snprintf(buffer.data(), buffer.size(), "%d", value.int32);
                 return buffer.data();
+
             case KEELS2_CONVAR_FLOAT32:
                 std::snprintf(
                     buffer.data(),
                     buffer.size(),
                     "%f",
                     static_cast<double>(value.float32));
+
                 return buffer.data();
+
             case KEELS2_CONVAR_STRING:
                 return value.string ? value.string : "";
+
             default:
                 return {};
         }
@@ -2825,12 +3527,14 @@ private:
         cs2::ConVarValue candidate{};
         std::unique_ptr<char, MemAllocFree> previous_string(nullptr, memory_free_);
         std::unique_ptr<char, MemAllocFree> candidate_string(nullptr, memory_free_);
+
         if (entry.type == KEELS2_CONVAR_STRING)
         {
             previous_string.reset(string_duplicate_(current->string ? current->string : ""));
             candidate_string.reset(string_duplicate_(requested.string ? requested.string : ""));
             previous.string = previous_string.get();
             candidate.string = candidate_string.get();
+
             if (!previous.string || !candidate.string)
             {
                 return KEEL_RESULT_ENGINE_FAILURE;
@@ -2842,6 +3546,7 @@ private:
             {
                 return KEEL_RESULT_INCOMPATIBLE;
             }
+
             candidate = requested;
         }
 
@@ -2860,6 +3565,7 @@ private:
         const bool changed = !EqualEngineValue(entry.type, effective, previous);
         std::string old_text;
         std::string new_text;
+
         if (changed)
         {
             old_text = EngineValueText(entry.type, previous);
@@ -2867,13 +3573,16 @@ private:
         }
 
         std::unique_ptr<char, MemAllocFree> replacement(nullptr, memory_free_);
+
         if (entry.type == KEELS2_CONVAR_STRING)
         {
             replacement.reset(string_duplicate_(effective.string ? effective.string : ""));
+
             if (!replacement)
             {
                 return KEEL_RESULT_ENGINE_FAILURE;
             }
+
             memory_free_(current->string);
             current->string = replacement.release();
         }
@@ -2881,6 +3590,7 @@ private:
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         if (!changed)
         {
             return KEEL_RESULT_OK;
@@ -2893,12 +3603,14 @@ private:
             current,
             &previous,
             nullptr);
+
         cvar_->CallGlobalChangeCallbacks(
             &entry.object,
             callback_slot,
             new_text.c_str(),
             old_text.c_str(),
             nullptr);
+
         return KEEL_RESULT_OK;
     }
 
@@ -2911,26 +3623,33 @@ private:
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         destination = {};
         destination.size = sizeof(KeelConVarValue);
         destination.type = type;
+
         switch (type)
         {
             case KEELS2_CONVAR_BOOL:
                 destination.value.boolean_value = source->boolean ? KEEL_TRUE : KEEL_FALSE;
                 break;
+
             case KEELS2_CONVAR_INT32:
                 destination.value.int32_value = source->int32;
                 break;
+
             case KEELS2_CONVAR_FLOAT32:
                 destination.value.float32_value = source->float32;
                 break;
+
             case KEELS2_CONVAR_STRING:
                 destination.value.string_value = source->string ? source->string : "";
                 break;
+
             default:
                 return KEEL_RESULT_INCOMPATIBLE;
         }
+
         return KEEL_RESULT_OK;
     }
 
@@ -2939,15 +3658,18 @@ private:
     {
         global_observers_active_.fetch_add(1, std::memory_order_acq_rel);
         ConVarProviderScope global_scope(global_observers_active_);
+
         if (!reference || !reference->data || (slot != 0 && slot != KEELS2_CONVAR_GLOBAL_SLOT))
         {
             return;
         }
+
         try
         {
             std::vector<ConVarEntry*> selected;
             {
                 std::scoped_lock lock(convar_callback_mutex_);
+
                 for (auto* entry : convar_observers_)
                 {
                     if (entry->object.data == reference->data)
@@ -2956,32 +3678,40 @@ private:
                     }
                 }
             }
+
             for (auto* entry : selected)
             {
                 GameConVarCallback callback{};
                 void* user_data{};
                 {
                     std::scoped_lock lock(convar_callback_mutex_);
+
                     if (!entry->observer)
                     {
                         continue;
                     }
+
                     callback = entry->observer;
                     user_data = entry->observer_data;
                     entry->provider_active.fetch_add(1, std::memory_order_acq_rel);
                 }
+
                 ConVarProviderScope provider_scope(entry->provider_active);
+
                 if (!entry->observer_owner->OnMainThread())
                 {
                     continue;
                 }
+
                 cs2::ConVarValue native_current{};
                 KeelConVarValue current{};
+
                 if (!LoadLiveEngineValue(entry->type, entry->object.data->values, native_current) ||
                     LoadPublicValue(entry->type, &native_current, current) != KEEL_RESULT_OK)
                 {
                     continue;
                 }
+
                 KeelConVarValue previous{};
                 std::string previous_string;
                 RetainPublicValue(entry->observed_value, previous, previous_string);
@@ -3014,31 +3744,38 @@ private:
         try
         {
             ConVarEntry* entry{};
+
             if (reference && reference->data)
             {
                 const std::lock_guard lock(convar_callback_mutex_);
                 const auto callback = convar_callbacks_.find(reference->data);
+
                 if (callback != convar_callbacks_.end())
                 {
                     entry = callback->second;
                     entry->provider_active.fetch_add(1, std::memory_order_acq_rel);
                 }
             }
+
             if (!entry)
             {
                 return;
             }
+
             ConVarProviderScope provider_scope(entry->provider_active);
+
             if (entry->registering.load(std::memory_order_acquire) ||
                 !entry->active.load(std::memory_order_acquire) ||
                 (!entry->callback && !entry->native_callback))
             {
                 return;
             }
+
             if (split_screen_slot != KEELS2_CONVAR_GLOBAL_SLOT && split_screen_slot != 0)
             {
                 return;
             }
+
             if (entry->native_callback)
             {
                 entry->native_callback(
@@ -3048,15 +3785,18 @@ private:
                     old_value,
                     entry->user_data);
             }
+
             if (entry->callback)
             {
                 KeelConVarValue public_new{};
                 KeelConVarValue public_old{};
+
                 if (LoadPublicValue(entry->type, new_value, public_new) != KEEL_RESULT_OK ||
                     LoadPublicValue(entry->type, old_value, public_old) != KEEL_RESULT_OK)
                 {
                     return;
                 }
+
                 entry->callback(
                     KEELS2_CONVAR_GLOBAL_SLOT,
                     public_new,
@@ -3072,6 +3812,7 @@ private:
     static void WaitForConVarProviders(std::atomic<std::uint32_t>& active) noexcept
     {
         std::uint32_t value = active.load(std::memory_order_acquire);
+
         while (value != 0)
         {
             active.wait(value, std::memory_order_acquire);
@@ -3104,6 +3845,7 @@ private:
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         const KeelHookVirtualTargetSpec target_spec{
             sizeof(KeelHookVirtualTargetSpec),
             KH_MECHANISM_VIRTUAL,
@@ -3122,11 +3864,13 @@ private:
             &target_spec,
             &prototype,
             &target);
+
         if (result != KEEL_RESULT_OK)
         {
             error = "Source 2 callback target resolution failed";
             return result;
         }
+
         const KeelHookCallbackSpec callback_spec{
             sizeof(KeelHookCallbackSpec),
             phase,
@@ -3141,12 +3885,14 @@ private:
             target,
             &callback_spec,
             &callback_handle);
+
         if (result != KEEL_RESULT_OK)
         {
             static_cast<void>(source2_hooks_api_->release_target(source2_hook_owner_, target));
             error = "Source 2 callback installation failed";
             return result;
         }
+
         output = {target, callback_handle};
         return KEEL_RESULT_OK;
     }
@@ -3160,11 +3906,13 @@ private:
                 static_cast<void>(source2_hooks_api_->remove_callback(
                     source2_hook_owner_,
                     iterator->callback));
+
                 static_cast<void>(source2_hooks_api_->release_target(
                     source2_hook_owner_,
                     iterator->target));
             }
         }
+
         source2_hooks_.clear();
     }
 
@@ -3174,10 +3922,12 @@ private:
         {
             return;
         }
+
         void* table = *reinterpret_cast<void**>(factory);
         {
             std::scoped_lock lock(source2_mutex_);
             active_factories_.insert(factory);
+
             if (!table || !hooked_factory_vtables_.insert(table).second)
             {
                 return;
@@ -3194,6 +3944,7 @@ private:
             KH_PHASE_POST,
             create,
             error);
+
         if (result == KEEL_RESULT_OK)
         {
             Source2Hook destroy;
@@ -3205,6 +3956,7 @@ private:
                 KH_PHASE_PRE,
                 destroy,
                 error);
+
             if (result == KEEL_RESULT_OK)
             {
                 std::scoped_lock lock(source2_mutex_);
@@ -3212,15 +3964,19 @@ private:
                 source2_hooks_.push_back(destroy);
                 return;
             }
+
             static_cast<void>(source2_hooks_api_->remove_callback(source2_hook_owner_, create.callback));
             static_cast<void>(source2_hooks_api_->release_target(source2_hook_owner_, create.target));
         }
+
         {
             std::scoped_lock lock(source2_mutex_);
             hooked_factory_vtables_.erase(table);
         }
+
         const std::string message =
             "[KeelS2] EngineServiceMgr game loop factory hook failed: " + error + "\n";
+
         platform::WriteEngineConsole(message.c_str());
     }
 
@@ -3230,10 +3986,12 @@ private:
         {
             return;
         }
+
         void* table = *reinterpret_cast<void**>(loop);
         {
             std::scoped_lock lock(source2_mutex_);
             active_loops_.insert(loop);
+
             if (!table || !hooked_loop_vtables_.insert(table).second)
             {
                 return;
@@ -3250,6 +4008,7 @@ private:
             KH_PHASE_POST,
             init,
             error);
+
         if (result == KEEL_RESULT_OK)
         {
             Source2Hook shutdown;
@@ -3261,6 +4020,7 @@ private:
                 KH_PHASE_PRE,
                 shutdown,
                 error);
+
             if (result == KEEL_RESULT_OK)
             {
                 std::scoped_lock lock(source2_mutex_);
@@ -3268,15 +4028,19 @@ private:
                 source2_hooks_.push_back(shutdown);
                 return;
             }
+
             static_cast<void>(source2_hooks_api_->remove_callback(source2_hook_owner_, init.callback));
             static_cast<void>(source2_hooks_api_->release_target(source2_hook_owner_, init.target));
         }
+
         {
             std::scoped_lock lock(source2_mutex_);
             hooked_loop_vtables_.erase(table);
         }
+
         const std::string message =
             "[KeelS2] EngineServiceMgr game loop hook failed: " + error + "\n";
+
         platform::WriteEngineConsole(message.c_str());
     }
 
@@ -3287,6 +4051,7 @@ private:
         {
             return KEEL_TRUE;
         }
+
         KeelSource2CallbackEvent event{
             sizeof(KeelSource2CallbackEvent),
             type,
@@ -3304,11 +4069,13 @@ private:
             error.clear();
             return true;
         }
+
         if (!game_event_listener_ || !KeelCs2_ListenForGameEvent(game_event_listener_, name.c_str()))
         {
             error = "IGameEventManager2 rejected listener for " + name;
             return false;
         }
+
         bound_game_events_.insert(name);
         error.clear();
         return true;
@@ -3317,38 +4084,47 @@ private:
     void CaptureGameEventManager(void* manager)
     {
         std::scoped_lock lock(source2_mutex_);
+
         if (!manager || !game_event_error_.empty())
         {
             return;
         }
+
         auto** vtable = *reinterpret_cast<void***>(manager);
+
         if (vtable != game_event_manager_vtable_)
         {
             game_event_error_ = "CGameEventManager instance does not use the pinned primary virtual table";
             return;
         }
+
         if (game_event_manager_)
         {
             if (game_event_manager_ != manager)
             {
                 game_event_error_ = "CGameEventManager changed during server initialization";
             }
+
             return;
         }
+
         game_event_manager_ = manager;
         game_event_interface_.instance = manager;
         game_event_listener_ = KeelCs2_CreateGameEventListener(
             manager,
             &GameEventDispatch,
             this);
+
         if (!game_event_listener_)
         {
             game_event_error_ = "IGameEventListener2 creation failed";
             return;
         }
+
         for (const auto& name : requested_game_events_)
         {
             std::string error;
+
             if (!BindGameEventLocked(name, error))
             {
                 game_event_error_ = std::move(error);
@@ -3365,16 +4141,19 @@ private:
         kh::Frame frame(raw);
         auto* adapter = static_cast<Cs2Adapter*>(user_data);
         const auto manager = frame.Argument<void*>(0);
+
         if (adapter && manager && *manager)
         {
             adapter->CaptureGameEventManager(*manager);
         }
+
         return KH_ACTION_CONTINUE;
     }
 
     static void GameEventDispatch(void* event, const char* name, void* user_data)
     {
         auto* adapter = static_cast<Cs2Adapter*>(user_data);
+
         if (adapter && event && name && name[0])
         {
             KeelSource2GameEvent payload{
@@ -3393,10 +4172,12 @@ private:
         auto* adapter = static_cast<Cs2Adapter*>(user_data);
         const auto name = frame.Argument<const char*>(1);
         const auto factory = frame.Argument<void*>(2);
+
         if (adapter && name && *name && std::strcmp(*name, "game") == 0 && factory && *factory)
         {
             adapter->EnsureFactoryHooks(*factory);
         }
+
         return KH_ACTION_CONTINUE;
     }
 
@@ -3406,11 +4187,13 @@ private:
         auto* adapter = static_cast<Cs2Adapter*>(user_data);
         const auto name = frame.Argument<const char*>(1);
         const auto factory = frame.Argument<void*>(2);
+
         if (adapter && name && *name && std::strcmp(*name, "game") == 0 && factory && *factory)
         {
             std::scoped_lock lock(adapter->source2_mutex_);
             adapter->active_factories_.erase(*factory);
         }
+
         return KH_ACTION_CONTINUE;
     }
 
@@ -3421,15 +4204,18 @@ private:
         const auto factory = frame.Argument<void*>(0);
         const auto loop = frame.Result<void*>();
         bool active{};
+
         if (adapter && factory && *factory)
         {
             std::scoped_lock lock(adapter->source2_mutex_);
             active = adapter->active_factories_.contains(*factory);
         }
+
         if (active && loop && *loop)
         {
             adapter->EnsureLoopHooks(*loop);
         }
+
         return KH_ACTION_CONTINUE;
     }
 
@@ -3440,20 +4226,24 @@ private:
         const auto factory = frame.Argument<void*>(0);
         const auto loop = frame.Argument<void*>(1);
         bool invalidate{};
+
         if (adapter && factory && loop && *factory && *loop)
         {
             std::scoped_lock lock(adapter->source2_mutex_);
+
             if (adapter->active_factories_.contains(*factory))
             {
                 invalidate = adapter->initialized_loops_.erase(*loop) != 0;
                 adapter->active_loops_.erase(*loop);
             }
         }
+
         if (invalidate)
         {
             adapter->construction_map_shutdown_ = true;
             adapter->InvalidateEntityEpoch();
         }
+
         return KH_ACTION_CONTINUE;
     }
 
@@ -3466,12 +4256,14 @@ private:
         const auto prerequisites = frame.Argument<void*>(2);
         const auto result = frame.Result<bool>();
         bool emit{};
+
         if (adapter && loop && *loop && result && *result)
         {
             std::scoped_lock lock(adapter->source2_mutex_);
             emit = adapter->active_loops_.contains(*loop) &&
                 adapter->initialized_loops_.insert(*loop).second;
         }
+
         if (emit)
         {
             adapter->InvalidateEntityEpoch();
@@ -3484,6 +4276,7 @@ private:
             };
             static_cast<void>(adapter->EmitSource2(KEELS2_SOURCE2_LEVEL_INIT, payload));
         }
+
         return KH_ACTION_CONTINUE;
     }
 
@@ -3493,11 +4286,13 @@ private:
         auto* adapter = static_cast<Cs2Adapter*>(user_data);
         const auto loop = frame.Argument<void*>(0);
         bool emit{};
+
         if (adapter && loop && *loop)
         {
             std::scoped_lock lock(adapter->source2_mutex_);
             emit = adapter->initialized_loops_.erase(*loop) != 0;
         }
+
         if (emit)
         {
             adapter->construction_map_shutdown_ = true;
@@ -3506,6 +4301,7 @@ private:
             KeelSource2LevelShutdown payload{sizeof(KeelSource2LevelShutdown), 0};
             static_cast<void>(adapter->EmitSource2(KEELS2_SOURCE2_LEVEL_SHUTDOWN, payload));
         }
+
         return KH_ACTION_CONTINUE;
     }
 
@@ -3519,11 +4315,13 @@ private:
         const auto network_id = frame.Argument<const char*>(4);
         const auto unknown = frame.Argument<bool>(5);
         const auto rejection = frame.Argument<void*>(6);
+
         if (!adapter || !slot || !name || !*name || !xuid || !network_id || !*network_id ||
             !unknown || !rejection)
         {
             return KH_ACTION_CONTINUE;
         }
+
         std::array<char, KEELS2_SOURCE2_REJECTION_CAPACITY> message{};
         KeelSource2ClientConnect payload{
             sizeof(KeelSource2ClientConnect),
@@ -3537,18 +4335,22 @@ private:
             static_cast<std::uint32_t>(message.size()),
             0
         };
+
         if (adapter->EmitSource2(KEELS2_SOURCE2_CLIENT_CONNECT, payload) == KEEL_FALSE)
         {
             message.back() = '\0';
             const auto length = static_cast<std::uint32_t>(std::strlen(message.data()));
+
             if (*rejection && !KeelCs2_WriteRejectionMessage(*rejection, message.data(), length))
             {
                 platform::WriteEngineConsole(
                     "[KeelS2] ClientConnect rejection message could not be written\n");
             }
+
             static_cast<void>(frame.SetResult(false));
             return KH_ACTION_SUPERSEDE;
         }
+
         return KH_ACTION_CONTINUE;
     }
 
@@ -3558,10 +4360,12 @@ private:
         auto* adapter = static_cast<Cs2Adapter*>(user_data);
         const auto slot = frame.Argument<std::int32_t>(1);
         const auto command = frame.Argument<const void*>(2);
+
         if (!adapter || !slot || !command || !*command)
         {
             return KH_ACTION_CONTINUE;
         }
+
         KeelSource2ClientCommand payload{
             sizeof(KeelSource2ClientCommand),
             *slot,
@@ -3596,9 +4400,11 @@ private:
         const bool fixture_profile = compatibility.profile &&
             (std::strcmp(compatibility.profile, "test-fixture-linuxsteamrt64") == 0 ||
                 std::strcmp(compatibility.profile, "test-fixture-win64") == 0);
+
         const char* expected_engine_module = fixture_profile
             ? fixture_engine_module
             : engine_module;
+
         const bool any_schema_entity_fact = compatibility.schema_interface ||
             compatibility.schema_module || compatibility.schema_server_module ||
             compatibility.schema_validation_slot != 0 ||
@@ -3606,15 +4412,19 @@ private:
             compatibility.entity_system_module ||
             compatibility.game_resource_validation_slot != 0 ||
             compatibility.game_entity_system_offset != 0;
+
         const char* expected_schema_module = fixture_profile
             ? fixture_schema_module
             : schema_module;
+
         const char* expected_entity_module = fixture_profile
             ? fixture_schema_module
             : server_module;
+
         const char* expected_game_resource_module = fixture_profile
             ? fixture_schema_module
             : expected_engine_module;
+
         const bool schema_entities_valid = !any_schema_entity_fact ||
             (compatibility.schema_interface &&
                 std::strcmp(compatibility.schema_interface, "SchemaSystem_001") == 0 &&
@@ -3637,6 +4447,7 @@ private:
                     expected_entity_module) == 0 &&
                 compatibility.game_resource_validation_slot == 0 &&
                 compatibility.game_entity_system_offset == entity_system_offset);
+
         return compatibility.profile && compatibility.profile[0] &&
             schema_entities_valid &&
             compatibility.server_interface &&
@@ -3723,6 +4534,7 @@ private:
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         info = {
             sizeof(KeelSource2InterfaceInfo),
             entry.capability,
@@ -3751,18 +4563,23 @@ private:
     {
         int return_code = 1;
         void* instance = factory(name, &return_code);
+
         if (!instance || return_code != 0)
         {
             error = std::string(name) + " is unavailable";
             return false;
         }
+
         auto** vtable = *reinterpret_cast<void***>(instance);
+
         if (!vtable)
         {
             error = std::string(name) + " has a null vtable";
             return false;
         }
+
         std::filesystem::path module;
+
         if (!ValidateTarget(
                 vtable[validation_slot],
                 expected_module,
@@ -3772,6 +4589,7 @@ private:
         {
             return false;
         }
+
         entry.capability = capability;
         entry.factory = factory_type;
         entry.instance = instance;
@@ -3787,19 +4605,23 @@ private:
         {
             return false;
         }
+
         for (std::size_t index{}; index < 256; ++index)
         {
             const unsigned char character =
                 static_cast<unsigned char>(interface_name[index]);
+
             if (character == 0)
             {
                 return index != 0;
             }
+
             if (!std::isalnum(character) && character != '_')
             {
                 return false;
             }
         }
+
         return false;
     }
 
@@ -3815,6 +4637,7 @@ private:
             error = std::string(operation) + " validation target is null";
             return false;
         }
+
         if (!platform::ModulePathFromAddress(address, module, error))
         {
             error = std::string(operation) + " module could not be resolved: " + error;
@@ -3836,6 +4659,7 @@ private:
             error = std::string(operation) + " resolves to unexpected module " + module.string();
             return false;
         }
+
         return true;
     }
 
@@ -3846,15 +4670,19 @@ private:
         std::string& error)
     {
         std::error_code filesystem_error;
+
         if (!std::filesystem::equivalent(first, second, filesystem_error) || filesystem_error)
         {
             error = std::string(operation) + " validation targets resolve to different modules";
+
             if (filesystem_error)
             {
                 error += ": " + filesystem_error.message();
             }
+
             return false;
         }
+
         return true;
     }
 
@@ -3890,6 +4718,7 @@ private:
         {
             return;
         }
+
         const KeelLifecycleEvent event{
             sizeof(KeelLifecycleEvent),
             type,
@@ -3904,13 +4733,16 @@ private:
     {
         kh::Frame frame(raw);
         auto* adapter = static_cast<Cs2Adapter*>(user_data);
+
         if (adapter && !adapter->game_frame_observed_.exchange(true, std::memory_order_acq_rel))
         {
             platform::WriteEngineConsole("[KeelS2] native GameFrame hook entered\n");
         }
+
         const auto simulating = frame.Argument<bool>(1);
         const auto first_tick = frame.Argument<bool>(2);
         const auto last_tick = frame.Argument<bool>(3);
+
         if (adapter && simulating && first_tick && last_tick)
         {
             const KeelLifecycleGameFrame payload{
@@ -3921,6 +4753,7 @@ private:
             };
             adapter->Emit(KEELS2_LIFECYCLE_GAME_FRAME, payload);
         }
+
         return KH_ACTION_CONTINUE;
     }
 
@@ -3934,6 +4767,7 @@ private:
         const auto network_id = frame.Argument<const char*>(4);
         const auto address = frame.Argument<const char*>(5);
         const auto fake = frame.Argument<bool>(6);
+
         if (adapter && slot && name && xuid && network_id && address && fake)
         {
             const KeelLifecycleClientConnected payload{
@@ -3948,6 +4782,7 @@ private:
             };
             adapter->Emit(KEELS2_LIFECYCLE_CLIENT_CONNECTED, payload);
         }
+
         return KH_ACTION_CONTINUE;
     }
 
@@ -3959,6 +4794,7 @@ private:
         const auto name = frame.Argument<const char*>(2);
         const auto type = frame.Argument<std::int32_t>(3);
         const auto xuid = frame.Argument<std::uint64_t>(4);
+
         if (adapter && slot && name && type && xuid)
         {
             const KeelLifecycleClientPutInServer payload{
@@ -3971,6 +4807,7 @@ private:
             };
             adapter->Emit(KEELS2_LIFECYCLE_CLIENT_PUT_IN_SERVER, payload);
         }
+
         return KH_ACTION_CONTINUE;
     }
 
@@ -3982,6 +4819,7 @@ private:
         const auto load_game = frame.Argument<bool>(2);
         const auto name = frame.Argument<const char*>(3);
         const auto xuid = frame.Argument<std::uint64_t>(4);
+
         if (adapter && slot && load_game && name && xuid)
         {
             const KeelLifecycleClientActive payload{
@@ -3994,6 +4832,7 @@ private:
             };
             adapter->Emit(KEELS2_LIFECYCLE_CLIENT_ACTIVE, payload);
         }
+
         return KH_ACTION_CONTINUE;
     }
 
@@ -4002,6 +4841,7 @@ private:
         kh::Frame frame(raw);
         auto* adapter = static_cast<Cs2Adapter*>(user_data);
         const auto slot = frame.Argument<std::int32_t>(1);
+
         if (adapter && slot)
         {
             const KeelLifecycleClientFullyConnected payload{
@@ -4010,6 +4850,7 @@ private:
             };
             adapter->Emit(KEELS2_LIFECYCLE_CLIENT_FULLY_CONNECTED, payload);
         }
+
         return KH_ACTION_CONTINUE;
     }
 
@@ -4022,6 +4863,7 @@ private:
         const auto name = frame.Argument<const char*>(3);
         const auto xuid = frame.Argument<std::uint64_t>(4);
         const auto network_id = frame.Argument<const char*>(5);
+
         if (adapter && slot && reason && name && xuid && network_id)
         {
             const KeelLifecycleClientDisconnecting payload{
@@ -4035,6 +4877,7 @@ private:
             };
             adapter->Emit(KEELS2_LIFECYCLE_CLIENT_DISCONNECTING, payload);
         }
+
         return KH_ACTION_CONTINUE;
     }
 
@@ -4043,6 +4886,7 @@ private:
         kh::Frame frame(raw);
         auto* adapter = static_cast<Cs2Adapter*>(user_data);
         const auto slot = frame.Argument<std::int32_t>(1);
+
         if (adapter && slot)
         {
             const KeelLifecycleClientSettingsChanged payload{
@@ -4051,6 +4895,7 @@ private:
             };
             adapter->Emit(KEELS2_LIFECYCLE_CLIENT_SETTINGS_CHANGED, payload);
         }
+
         return KH_ACTION_CONTINUE;
     }
 
@@ -4156,6 +5001,7 @@ GameAdapter* CreateAdapter(const GameAdapterHostApi* host)
     {
         return nullptr;
     }
+
     try
     {
         return new Cs2Adapter(*host);
@@ -4214,27 +5060,62 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_PlayerAction(
 {
     if (!adapter || !entity || !action)
         return KEEL_RESULT_INVALID_ARGUMENT;
-    try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->PlayerAction(*entity, *action); }
-    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+
+    try
+    {
+        return static_cast<keels2::host::Cs2Adapter*>(adapter)->PlayerAction(*entity, *action);
+    }
+    catch (...)
+    {
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
 }
 
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryRoundControl(
     std::uint32_t version, keels2::host::GameAdapterRoundControlApi* api) noexcept
 {
-    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    if (!api || api->size != sizeof(*api))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+
     *api = {};
-    if (version != keels2::host::kGameAdapterRoundControlVersion) return KEEL_RESULT_INCOMPATIBLE;
-    api->size = sizeof(*api); api->api_version = version;
-    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* capabilities) noexcept {
-        if (capabilities) *capabilities = 0;
-        if (!adapter || !capabilities) return KEEL_RESULT_INVALID_ARGUMENT;
-        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->RoundCapabilities(*capabilities); }
-        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+
+    if (version != keels2::host::kGameAdapterRoundControlVersion)
+        return KEEL_RESULT_INCOMPATIBLE;
+
+    api->size = sizeof(*api);
+    api->api_version = version;
+
+    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* capabilities) noexcept
+    {
+        if (capabilities)
+            *capabilities = 0;
+
+        if (!adapter || !capabilities)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->RoundCapabilities(*capabilities);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
     };
-    api->terminate = [](keels2::host::GameAdapter* adapter, const KeelRoundTermination* request) noexcept {
-        if (!adapter || !request) return KEEL_RESULT_INVALID_ARGUMENT;
-        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->TerminateRound(*request); }
-        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+
+    api->terminate = [](keels2::host::GameAdapter* adapter, const KeelRoundTermination* request) noexcept
+    {
+        if (!adapter || !request)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->TerminateRound(*request);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
     };
     return KEEL_RESULT_OK;
 }
@@ -4242,21 +5123,51 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryRoundContr
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityWrites(
     std::uint32_t version, keels2::host::GameAdapterEntityWritesApi* api) noexcept
 {
-    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    if (!api || api->size != sizeof(*api))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+
     *api = {};
-    if (version != keels2::host::kGameAdapterEntityWritesVersion) return KEEL_RESULT_INCOMPATIBLE;
-    api->size = sizeof(*api); api->api_version = version;
-    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* capabilities) noexcept {
-        if (capabilities) *capabilities = 0;
-        if (!adapter || !capabilities) return KEEL_RESULT_INVALID_ARGUMENT;
-        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->EntityWriteCapabilities(*capabilities); }
-        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+
+    if (version != keels2::host::kGameAdapterEntityWritesVersion)
+        return KEEL_RESULT_INCOMPATIBLE;
+
+    api->size = sizeof(*api);
+    api->api_version = version;
+
+    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* capabilities) noexcept
+    {
+        if (capabilities)
+            *capabilities = 0;
+
+        if (!adapter || !capabilities)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->EntityWriteCapabilities(*capabilities);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
     };
-    api->write = [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* entity,
-        const keels2::host::GameSchemaField* field, const void* value, std::uint32_t size) noexcept {
-        if (!adapter || !entity || !field || !value) return KEEL_RESULT_INVALID_ARGUMENT;
-        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->WriteEntityField(*entity, *field, value, size); }
-        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    api->write = [](keels2::host::GameAdapter* adapter,
+                    const keels2::host::GameEntityIdentity* entity,
+                    const keels2::host::GameSchemaField* field,
+                    const void* value,
+                    std::uint32_t size) noexcept
+    {
+        if (!adapter || !entity || !field || !value)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->WriteEntityField(*entity, *field, value, size);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
     };
     return KEEL_RESULT_OK;
 }
@@ -4264,22 +5175,49 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityWrit
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayerManagement(
     std::uint32_t version, keels2::host::GameAdapterPlayerManagementApi* api) noexcept
 {
-    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    if (!api || api->size != sizeof(*api))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+
     *api = {};
-    if (version != keels2::host::kGameAdapterPlayerManagementVersion) return KEEL_RESULT_INCOMPATIBLE;
+
+    if (version != keels2::host::kGameAdapterPlayerManagementVersion)
+        return KEEL_RESULT_INCOMPATIBLE;
+
     api->size = sizeof(*api);
     api->api_version = version;
-    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* capabilities) noexcept {
-        if (capabilities) *capabilities = 0;
-        if (!adapter || !capabilities) return KEEL_RESULT_INVALID_ARGUMENT;
-        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->PlayerManagementCapabilities(*capabilities); }
-        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+
+    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* capabilities) noexcept
+    {
+        if (capabilities)
+            *capabilities = 0;
+
+        if (!adapter || !capabilities)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->PlayerManagementCapabilities(*capabilities);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
     };
-    api->apply = [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* entity,
-        const KeelPlayerManagementAction* action) noexcept {
-        if (!adapter || !entity || !action) return KEEL_RESULT_INVALID_ARGUMENT;
-        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->ManagePlayer(*entity, *action); }
-        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    api->apply = [](keels2::host::GameAdapter* adapter,
+                    const keels2::host::GameEntityIdentity* entity,
+                    const KeelPlayerManagementAction* action) noexcept
+    {
+        if (!adapter || !entity || !action)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->ManagePlayer(*entity, *action);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
     };
     return KEEL_RESULT_OK;
 }
@@ -4291,29 +5229,39 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayers(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     *api = {};
+
     if (version != keels2::host::kGameAdapterPlayersVersion)
     {
         return KEEL_RESULT_INCOMPATIBLE;
     }
+
     api->size = sizeof(*api);
     api->api_version = version;
-    api->capacity = []() noexcept { return KeelCs2_PlayerCapacity(); };
+
+    api->capacity = []() noexcept
+    {
+        return KeelCs2_PlayerCapacity();
+    };
     api->read = [](keels2::host::GameAdapter* adapter, std::int32_t slot, KeelPlayerInfo* player) noexcept {
         if (!player)
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         *player = {};
         player->size = sizeof(*player);
         player->slot = -1;
         player->user_id = -1;
         player->controller_handle = UINT32_MAX;
         player->pawn_handle = UINT32_MAX;
+
         if (!adapter)
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         try
         {
             return static_cast<keels2::host::Cs2Adapter*>(adapter)->ReadPlayer(slot, *player);
@@ -4333,11 +5281,14 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryMessaging(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     *api = {};
+
     if (version != keels2::host::kGameAdapterMessagingVersion)
     {
         return KEEL_RESULT_INCOMPATIBLE;
     }
+
     api->size = sizeof(*api);
     api->api_version = version;
     api->chat = [](keels2::host::GameAdapter* adapter, std::int32_t slot, KeelBool broadcast, const char* text) noexcept {
@@ -4345,6 +5296,7 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryMessaging(
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         try
         {
             return static_cast<keels2::host::Cs2Adapter*>(adapter)->PrintChat(slot, broadcast, text);
@@ -4364,11 +5316,14 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryConVarObse
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     *api = {};
+
     if (version != keels2::host::kGameAdapterConVarObserversVersion)
     {
         return KEEL_RESULT_INCOMPATIBLE;
     }
+
     api->size = sizeof(*api);
     api->api_version = version;
     api->observe = [](keels2::host::GameAdapter* adapter, keels2::host::GameConVarHandle convar,
@@ -4377,6 +5332,7 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryConVarObse
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         try
         {
             return static_cast<keels2::host::Cs2Adapter*>(adapter)->ObserveConVar(convar, callback, user_data);
@@ -4392,15 +5348,31 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryConVarObse
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayerInput(
     std::uint32_t version, keels2::host::GameAdapterPlayerInputApi* api) noexcept
 {
-    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    if (!api || api->size != sizeof(*api))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+
     *api = {};
-    if (version != keels2::host::kGameAdapterPlayerInputVersion) return KEEL_RESULT_INCOMPATIBLE;
-    api->size = sizeof(*api); api->api_version = version;
-    api->read = [](keels2::host::GameAdapter* adapter, std::int32_t slot, std::uint32_t controller,
-        std::uint64_t* buttons, std::uint64_t* context) noexcept {
-        if (buttons) *buttons = 0;
-        if (context) *context = 0;
-        if (!adapter || !buttons || !context) return KEEL_RESULT_INVALID_ARGUMENT;
+
+    if (version != keels2::host::kGameAdapterPlayerInputVersion)
+        return KEEL_RESULT_INCOMPATIBLE;
+
+    api->size = sizeof(*api);
+    api->api_version = version;
+    api->read = [](keels2::host::GameAdapter* adapter,
+                   std::int32_t slot,
+                   std::uint32_t controller,
+                   std::uint64_t* buttons,
+                   std::uint64_t* context) noexcept
+    {
+        if (buttons)
+            *buttons = 0;
+
+        if (context)
+            *context = 0;
+
+        if (!adapter || !buttons || !context)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
         try
         {
             return static_cast<keels2::host::Cs2Adapter*>(adapter)->ReadPlayerInput(slot, controller, *buttons, *context);
@@ -4417,33 +5389,79 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayerInpu
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayerStatistics(
     std::uint32_t version, keels2::host::GameAdapterPlayerStatisticsApi* api) noexcept
 {
-    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    if (!api || api->size != sizeof(*api))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+
     *api = {};
-    if (version != keels2::host::kGameAdapterPlayerStatisticsVersion) return KEEL_RESULT_INCOMPATIBLE;
-    api->size = sizeof(*api); api->api_version = version;
-    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* readable, std::uint32_t* writable) noexcept {
-        if (readable) *readable = 0;
-        if (writable) *writable = 0;
-        if (!adapter || !readable || !writable) return KEEL_RESULT_INVALID_ARGUMENT;
-        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->PlayerStatCapabilities(*readable,*writable); }
-        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+
+    if (version != keels2::host::kGameAdapterPlayerStatisticsVersion)
+        return KEEL_RESULT_INCOMPATIBLE;
+
+    api->size = sizeof(*api);
+    api->api_version = version;
+    api->capabilities =
+        [](keels2::host::GameAdapter* adapter, std::uint32_t* readable, std::uint32_t* writable) noexcept
+    {
+        if (readable)
+            *readable = 0;
+
+        if (writable)
+            *writable = 0;
+
+        if (!adapter || !readable || !writable)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->PlayerStatCapabilities(*readable, *writable);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
     };
-    api->read = [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* entity, std::uint32_t key, std::int32_t* output) noexcept {
-        if (output) *output = 0;
-        if (!adapter || !entity || !output) return KEEL_RESULT_INVALID_ARGUMENT;
+    api->read = [](keels2::host::GameAdapter* adapter,
+                   const keels2::host::GameEntityIdentity* entity,
+                   std::uint32_t key,
+                   std::int32_t* output) noexcept
+    {
+        if (output)
+            *output = 0;
+
+        if (!adapter || !entity || !output)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
         try
         {
             std::int32_t value{};
             const auto result = static_cast<keels2::host::Cs2Adapter*>(adapter)->AccessPlayerStat(*entity,key,value,false);
-            if (result == KEEL_RESULT_OK) *output = value;
+
+            if (result == KEEL_RESULT_OK)
+                *output = value;
+
             return result;
         }
-        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
     };
-    api->write = [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* entity, std::uint32_t key, std::int32_t value) noexcept {
-        if (!adapter || !entity) return KEEL_RESULT_INVALID_ARGUMENT;
-        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->AccessPlayerStat(*entity,key,value,true); }
-        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    api->write = [](keels2::host::GameAdapter* adapter,
+                    const keels2::host::GameEntityIdentity* entity,
+                    std::uint32_t key,
+                    std::int32_t value) noexcept
+    {
+        if (!adapter || !entity)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->AccessPlayerStat(*entity, key, value, true);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
     };
     return KEEL_RESULT_OK;
 }
@@ -4451,59 +5469,143 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayerStat
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityHookData(
     std::uint32_t version, keels2::host::GameAdapterEntityHookDataApi* api) noexcept
 {
-    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    if (!api || api->size != sizeof(*api))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+
     *api = {};
-    if (version != keels2::host::kGameAdapterEntityHookDataVersion) return KEEL_RESULT_INCOMPATIBLE;
-    *api = {sizeof(*api),keels2::host::kGameAdapterEntityHookDataVersion,
-        [](keels2::host::GameAdapter* adapter, const void* record, KeelDamageInfo* output) noexcept -> KeelResult {
-            const bool sized = output && output->size == sizeof(*output);
-            if (output) { *output = {}; output->size = sizeof(*output); output->inflictor = output->attacker = output->ability = UINT32_MAX; }
-            if (!adapter || !record || !sized) return KEEL_RESULT_INVALID_ARGUMENT;
-            try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->AccessDamage(record,output,nullptr); }
-            catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
-        },
-        [](keels2::host::GameAdapter* adapter, void* record, const KeelDamageEdit* edit) noexcept -> KeelResult {
-            if (!adapter || !record || !edit) return KEEL_RESULT_INVALID_ARGUMENT;
-            try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->AccessDamage(record,nullptr,edit); }
-            catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
-        },
-        [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* pawn, const void* candidate, KeelBool* matches) noexcept -> KeelResult {
-            if (matches) *matches = KEEL_FALSE;
-            if (!adapter || !pawn || !candidate || !matches) return KEEL_RESULT_INVALID_ARGUMENT;
-            try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->WeaponMatches(*pawn,candidate,*matches); }
-            catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
-        }};
+
+    if (version != keels2::host::kGameAdapterEntityHookDataVersion)
+        return KEEL_RESULT_INCOMPATIBLE;
+
+    *api = {sizeof(*api),
+            keels2::host::kGameAdapterEntityHookDataVersion,
+            [](keels2::host::GameAdapter* adapter, const void* record, KeelDamageInfo* output) noexcept -> KeelResult
+            {
+                const bool sized = output && output->size == sizeof(*output);
+
+                if (output)
+                {
+                    *output = {};
+                    output->size = sizeof(*output);
+                    output->inflictor = output->attacker = output->ability = UINT32_MAX;
+                }
+
+                if (!adapter || !record || !sized)
+                    return KEEL_RESULT_INVALID_ARGUMENT;
+
+                try
+                {
+                    return static_cast<keels2::host::Cs2Adapter*>(adapter)->AccessDamage(record, output, nullptr);
+                }
+                catch (...)
+                {
+                    return KEEL_RESULT_ENGINE_FAILURE;
+                }
+            },
+            [](keels2::host::GameAdapter* adapter, void* record, const KeelDamageEdit* edit) noexcept -> KeelResult
+            {
+                if (!adapter || !record || !edit)
+                    return KEEL_RESULT_INVALID_ARGUMENT;
+
+                try
+                {
+                    return static_cast<keels2::host::Cs2Adapter*>(adapter)->AccessDamage(record, nullptr, edit);
+                }
+                catch (...)
+                {
+                    return KEEL_RESULT_ENGINE_FAILURE;
+                }
+            },
+            [](keels2::host::GameAdapter* adapter,
+               const keels2::host::GameEntityIdentity* pawn,
+               const void* candidate,
+               KeelBool* matches) noexcept -> KeelResult
+            {
+                if (matches)
+                    *matches = KEEL_FALSE;
+
+                if (!adapter || !pawn || !candidate || !matches)
+                    return KEEL_RESULT_INVALID_ARGUMENT;
+
+                try
+                {
+                    return static_cast<keels2::host::Cs2Adapter*>(adapter)->WeaponMatches(*pawn, candidate, *matches);
+                }
+                catch (...)
+                {
+                    return KEEL_RESULT_ENGINE_FAILURE;
+                }
+            }};
+
     return KEEL_RESULT_OK;
 }
 
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityCapture(
     std::uint32_t version, keels2::host::GameAdapterEntityCaptureApi* api) noexcept
 {
-    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    if (!api || api->size != sizeof(*api))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+
     *api = {};
-    if (version != keels2::host::kGameAdapterEntityCaptureVersion) return KEEL_RESULT_INCOMPATIBLE;
-    *api = {sizeof(*api), keels2::host::kGameAdapterEntityCaptureVersion,
-        [](keels2::host::GameAdapter* adapter, const void* instance, keels2::host::GameEntityIdentity* entity) noexcept -> KeelResult {
-            if (entity) *entity = {};
-            if (!adapter || !instance || !entity) return KEEL_RESULT_INVALID_ARGUMENT;
-            try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->CaptureEntity(instance, *entity); }
-            catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
-        }};
+
+    if (version != keels2::host::kGameAdapterEntityCaptureVersion)
+        return KEEL_RESULT_INCOMPATIBLE;
+
+    *api = {sizeof(*api),
+            keels2::host::kGameAdapterEntityCaptureVersion,
+            [](keels2::host::GameAdapter* adapter,
+               const void* instance,
+               keels2::host::GameEntityIdentity* entity) noexcept -> KeelResult
+            {
+                if (entity)
+                    *entity = {};
+
+                if (!adapter || !instance || !entity)
+                    return KEEL_RESULT_INVALID_ARGUMENT;
+
+                try
+                {
+                    return static_cast<keels2::host::Cs2Adapter*>(adapter)->CaptureEntity(instance, *entity);
+                }
+                catch (...)
+                {
+                    return KEEL_RESULT_ENGINE_FAILURE;
+                }
+            }};
+
     return KEEL_RESULT_OK;
 }
 
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityAccess(
     std::uint32_t version, keels2::host::GameAdapterEntityAccessApi* api) noexcept
 {
-    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    if (!api || api->size != sizeof(*api))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+
     *api = {};
-    if (version != keels2::host::kGameAdapterEntityAccessVersion) return KEEL_RESULT_INCOMPATIBLE;
-    api->size = sizeof(*api); api->api_version = version;
-    api->visit = [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityAccessRequest* entities,
-        std::uint32_t count, KeelEntityAccessCallback callback, void* user_data) noexcept {
-        if (!adapter) return KEEL_RESULT_INVALID_ARGUMENT;
-        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->VisitEntities(entities, count, callback, user_data); }
-        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+
+    if (version != keels2::host::kGameAdapterEntityAccessVersion)
+        return KEEL_RESULT_INCOMPATIBLE;
+
+    api->size = sizeof(*api);
+    api->api_version = version;
+    api->visit = [](keels2::host::GameAdapter* adapter,
+                    const keels2::host::GameEntityAccessRequest* entities,
+                    std::uint32_t count,
+                    KeelEntityAccessCallback callback,
+                    void* user_data) noexcept
+    {
+        if (!adapter)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->VisitEntities(entities, count, callback, user_data);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
     };
     return KEEL_RESULT_OK;
 }
@@ -4511,43 +5613,105 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityAcce
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityOutputs(
     std::uint32_t version, keels2::host::GameAdapterEntityOutputsApi* api) noexcept
 {
-    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    if (!api || api->size != sizeof(*api))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+
     *api = {};
-    if (version != keels2::host::kGameAdapterEntityOutputsVersion) return KEEL_RESULT_INCOMPATIBLE;
-    *api = {sizeof(*api),version,
-        [](keels2::host::GameAdapter* adapter, const KeelHookApi* hooks, keels2::host::GameHookDefer defer,
-            keels2::host::GameEntityOutputCallback callback, void* data) noexcept -> KeelResult {
-            if (!adapter || !hooks || !defer || !callback) return KEEL_RESULT_INVALID_ARGUMENT;
-            try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->StartOutputs(*hooks,defer,callback,data); }
-            catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
-        },
-        [](keels2::host::GameAdapter* adapter) noexcept -> KeelResult {
-            if (!adapter) return KEEL_RESULT_INVALID_ARGUMENT;
-            try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->StopOutputs(); }
-            catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
-        }};
+
+    if (version != keels2::host::kGameAdapterEntityOutputsVersion)
+        return KEEL_RESULT_INCOMPATIBLE;
+
+    *api = {sizeof(*api),
+            version,
+            [](keels2::host::GameAdapter* adapter,
+               const KeelHookApi* hooks,
+               keels2::host::GameHookDefer defer,
+               keels2::host::GameEntityOutputCallback callback,
+               void* data) noexcept -> KeelResult
+            {
+                if (!adapter || !hooks || !defer || !callback)
+                    return KEEL_RESULT_INVALID_ARGUMENT;
+
+                try
+                {
+                    return static_cast<keels2::host::Cs2Adapter*>(adapter)->StartOutputs(*hooks, defer, callback, data);
+                }
+                catch (...)
+                {
+                    return KEEL_RESULT_ENGINE_FAILURE;
+                }
+            },
+            [](keels2::host::GameAdapter* adapter) noexcept -> KeelResult
+            {
+                if (!adapter)
+                    return KEEL_RESULT_INVALID_ARGUMENT;
+
+                try
+                {
+                    return static_cast<keels2::host::Cs2Adapter*>(adapter)->StopOutputs();
+                }
+                catch (...)
+                {
+                    return KEEL_RESULT_ENGINE_FAILURE;
+                }
+            }};
+
     return KEEL_RESULT_OK;
 }
 
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityInput(
     std::uint32_t version, keels2::host::GameAdapterEntityInputApi* api) noexcept
 {
-    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    if (!api || api->size != sizeof(*api))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+
     *api = {};
-    if (version != keels2::host::kGameAdapterEntityInputVersion) return KEEL_RESULT_INCOMPATIBLE;
-    api->size = sizeof(*api); api->api_version = version;
-    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* direct, std::uint32_t* queued) noexcept {
-        if (direct) *direct = 0;
-        if (queued) *queued = 0;
-        if (!adapter || !direct || !queued) return KEEL_RESULT_INVALID_ARGUMENT;
-        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->InputCapabilities(*direct,*queued); }
-        catch (...) { *direct = *queued = 0; return KEEL_RESULT_ENGINE_FAILURE; }
+
+    if (version != keels2::host::kGameAdapterEntityInputVersion)
+        return KEEL_RESULT_INCOMPATIBLE;
+
+    api->size = sizeof(*api);
+    api->api_version = version;
+
+    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* direct, std::uint32_t* queued) noexcept
+    {
+        if (direct)
+            *direct = 0;
+
+        if (queued)
+            *queued = 0;
+
+        if (!adapter || !direct || !queued)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->InputCapabilities(*direct, *queued);
+        }
+        catch (...)
+        {
+            *direct = *queued = 0;
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
     };
-    api->dispatch = [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityInputRequest* request, KeelBool* invoked) noexcept {
-        if (invoked) *invoked = KEEL_FALSE;
-        if (!adapter || !request || !invoked) return KEEL_RESULT_INVALID_ARGUMENT;
-        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->DispatchInput(*request,*invoked); }
-        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    api->dispatch = [](keels2::host::GameAdapter* adapter,
+                       const keels2::host::GameEntityInputRequest* request,
+                       KeelBool* invoked) noexcept
+    {
+        if (invoked)
+            *invoked = KEEL_FALSE;
+
+        if (!adapter || !request || !invoked)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->DispatchInput(*request, *invoked);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
     };
     return KEEL_RESULT_OK;
 }
@@ -4555,21 +5719,51 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityInpu
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityTools(
     std::uint32_t version, keels2::host::GameAdapterEntityToolsApi* api) noexcept
 {
-    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    if (!api || api->size != sizeof(*api))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+
     *api = {};
-    if (version != keels2::host::kGameAdapterEntityToolsVersion) return KEEL_RESULT_INCOMPATIBLE;
-    api->size = sizeof(*api); api->api_version = version;
-    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* flags) noexcept {
-        if (flags) *flags = 0;
-        if (!adapter || !flags) return KEEL_RESULT_INVALID_ARGUMENT;
-        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->EntityToolCapabilities(*flags); }
-        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+
+    if (version != keels2::host::kGameAdapterEntityToolsVersion)
+        return KEEL_RESULT_INCOMPATIBLE;
+
+    api->size = sizeof(*api);
+    api->api_version = version;
+
+    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* flags) noexcept
+    {
+        if (flags)
+            *flags = 0;
+
+        if (!adapter || !flags)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->EntityToolCapabilities(*flags);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
     };
-    api->apply = [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* entity,
-        std::uint32_t kind, const KeelEntityTeleport* request, const char* model) noexcept {
-        if (!adapter || !entity) return KEEL_RESULT_INVALID_ARGUMENT;
-        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->ApplyEntityTool(*entity,kind,request,model); }
-        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    api->apply = [](keels2::host::GameAdapter* adapter,
+                    const keels2::host::GameEntityIdentity* entity,
+                    std::uint32_t kind,
+                    const KeelEntityTeleport* request,
+                    const char* model) noexcept
+    {
+        if (!adapter || !entity)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
+        try
+        {
+            return static_cast<keels2::host::Cs2Adapter*>(adapter)->ApplyEntityTool(*entity, kind, request, model);
+        }
+        catch (...)
+        {
+            return KEEL_RESULT_ENGINE_FAILURE;
+        }
     };
     return KEEL_RESULT_OK;
 }
@@ -4577,48 +5771,96 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityTool
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityConstruction(
     std::uint32_t version, keels2::host::GameAdapterEntityConstructionApi* api) noexcept
 {
-    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    if (!api || api->size != sizeof(*api))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+
     *api = {};
-    if (version != keels2::host::kGameAdapterEntityConstructionVersion) return KEEL_RESULT_INCOMPATIBLE;
+
+    if (version != keels2::host::kGameAdapterEntityConstructionVersion)
+        return KEEL_RESULT_INCOMPATIBLE;
+
     using Adapter = keels2::host::GameAdapter;
     using Cs2 = keels2::host::Cs2Adapter;
     using Identity = keels2::host::GameEntityIdentity;
-    *api = {sizeof(*api),version,
-        [](Adapter* adapter) noexcept -> KeelResult {
-            if (!adapter) return KEEL_RESULT_INVALID_ARGUMENT;
-            try { return static_cast<Cs2*>(adapter)->Ready(); }
-            catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
-        },
-        [](Adapter* adapter, const char* name, std::uint64_t* token, Identity* identity) noexcept -> KeelResult {
-            if (token) *token = 0;
-            if (identity) *identity = {};
-            if (!adapter || !name || !token || !identity) return KEEL_RESULT_INVALID_ARGUMENT;
-            return static_cast<Cs2*>(adapter)->Constructions().Create(name,*token,*identity);
-        },
-        [](Adapter* adapter, std::uint64_t token, Identity* identity) noexcept -> KeelResult {
-            if (identity) *identity = {};
-            if (!adapter || !identity) return KEEL_RESULT_INVALID_ARGUMENT;
-            return static_cast<Cs2*>(adapter)->Constructions().Describe(token,*identity);
-        },
-        [](Adapter* adapter, std::uint64_t token, const KeelEntityKeyValue* value) noexcept -> KeelResult {
-            if (!adapter || !value) return KEEL_RESULT_INVALID_ARGUMENT;
-            return static_cast<Cs2*>(adapter)->Constructions().Set(token,*value);
-        },
-        [](Adapter* adapter, std::uint64_t token, const KeelEntityTeleport* request) noexcept -> KeelResult {
-            if (!adapter || !request) return KEEL_RESULT_INVALID_ARGUMENT;
-            return static_cast<Cs2*>(adapter)->Constructions().Teleport(token,*request);
-        },
-        [](Adapter* adapter, std::uint64_t token, KeelBool* invoked) noexcept -> KeelResult {
-            if (invoked) *invoked = KEEL_FALSE;
-            if (!adapter || !invoked) return KEEL_RESULT_INVALID_ARGUMENT;
-            return static_cast<Cs2*>(adapter)->Constructions().Spawn(token,*invoked);
-        },
-        [](Adapter* adapter, std::uint64_t token) noexcept -> KeelResult {
-            return adapter ? static_cast<Cs2*>(adapter)->Constructions().Cancel(token) : KEEL_RESULT_INVALID_ARGUMENT;
-        },
-        [](Adapter* adapter, std::uint64_t token, const char* name, KeelEntityAccessCallback callback, void* data) noexcept -> KeelResult {
-            if (!adapter) return KEEL_RESULT_INVALID_ARGUMENT;
-            return static_cast<Cs2*>(adapter)->Constructions().Visit(token,name,callback,data);
-        }};
+    *api = {sizeof(*api),
+            version,
+            [](Adapter* adapter) noexcept -> KeelResult
+            {
+                if (!adapter)
+                    return KEEL_RESULT_INVALID_ARGUMENT;
+
+                try
+                {
+                    return static_cast<Cs2*>(adapter)->Ready();
+                }
+                catch (...)
+                {
+                    return KEEL_RESULT_ENGINE_FAILURE;
+                }
+            },
+            [](Adapter* adapter, const char* name, std::uint64_t* token, Identity* identity) noexcept -> KeelResult
+            {
+                if (token)
+                    *token = 0;
+
+                if (identity)
+                    *identity = {};
+
+                if (!adapter || !name || !token || !identity)
+                    return KEEL_RESULT_INVALID_ARGUMENT;
+
+                return static_cast<Cs2*>(adapter)->Constructions().Create(name, *token, *identity);
+            },
+            [](Adapter* adapter, std::uint64_t token, Identity* identity) noexcept -> KeelResult
+            {
+                if (identity)
+                    *identity = {};
+
+                if (!adapter || !identity)
+                    return KEEL_RESULT_INVALID_ARGUMENT;
+
+                return static_cast<Cs2*>(adapter)->Constructions().Describe(token, *identity);
+            },
+            [](Adapter* adapter, std::uint64_t token, const KeelEntityKeyValue* value) noexcept -> KeelResult
+            {
+                if (!adapter || !value)
+                    return KEEL_RESULT_INVALID_ARGUMENT;
+
+                return static_cast<Cs2*>(adapter)->Constructions().Set(token, *value);
+            },
+            [](Adapter* adapter, std::uint64_t token, const KeelEntityTeleport* request) noexcept -> KeelResult
+            {
+                if (!adapter || !request)
+                    return KEEL_RESULT_INVALID_ARGUMENT;
+
+                return static_cast<Cs2*>(adapter)->Constructions().Teleport(token, *request);
+            },
+            [](Adapter* adapter, std::uint64_t token, KeelBool* invoked) noexcept -> KeelResult
+            {
+                if (invoked)
+                    *invoked = KEEL_FALSE;
+
+                if (!adapter || !invoked)
+                    return KEEL_RESULT_INVALID_ARGUMENT;
+
+                return static_cast<Cs2*>(adapter)->Constructions().Spawn(token, *invoked);
+            },
+            [](Adapter* adapter, std::uint64_t token) noexcept -> KeelResult
+            {
+                return adapter ? static_cast<Cs2*>(adapter)->Constructions().Cancel(token)
+                               : KEEL_RESULT_INVALID_ARGUMENT;
+            },
+            [](Adapter* adapter,
+               std::uint64_t token,
+               const char* name,
+               KeelEntityAccessCallback callback,
+               void* data) noexcept -> KeelResult
+            {
+                if (!adapter)
+                    return KEEL_RESULT_INVALID_ARGUMENT;
+
+                return static_cast<Cs2*>(adapter)->Constructions().Visit(token, name, callback, data);
+            }};
+
     return KEEL_RESULT_OK;
 }

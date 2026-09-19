@@ -7,9 +7,11 @@ _Static_assert(sizeof(KeelSource2RuntimeApi) == 32, "runtime API layout changed"
 _Static_assert(
     offsetof(KeelSource2RuntimeApi, server_command) == 8,
     "server command offset changed");
+
 _Static_assert(
     offsetof(KeelSource2RuntimeApi, client_console_print) == 16,
     "client console offset changed");
+
 _Static_assert(
     offsetof(KeelSource2RuntimeApi, find_user_message) == 24,
     "user message offset changed");

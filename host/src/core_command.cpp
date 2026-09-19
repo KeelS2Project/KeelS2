@@ -41,59 +41,76 @@ bool Host::DeferPluginCommand(std::string_view operation, std::string_view selec
 {
     if (dispatching_deferred_plugin_commands_ || !keelhook_)
         return false;
+
     const bool bulk = operation == "refresh" || operation == "unload_all";
     PluginRecord* plugin{};
+
     if (bulk)
     {
         const auto target = std::find_if(plugins_.begin(), plugins_.end(), [this](const auto& item) {
             return keelhook_->OnCurrentTarget(item->handle);
         });
+
         if (target == plugins_.end())
             return false;
+
         plugin = target->get();
     }
     else
     {
         plugin = SelectPlugin(selector);
+
         if (!plugin)
             return true;
+
         if (!keelhook_->OnCurrentTarget(plugin->handle))
             return false;
     }
+
     if (!lifecycle_)
     {
         const void* service{};
         const KeelResult connected = QueryService(plugin->handle,
             KEELS2_LIFECYCLE_SERVICE_NAME, KEELS2_LIFECYCLE_API_VERSION, &service);
+
         if (connected != KEEL_RESULT_OK)
         {
             Write(KEEL_LOG_ERROR, "plugin command could not connect to the lifecycle service");
             return true;
         }
     }
+
     if (lifecycle_->EnsureEvent(KEELS2_LIFECYCLE_GAME_FRAME) != KEEL_RESULT_OK)
     {
         Write(KEEL_LOG_ERROR, "plugin command could not install the deferred game-frame dispatch");
         return true;
     }
+
     if (deferred_plugin_commands_.size() >= 32)
     {
         Write(KEEL_LOG_ERROR, "deferred plugin command queue is full");
         return true;
     }
+
     deferred_plugin_commands_.emplace_back(bulk ? 0 : plugin->handle, operation);
-    Write(KEEL_LOG_INFO, "plugin " + std::string(operation) + " queued for the next game frame after the current hook: " + plugin->name);
+    Write(KEEL_LOG_INFO,
+          "plugin " + std::string(operation) +
+              " queued for the next game frame after the current hook: " + plugin->name);
+
     return true;
 }
 
 void Host::DispatchDeferredPluginCommands()
 {
     std::unique_lock lock(state_mutex_);
+
     if (!accepting_resources_ || deferred_plugin_commands_.empty() || dispatching_deferred_plugin_commands_)
         return;
+
     auto pending = std::move(deferred_plugin_commands_);
     deferred_plugin_commands_.clear();
     dispatching_deferred_plugin_commands_ = true;
+
     try
     {
         for (const auto& [handle, operation] : pending)
@@ -103,18 +120,23 @@ void Host::DispatchDeferredPluginCommands()
                 RefreshPluginsCommand(lock);
                 continue;
             }
+
             if (operation == "unload_all")
             {
                 UnloadAllPluginsCommand(lock);
                 continue;
             }
+
             PluginRecord* plugin = PluginByHandle(handle);
+
             if (!plugin)
             {
                 Write(KEEL_LOG_ERROR, "deferred plugin command target no longer exists");
                 continue;
             }
+
             const auto selector = PluginDisplayId(plugin);
+
             if (operation == "reload")
                 ReloadPluginCommand(selector, lock);
             else if (operation == "unload")
@@ -126,6 +148,7 @@ void Host::DispatchDeferredPluginCommands()
         dispatching_deferred_plugin_commands_ = false;
         throw;
     }
+
     dispatching_deferred_plugin_commands_ = false;
 }
 
@@ -134,9 +157,11 @@ void Host::DispatchClientCommand(
     std::int32_t slot)
 {
     std::vector<std::string> lines;
+
     if (invocation.argument_count == 1 && invocation.arguments && invocation.arguments[0])
     {
         const std::string_view command(invocation.arguments[0]);
+
         if (EqualInsensitive(command, "plugins"))
         {
             lines = PluginListLines(true);
@@ -150,6 +175,7 @@ void Host::DispatchClientCommand(
             lines = VersionLines();
         }
     }
+
     if (lines.empty())
     {
         lines = {
@@ -160,9 +186,11 @@ void Host::DispatchClientCommand(
             "  version  - Version and build details",
         };
     }
+
     for (const std::string& line : lines)
     {
         std::string error;
+
         if (adapter_->ClientConsolePrint(slot, (line + "\n").c_str(), error) != KEEL_RESULT_OK)
         {
             break;
@@ -179,6 +207,7 @@ void Host::DispatchCoreCommand(
         ShowMainMenu();
         return;
     }
+
     if (!invocation.arguments || !invocation.arguments[0])
     {
         Write(KEEL_LOG_ERROR, "invalid keel command arguments");
@@ -186,6 +215,7 @@ void Host::DispatchCoreCommand(
     }
 
     const std::string_view command(invocation.arguments[0]);
+
     if (EqualInsensitive(command, "help"))
     {
         if (invocation.argument_count == 1)
@@ -200,8 +230,10 @@ void Host::DispatchCoreCommand(
         {
             Write(KEEL_LOG_ERROR, "unknown help topic");
         }
+
         return;
     }
+
     if (EqualInsensitive(command, "plugins"))
     {
         if (invocation.argument_count == 1)
@@ -209,12 +241,15 @@ void Host::DispatchCoreCommand(
             ShowPluginsMenu();
             return;
         }
+
         if (!invocation.arguments[1])
         {
             Write(KEEL_LOG_ERROR, "invalid plugins subcommand");
             return;
         }
+
         const std::string_view subcommand(invocation.arguments[1]);
+
         if (bulk_plugin_operation_ && !EqualInsensitive(subcommand, "list") &&
             !EqualInsensitive(subcommand, "info") && !EqualInsensitive(subcommand, "cmds") &&
             !EqualInsensitive(subcommand, "cvars"))
@@ -222,6 +257,7 @@ void Host::DispatchCoreCommand(
             Write(KEEL_LOG_ERROR, "A plugin management operation is already active.");
             return;
         }
+
         if (EqualInsensitive(subcommand, "list"))
         {
             if (invocation.argument_count == 2)
@@ -256,6 +292,7 @@ void Host::DispatchCoreCommand(
             else if (invocation.argument_count == 3 && invocation.arguments[2])
             {
                 PluginRecord* plugin = SelectPlugin(invocation.arguments[2]);
+
                 if (plugin)
                 {
                     if (EqualInsensitive(subcommand, "cvars"))
@@ -273,8 +310,10 @@ void Host::DispatchCoreCommand(
         {
             const bool refresh = EqualInsensitive(subcommand, "refresh");
             const std::string operation = refresh ? "refresh" : "unload_all";
+
             if (invocation.argument_count != 2)
                 WriteUsage("keel plugins " + operation);
+
             else if (!DeferPluginCommand(operation, {}))
             {
                 if (refresh)
@@ -355,8 +394,10 @@ void Host::DispatchCoreCommand(
         {
             Write(KEEL_LOG_ERROR, "unknown or incomplete plugins subcommand; use keel plugins");
         }
+
         return;
     }
+
     if (EqualInsensitive(command, "inspect"))
     {
         if (invocation.argument_count == 1)
@@ -391,8 +432,10 @@ void Host::DispatchCoreCommand(
         {
             WriteUsage("keel inspect [hooks|interfaces|services|resources|profile]");
         }
+
         return;
     }
+
     if (EqualInsensitive(command, "version") && invocation.argument_count == 1)
     {
         ShowVersion();
@@ -443,7 +486,9 @@ void Host::ShowHookInspection()
     const auto snapshots = keelhook_
         ? keelhook_->Snapshots()
         : std::vector<KeelHookService::TargetSnapshot>{};
+
     WriteLine("Hook targets: " + std::to_string(snapshots.size()));
+
     for (const auto& target : snapshots)
     {
         std::ostringstream address;
@@ -464,6 +509,7 @@ void Host::ShowHookInspection()
             (target.physical_intact ? "intact" : "changed") + " closure=" + closure.str() +
             " slot=" + slot.str() + " installed=" + installed.str() + " active=" +
             std::to_string(target.active) + " module=" + target.module_path);
+
         for (const auto& callback : target.callbacks)
         {
             WriteLine(
@@ -475,6 +521,7 @@ void Host::ShowHookInspection()
                 std::to_string(callback.active));
         }
     }
+
     WriteLine("Hook inspection complete");
 }
 
@@ -487,10 +534,13 @@ void Host::ShowInterfaceInspection()
             WriteLine(line);
         }
     }
+
     const auto snapshots = adapter_
         ? adapter_->InterfaceSnapshots()
         : std::vector<GameInterfaceSnapshot>{};
+
     WriteLine("Source 2 interfaces: " + std::to_string(snapshots.size()));
+
     for (const auto& interface : snapshots)
     {
         WriteLine(
@@ -517,14 +567,18 @@ void Host::ShowServiceInspection()
         "keelhook v5"
     };
     WriteLine("Built-in services: " + std::to_string(builtins.size()));
+
     for (const char* service : builtins)
     {
         WriteLine("  " + std::string(service) + " owner=host");
     }
+
     const auto published = published_services_
         ? published_services_->Snapshots()
         : std::vector<PublishedServiceRegistry::Snapshot>{};
+
     WriteLine("Published services: " + std::to_string(published.size()));
+
     for (const auto& service : published)
     {
         WriteLine(
@@ -538,15 +592,18 @@ void Host::ShowResourceInspection()
 {
     std::vector<const CommandRecord*> commands;
     commands.reserve(commands_.size());
+
     for (const auto& [handle, command] : commands_)
     {
         static_cast<void>(handle);
         commands.push_back(command.get());
     }
+
     std::sort(commands.begin(), commands.end(), [](const auto* left, const auto* right) {
         return left->name < right->name;
     });
     WriteLine("Commands: " + std::to_string(commands.size()));
+
     for (const CommandRecord* command : commands)
     {
         WriteLine(
@@ -554,10 +611,13 @@ void Host::ShowResourceInspection()
             " enabled=" +
             (command->enabled.load(std::memory_order_acquire) ? "yes" : "no"));
     }
+
     const auto convars = convars_
         ? convars_->Snapshots()
         : std::vector<ConVarService::Snapshot>{};
+
     WriteLine("ConVars: " + std::to_string(convars.size()));
+
     for (const auto& convar : convars)
     {
         WriteLine(
@@ -619,6 +679,7 @@ void Host::ShowStatus()
     std::size_t paused{};
     std::size_t invalid{};
     std::size_t failed{};
+
     for (const auto& plugin : plugins_)
     {
         if (plugin->state == PluginState::loading)
@@ -642,19 +703,33 @@ void Host::ShowStatus()
             ++failed;
         }
     }
+
     const std::size_t plugin_commands = static_cast<std::size_t>(std::count_if(
         commands_.begin(), commands_.end(), [](const auto& entry) {
             return entry.second->owner != 0;
         }
     ));
     std::string state;
+
     switch (state_)
     {
-        case HostState::starting: state = "starting"; break;
-        case HostState::running: state = "running"; break;
-        case HostState::stopping: state = "stopping"; break;
-        case HostState::stopped: state = "stopped"; break;
+    case HostState::starting:
+        state = "starting";
+        break;
+
+    case HostState::running:
+        state = "running";
+        break;
+
+    case HostState::stopping:
+        state = "stopping";
+        break;
+
+    case HostState::stopped:
+        state = "stopped";
+        break;
     }
+
     WriteLine("KeelS2 status: " + state);
     WriteLine("Game: " + game_ + " " + game_version_ + " (" + platform_ + ")");
     WriteLine("Profile: " + compatibility_profile_);
@@ -687,6 +762,7 @@ void Host::ShowPluginList()
 std::vector<std::string> Host::PluginListLines(bool active_only) const
 {
     std::vector<std::string> lines;
+
     for (const auto* plugin : KnownPlugins())
     {
         if (active_only && (plugin->state != PluginState::loaded || !plugin->selectable ||
@@ -695,23 +771,29 @@ std::vector<std::string> Host::PluginListLines(bool active_only) const
         {
             continue;
         }
+
         std::string label = plugin->name.empty() ? plugin->path.filename().string() : plugin->name;
         std::string line = "  [" + PluginDisplayId(plugin) + "] " + label;
+
         if (!plugin->version.empty())
         {
             line += " (" + plugin->version + ")";
         }
+
         if (!plugin->author.empty())
         {
             line += " by " + plugin->author;
         }
+
         line += " - ";
         line += PluginStateLabel(plugin->state);
         lines.push_back(std::move(line));
     }
+
     const std::string heading = active_only
         ? (lines.empty() ? "No active plugins." : "Listing " + std::to_string(lines.size()) + " active plugins:")
         : "Listing " + std::to_string(lines.size()) + " plugins:";
+
     lines.insert(lines.begin(), heading);
     return lines;
 }
@@ -719,12 +801,15 @@ std::vector<std::string> Host::PluginListLines(bool active_only) const
 void Host::ShowPluginInfo(std::string_view selector)
 {
     PluginRecord* plugin = SelectPlugin(selector);
+
     if (!plugin)
     {
         return;
     }
+
     WriteLine("Plugin [" + PluginDisplayId(plugin) + "]");
     WriteLine("  State: " + std::string(PluginStateLabel(plugin->state)));
+
     if (!plugin->name.empty())
     {
         WriteLine("  Name: " + plugin->name);
@@ -733,9 +818,12 @@ void Host::ShowPluginInfo(std::string_view selector)
         WriteLine("  Description: " + (plugin->description.empty() ? std::string("none") : plugin->description));
         WriteLine("  Commands: " + std::to_string(PluginCommandCount(plugin->handle)));
     }
+
     WriteLine("  File: " + plugin->path.filename().string());
+
     if (plugin->state == PluginState::disabled)
         WriteLine("  Use keel plugins load " + plugin->path.filename().string() + " to enable it.");
+
     if (plugin->state == PluginState::invalid || plugin->state == PluginState::error)
     {
         WriteLine("  Diagnostic: " + plugin->diagnostic);
@@ -745,6 +833,7 @@ void Host::ShowPluginInfo(std::string_view selector)
 void Host::ShowPluginCommands(const PluginRecord* plugin)
 {
     std::vector<const CommandRecord*> matches;
+
     for (const auto& entry : commands_)
     {
         if (entry.second->owner != 0 && (!plugin || entry.second->owner == plugin->handle))
@@ -752,9 +841,11 @@ void Host::ShowPluginCommands(const PluginRecord* plugin)
             matches.push_back(entry.second.get());
         }
     }
+
     std::sort(matches.begin(), matches.end(), [](const auto* left, const auto* right) {
         return left->name < right->name;
     });
+
     if (plugin)
     {
         WriteLine("Commands for [" + PluginDisplayId(plugin) + "] " + plugin->name + ":");
@@ -763,18 +854,22 @@ void Host::ShowPluginCommands(const PluginRecord* plugin)
     {
         WriteLine("Listing " + std::to_string(matches.size()) + " plugin commands:");
     }
+
     for (const CommandRecord* command : matches)
     {
         const PluginRecord* owner = PluginByHandle(command->owner);
         std::string line = "  " + command->name;
+
         if (!command->description.empty())
         {
             line += " - " + command->description;
         }
+
         if (!plugin && owner)
         {
             line += " [" + PluginDisplayId(owner) + "]";
         }
+
         WriteLine(line);
     }
 }
@@ -788,18 +883,23 @@ void Host::ShowPluginConVars(const PluginRecord* plugin)
     std::sort(matches.begin(), matches.end(), [](const auto& left, const auto& right) {
         return left.name < right.name;
     });
+
     if (plugin)
         WriteLine("ConVars for [" + PluginDisplayId(plugin) + "] " + plugin->name + ":");
     else
         WriteLine("Listing " + std::to_string(matches.size()) + " plugin ConVars:");
+
     for (const auto& convar : matches)
     {
         const auto* owner = PluginByHandle(convar.owner);
         std::string line = "  " + convar.name;
+
         if (!plugin && owner)
             line += " [" + PluginDisplayId(owner) + "] " + owner->name;
+
         if (!convar.enabled)
             line += " (inactive)";
+
         WriteLine(line);
     }
 }

@@ -11,7 +11,12 @@ KeelResult ResolvePlayerManagement(const platform::LoadedModule& module,
 {
     bindings = {};
     error.clear();
-    struct Entry { std::uintptr_t rva; std::array<unsigned char, 16> bytes; };
+
+    struct Entry
+    {
+        std::uintptr_t rva;
+        std::array<unsigned char, 16> bytes;
+    };
 #if defined(_WIN32)
     constexpr const char* supported = "cs2-25218825-win64-33042584-2212b672d2410a30";
     constexpr platform::FileFingerprint expected{33042584, 0x2212b672d2410a30ull};
@@ -38,26 +43,34 @@ KeelResult ResolvePlayerManagement(const platform::LoadedModule& module,
         error = "player management is unavailable for this compatibility profile";
         return KEEL_RESULT_UNSUPPORTED;
     }
+
     platform::FileFingerprint fingerprint;
+
     if (!platform::FingerprintFile(module.path, fingerprint, error))
         return KEEL_RESULT_INCOMPATIBLE;
+
     if (fingerprint != expected)
     {
         error = "player management server fingerprint changed";
         return KEEL_RESULT_INCOMPATIBLE;
     }
+
     std::array<void*, entries.size()> addresses{};
     const auto base = reinterpret_cast<std::uintptr_t>(module.base);
+
     for (std::size_t index = 0; index < entries.size(); ++index)
     {
         const auto& entry = entries[index];
+
         if (!base || entry.rva > UINTPTR_MAX - base ||
             entry.bytes.size() - 1 > UINTPTR_MAX - base - entry.rva)
         {
             error = "player management address is outside the module";
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         void* address = reinterpret_cast<void*>(base + entry.rva);
+
         for (std::size_t offset = 0; offset < entry.bytes.size(); ++offset)
         {
             if (!platform::IsExecutableAddress(module, reinterpret_cast<void*>(base + entry.rva + offset)))
@@ -66,21 +79,28 @@ KeelResult ResolvePlayerManagement(const platform::LoadedModule& module,
                 return KEEL_RESULT_INCOMPATIBLE;
             }
         }
+
         if (std::memcmp(address, entry.bytes.data(), entry.bytes.size()) != 0)
         {
             error = "player management code does not match the compatibility profile";
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         addresses[index] = address;
     }
+
     void** table{};
-    if (platform::FindPrimaryVtable(module, "CCSPlayerController", respawn_slot + 1, table, error) != platform::ModuleLookup::found)
+
+    if (platform::FindPrimaryVtable(module, "CCSPlayerController", respawn_slot + 1, table, error) !=
+        platform::ModuleLookup::found)
         return KEEL_RESULT_INCOMPATIBLE;
+
     if (table[change_slot] != addresses[0] || table[respawn_slot] != addresses[2])
     {
         error = "player management virtual methods do not match the compatibility profile";
         return KEEL_RESULT_INCOMPATIBLE;
     }
+
     bindings = {table, addresses[0], addresses[1], addresses[2], addresses[3]};
     return KEEL_RESULT_OK;
 }

@@ -23,23 +23,31 @@ execute_process(
     RESULT_VARIABLE monitor_result
     TIMEOUT 60
 )
+
 if(NOT monitor_result EQUAL 0)
     message(FATAL_ERROR "Windows crash monitor returned ${monitor_result}")
 endif()
+
 if(NOT EXISTS "${pid_file}" OR NOT EXISTS "${result_file}" OR NOT EXISTS "${dump_file}")
     message(FATAL_ERROR "Windows crash monitor did not produce every contract artifact")
 endif()
+
 file(SIZE "${dump_file}" dump_size)
+
 if(dump_size LESS 1024)
     message(FATAL_ERROR "Windows crash monitor produced an invalid ${dump_size}-byte dump")
 endif()
+
 file(READ "${result_file}" result_text)
+
 if(NOT result_text MATCHES "UNHANDLED_EXCEPTION_CODE: 0xe0424b53")
     message(FATAL_ERROR "Windows crash monitor did not record the contract exception:\n${result_text}")
 endif()
+
 if(NOT result_text MATCHES "DUMP: written")
     message(FATAL_ERROR "Windows crash monitor did not report a written dump:\n${result_text}")
 endif()
+
 if(NOT result_text MATCHES "MONITOR: complete")
     message(FATAL_ERROR "Windows crash monitor did not complete:\n${result_text}")
 endif()

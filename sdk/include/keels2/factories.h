@@ -53,11 +53,14 @@ typedef struct KeelFactoriesApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*subscribe)(KeelPluginHandle plugin,
         const KeelFactorySubscriptionSpec* spec,
         KeelFactorySubscriptionHandle* subscription);
+
     KeelResult (*unsubscribe)(KeelPluginHandle plugin,
         KeelFactorySubscriptionHandle subscription);
+
     KeelResult (*query_original)(KeelPluginHandle plugin,
         KeelSource2Factory factory, const char* interface_name,
         KeelFactoryResult* result);

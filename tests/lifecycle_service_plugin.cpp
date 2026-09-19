@@ -47,19 +47,23 @@ void OnLifecycle(const KeelLifecycleEvent* event, void*)
         Log("[Lifecycle Test] invalid event envelope");
         return;
     }
+
     if (g_loading.load(std::memory_order_acquire))
     {
         Log("[Lifecycle Test] callback entered during load");
         return;
     }
+
     const std::size_t index = event->type - 1;
     g_callback_counts[index].fetch_add(1, std::memory_order_relaxed);
+
     if (event->type == KEELS2_LIFECYCLE_GAME_FRAME &&
         g_block_armed.exchange(false, std::memory_order_acq_rel))
     {
         g_block_entered.store(true, std::memory_order_release);
         g_block_entered.notify_all();
         bool released = g_block_release.load(std::memory_order_acquire);
+
         while (!released)
         {
             g_block_release.wait(released, std::memory_order_acquire);
@@ -71,6 +75,7 @@ void OnLifecycle(const KeelLifecycleEvent* event, void*)
         event->payload_size == sizeof(KeelLifecycleGameFrame) && !g_seen[index])
     {
         const auto* payload = static_cast<const KeelLifecycleGameFrame*>(event->payload);
+
         if (payload->size == sizeof(KeelLifecycleGameFrame))
         {
             g_seen[index] = true;
@@ -79,6 +84,7 @@ void OnLifecycle(const KeelLifecycleEvent* event, void*)
     }
 #else
     bool valid{};
+
     switch (event->type)
     {
         case KEELS2_LIFECYCLE_GAME_FRAME:
@@ -87,8 +93,10 @@ void OnLifecycle(const KeelLifecycleEvent* event, void*)
             valid = event->payload_size == sizeof(*payload) && payload->size == sizeof(*payload) &&
                 payload->simulating == KEEL_TRUE && payload->first_tick == KEEL_FALSE &&
                 payload->last_tick == KEEL_TRUE;
+
             break;
         }
+
         case KEELS2_LIFECYCLE_CLIENT_CONNECTED:
         {
             const auto* payload = static_cast<const KeelLifecycleClientConnected*>(event->payload);
@@ -97,16 +105,20 @@ void OnLifecycle(const KeelLifecycleEvent* event, void*)
                 Text(payload->name, "Keel") && Text(payload->network_id, "STEAM_1:0:2") &&
                 Text(payload->address, "127.0.0.1:27005") && payload->fake_player == KEEL_FALSE &&
                 payload->reserved == 0;
+
             break;
         }
+
         case KEELS2_LIFECYCLE_CLIENT_PUT_IN_SERVER:
         {
             const auto* payload = static_cast<const KeelLifecycleClientPutInServer*>(event->payload);
             valid = event->payload_size == sizeof(*payload) && payload->size == sizeof(*payload) &&
                 payload->slot == 4 && payload->xuid == 76561198000000004ull &&
                 Text(payload->name, "Keel") && payload->client_type == 0 && payload->reserved == 0;
+
             break;
         }
+
         case KEELS2_LIFECYCLE_CLIENT_ACTIVE:
         {
             const auto* payload = static_cast<const KeelLifecycleClientActive*>(event->payload);
@@ -114,15 +126,19 @@ void OnLifecycle(const KeelLifecycleEvent* event, void*)
                 payload->slot == 4 && payload->xuid == 76561198000000004ull &&
                 Text(payload->name, "Keel") && payload->load_game == KEEL_FALSE &&
                 payload->reserved == 0;
+
             break;
         }
+
         case KEELS2_LIFECYCLE_CLIENT_FULLY_CONNECTED:
         {
             const auto* payload = static_cast<const KeelLifecycleClientFullyConnected*>(event->payload);
             valid = event->payload_size == sizeof(*payload) && payload->size == sizeof(*payload) &&
                 payload->slot == 4;
+
             break;
         }
+
         case KEELS2_LIFECYCLE_CLIENT_DISCONNECTING:
         {
             const auto* payload = static_cast<const KeelLifecycleClientDisconnecting*>(event->payload);
@@ -130,23 +146,29 @@ void OnLifecycle(const KeelLifecycleEvent* event, void*)
                 payload->slot == 4 && payload->xuid == 76561198000000004ull &&
                 Text(payload->name, "Keel") && Text(payload->network_id, "STEAM_1:0:2") &&
                 payload->reason == 39 && payload->reserved == 0;
+
             break;
         }
+
         case KEELS2_LIFECYCLE_CLIENT_SETTINGS_CHANGED:
         {
             const auto* payload = static_cast<const KeelLifecycleClientSettingsChanged*>(event->payload);
             valid = event->payload_size == sizeof(*payload) && payload->size == sizeof(*payload) &&
                 payload->slot == 4;
+
             break;
         }
+
         default:
             break;
     }
+
     if (!valid)
     {
         Log("[Lifecycle Test] invalid event payload");
         return;
     }
+
     if (!g_seen[index])
     {
         g_seen[index] = true;
@@ -172,10 +194,12 @@ void OnSecondGameFrame(const KeelLifecycleEvent* event, void*)
         Log("[Lifecycle Test] registration order failed");
         return;
     }
+
     if (!g_order_seen)
     {
         g_order_seen = true;
         Log("[Lifecycle Test] registration order passed");
+
         if (!g_lifecycle ||
             g_lifecycle->unsubscribe(g_plugin, g_order_subscription) != KEEL_RESULT_BUSY)
         {
@@ -206,6 +230,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Query(
     {
         return KEEL_FALSE;
     }
+
     *info = {
         sizeof(KeelPluginInfo),
         KEELS2_PLUGIN_ABI_VERSION,
@@ -226,16 +251,19 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     g_host = api;
     g_plugin = plugin;
     g_lifecycle = nullptr;
     g_subscriptions = {};
     g_order_subscription = 0;
     g_seen = {};
+
     for (auto& count : g_callback_counts)
     {
         count.store(0, std::memory_order_relaxed);
     }
+
     g_order_seen = false;
     g_block_armed.store(false, std::memory_order_release);
     g_block_entered.store(false, std::memory_order_release);
@@ -243,6 +271,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     g_loading.store(true, std::memory_order_release);
 
     const void* raw{};
+
     if (api->query_service(
             plugin,
             KEELS2_LIFECYCLE_SERVICE_NAME,
@@ -251,6 +280,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     if (api->query_service(
             plugin,
             KEELS2_LIFECYCLE_SERVICE_NAME,
@@ -259,13 +289,16 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     const auto* lifecycle = static_cast<const KeelLifecycleApi*>(raw);
+
     if (lifecycle->size != sizeof(KeelLifecycleApi) ||
         lifecycle->api_version != KEELS2_LIFECYCLE_API_VERSION ||
         !lifecycle->subscribe || !lifecycle->unsubscribe)
     {
         return KEEL_FALSE;
     }
+
     g_lifecycle = lifecycle;
 
     KeelLifecycleSubscriptionSpec invalid{
@@ -276,12 +309,15 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
         nullptr
     };
     KeelLifecycleSubscriptionHandle temporary{};
+
     if (lifecycle->subscribe(plugin, &invalid, &temporary) != KEEL_RESULT_INVALID_ARGUMENT || temporary)
     {
         return KEEL_FALSE;
     }
+
     invalid.size = sizeof(invalid);
     invalid.event = KEELS2_LIFECYCLE_CLIENT_SETTINGS_CHANGED + 1;
+
     if (lifecycle->subscribe(plugin, &invalid, &temporary) != KEEL_RESULT_INVALID_ARGUMENT || temporary)
     {
         return KEEL_FALSE;
@@ -294,6 +330,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
         &OnRemovedSubscription,
         nullptr
     };
+
     if (lifecycle->subscribe(plugin, &temporary_spec, &temporary) != KEEL_RESULT_OK || !temporary ||
         lifecycle->unsubscribe(plugin + 1, temporary) != KEEL_RESULT_NOT_FOUND ||
         lifecycle->unsubscribe(plugin, temporary) != KEEL_RESULT_OK ||
@@ -316,6 +353,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
             &OnLifecycle,
             nullptr
         };
+
         if (lifecycle->subscribe(plugin, &spec, &g_subscriptions[index]) != KEEL_RESULT_OK ||
             !g_subscriptions[index])
         {
@@ -330,6 +368,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
         &OnSecondGameFrame,
         nullptr
     };
+
     if (lifecycle->subscribe(plugin, &order_spec, &g_order_subscription) != KEEL_RESULT_OK ||
         !g_order_subscription)
     {
@@ -338,6 +377,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
 #endif
 #if !defined(KEELS2_LIFECYCLE_LIVE)
     const void* source2_raw{};
+
     if (api->query_service(
             plugin,
             KEELS2_SOURCE2_SERVICE_NAME,
@@ -346,15 +386,18 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     const auto* source2 = static_cast<const KeelSource2Api*>(source2_raw);
     KeelSource2InterfaceInfo server{};
     server.size = sizeof(server);
+
     if (!source2->query_interface ||
         source2->query_interface(plugin, KEELS2_SOURCE2_CAPABILITY_SERVER, &server) != KEEL_RESULT_OK ||
         !server.instance)
     {
         return KEEL_FALSE;
     }
+
     void* address = (*static_cast<void***>(server.instance))[19];
     using GameFrameFunction = void (*)(void*, bool, bool, bool);
     GameFrameFunction game_frame{};
@@ -365,11 +408,13 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     g_loading.store(false, std::memory_order_release);
     Log("[Lifecycle Test] loaded");
     const char* fail_load = std::getenv("KEELS2_TEST_LIFECYCLE_FAIL_LOAD");
+
     if (fail_load && std::strcmp(fail_load, "1") == 0)
     {
         Log("[Lifecycle Test] rejecting load after staged subscriptions");
         return KEEL_FALSE;
     }
+
     return KEEL_TRUE;
 }
 

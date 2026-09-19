@@ -14,10 +14,12 @@ int main(int argument_count, char** arguments)
     const std::filesystem::path path = arguments[1];
     {
         std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+
         if (!stream)
         {
             return 2;
         }
+
         stream << "KeelS2 fingerprint fixture\n";
     }
 
@@ -26,6 +28,7 @@ int main(int argument_count, char** arguments)
     const bool fingerprinted = keels2::platform::FingerprintFile(path, fingerprint, error);
     std::error_code remove_error;
     std::filesystem::remove(path, remove_error);
+
     if (!fingerprinted || remove_error || fingerprint.size != 27 ||
         fingerprint.fnv1a64 != 0xcc9504a454c4f53aull ||
         keels2::platform::FormatFingerprint(fingerprint) != "size=27 fnv1a64=cc9504a454c4f53a")

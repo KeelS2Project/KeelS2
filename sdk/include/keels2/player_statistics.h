@@ -26,6 +26,7 @@ typedef struct KeelPlayerStatisticsApi
     KeelResult (*capabilities)(KeelPluginHandle plugin, uint32_t* readable, uint32_t* writable);
     /* Clears value on failure. */
     KeelResult (*read)(KeelPluginHandle plugin, KeelEntityHandle controller, uint32_t key, int32_t* value);
+
     KeelResult (*write)(KeelPluginHandle plugin, KeelEntityHandle controller, uint32_t key, int32_t value);
 } KeelPlayerStatisticsApi;
 #ifdef __cplusplus

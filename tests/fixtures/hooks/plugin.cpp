@@ -10,6 +10,7 @@ bool HooksPlugin::Load()
 
     auto* server = GetSource2Server<IServerGameDLL>();
     auto* clients = GetSource2GameClients<IServerGameClients>();
+
     if (!server || !clients ||
         !HookPre(
             server,
@@ -38,6 +39,7 @@ bool HooksPlugin::Load()
 
     LogMessage(
         "ready hooks=GameFrame,ClientConnect,ClientCommand,ClientDisconnect");
+
     return true;
 }
 
@@ -55,6 +57,7 @@ PluginResult HooksPlugin::GameFramePre(
             firstTick,
             lastTick);
     }
+
     return plugin_continue;
 }
 
@@ -65,6 +68,7 @@ PluginResult HooksPlugin::GameFramePost(bool, bool, bool)
         gameFramePostLogged = true;
         LogMessage("GameFrame post");
     }
+
     return plugin_continue;
 }
 
@@ -88,6 +92,7 @@ PluginResult HooksPlugin::ClientConnectPost(
             networkId,
             unknown);
     }
+
     return plugin_continue;
 }
 
@@ -99,11 +104,13 @@ PluginResult HooksPlugin::ClientCommandPre(
     {
         return plugin_continue;
     }
+
     clientCommandLogged = true;
     LogMessage(
         "ClientCommand pre slot={} verb={}",
         slot.Get(),
         command.ArgC() > 0 ? command[0] : "");
+
     return plugin_continue;
 }
 
@@ -118,6 +125,7 @@ PluginResult HooksPlugin::ClientDisconnectPre(
     {
         return plugin_continue;
     }
+
     clientDisconnectLogged = true;
     LogMessage(
         "ClientDisconnect pre slot={} name={} xuid={} network_id={} reason={}",
@@ -126,6 +134,7 @@ PluginResult HooksPlugin::ClientDisconnectPre(
         xuid,
         networkId,
         reason);
+
     return plugin_continue;
 }
 

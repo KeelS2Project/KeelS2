@@ -13,18 +13,22 @@ int main(int argument_count, char** arguments)
     }
 
     int result{};
+
     for (int index = 1; index < argument_count; ++index)
     {
         const std::filesystem::path path = arguments[index];
         keels2::platform::FileFingerprint fingerprint;
         std::string error;
+
         if (!keels2::platform::FingerprintFile(path, fingerprint, error))
         {
             std::cerr << path.string() << ": " << error << '\n';
             result = 2;
             continue;
         }
+
         std::cout << path.string() << ": " << keels2::platform::FormatFingerprint(fingerprint) << '\n';
     }
+
     return result;
 }

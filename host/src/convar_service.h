@@ -49,6 +49,7 @@ public:
     KeelResult ReleasePlugin(KeelPluginHandle plugin);
     bool Shutdown();
     std::vector<Snapshot> Snapshots() const;
+
     KeelResult CreateNative(
         KeelPluginHandle plugin,
         const KeelConVarSpec* spec,
@@ -56,56 +57,70 @@ public:
         void* user_data,
         KeelConVarHandle* convar,
         void** native_convar);
+
     KeelResult FindNative(
         KeelPluginHandle plugin,
         const char* name,
         KeelConVarType expected_type,
         KeelConVarHandle* convar,
         void** native_convar);
+
     KeelResult ReleaseNative(KeelPluginHandle plugin, KeelConVarHandle convar);
 
 private:
     static KeelResult ObserveEntry(KeelPluginHandle plugin, KeelConVarHandle convar,
         KeelConVarChangeCallback callback, void* user_data);
+
     static void ObservedEntry(std::int32_t slot, const KeelConVarValue& current,
         const KeelConVarValue& previous, void* user_data);
+
     static KeelResult InvokeEntry(KeelPluginHandle plugin, KeelConVarHandle convar,
         KeelConVarAccessCallback callback, void* user_data);
+
     KeelResult Invoke(KeelPluginHandle plugin, KeelConVarHandle convar,
         KeelConVarAccessCallback callback, void* user_data,
         std::unique_lock<std::recursive_mutex>& host_lock);
+
     struct Definition;
+
     struct Record;
 
     static KeelResult CreateEntry(
         KeelPluginHandle plugin,
         const KeelConVarSpec* spec,
         KeelConVarHandle* convar);
+
     static KeelResult FindEntry(
         KeelPluginHandle plugin,
         const char* name,
         KeelConVarType expected_type,
         KeelConVarHandle* convar);
+
     static KeelResult ReleaseEntry(KeelPluginHandle plugin, KeelConVarHandle convar);
+
     static KeelResult ReadEntry(
         KeelPluginHandle plugin,
         KeelConVarHandle convar,
         std::int32_t slot,
         KeelConVarValue* value);
+
     static KeelResult QueueSetEntry(
         KeelPluginHandle plugin,
         KeelConVarHandle convar,
         std::int32_t slot,
         const KeelConVarValue* value);
+
     static KeelResult DescribeEntry(
         KeelPluginHandle plugin,
         KeelConVarHandle convar,
         KeelConVarInfo* info);
+
     static void ChangeEntry(
         std::int32_t slot,
         const KeelConVarValue& new_value,
         const KeelConVarValue& old_value,
         void* user_data);
+
     static void NativeChangeEntry(
         void* convar,
         std::int32_t slot,
@@ -117,6 +132,7 @@ private:
         KeelPluginHandle plugin,
         const KeelConVarSpec* spec,
         KeelConVarHandle* convar);
+
     KeelResult CreateImpl(
         KeelPluginHandle plugin,
         const KeelConVarSpec* spec,
@@ -125,37 +141,45 @@ private:
         void* user_data,
         KeelConVarHandle* convar,
         void** native_convar);
+
     KeelResult Find(
         KeelPluginHandle plugin,
         const char* name,
         KeelConVarType expected_type,
         KeelConVarHandle* convar);
+
     KeelResult FindImpl(
         KeelPluginHandle plugin,
         const char* name,
         KeelConVarType expected_type,
         KeelConVarHandle* convar,
         void** native_convar);
+
     KeelResult Release(KeelPluginHandle plugin, KeelConVarHandle convar);
+
     KeelResult Read(
         KeelPluginHandle plugin,
         KeelConVarHandle convar,
         std::int32_t slot,
         KeelConVarValue* value);
+
     KeelResult QueueSet(
         KeelPluginHandle plugin,
         KeelConVarHandle convar,
         std::int32_t slot,
         const KeelConVarValue* value);
+
     KeelResult Describe(
         KeelPluginHandle plugin,
         KeelConVarHandle convar,
         KeelConVarInfo* info);
+
     void Dispatch(
         Record& record,
         std::int32_t slot,
         const KeelConVarValue& new_value,
         const KeelConVarValue& old_value);
+
     void DispatchNative(
         Record& record,
         void* convar,
@@ -164,9 +188,11 @@ private:
         const void* old_value);
 
     KeelResult ReleaseRecord(const std::shared_ptr<Record>& record);
+
     std::shared_ptr<Record> OwnedRecord(
         KeelPluginHandle plugin,
         KeelConVarHandle convar) const;
+
     static bool ValidType(KeelConVarType type) noexcept;
     static bool ValidLookupName(const char* name) noexcept;
     static bool ValidValue(const KeelConVarValue& value, KeelConVarType type) noexcept;

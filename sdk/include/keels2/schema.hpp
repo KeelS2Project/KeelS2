@@ -49,6 +49,7 @@ constexpr KeelSchemaValueType ValueType() noexcept
 {
     using Type = std::remove_cv_t<Value>;
     static_assert(kSupportedValue<Type>);
+
     if constexpr (std::is_same_v<Type, char>)
     {
         return KEELS2_SCHEMA_CHAR;
@@ -137,6 +138,7 @@ public:
             static_cast<void>(Reset());
             MoveFrom(other);
         }
+
         return *this;
     }
 
@@ -152,6 +154,7 @@ public:
         {
             return KEEL_RESULT_OK;
         }
+
         if (!context_ ||
             !context_->accepting_resources.load(std::memory_order_acquire) ||
             !api_ || !api_->release_field)
@@ -159,12 +162,15 @@ public:
             Clear();
             return KEEL_RESULT_NOT_READY;
         }
+
         const KeelResult result = api_->release_field(context_->plugin, handle_);
+
         if (result == KEEL_RESULT_OK || result == KEEL_RESULT_NOT_FOUND ||
             result == KEEL_RESULT_NOT_READY)
         {
             Clear();
         }
+
         return result;
     }
 
@@ -248,17 +254,21 @@ public:
             KEELS2_SCHEMA_SERVICE_NAME,
             KEELS2_SCHEMA_API_VERSION,
             &raw);
+
         if (result != KEEL_RESULT_OK)
         {
             return result;
         }
+
         const auto* api = static_cast<const KeelSchemaApi*>(raw);
+
         if (!api || api->size != sizeof(KeelSchemaApi) ||
             api->api_version != KEELS2_SCHEMA_API_VERSION || !api->resolve_field ||
             !api->release_field || !api->describe_field)
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         context_ = context.State();
         api_ = api;
         return KEEL_RESULT_OK;
@@ -278,14 +288,17 @@ public:
     {
         static_assert(detail::kSupportedValue<Value>);
         static_cast<void>(output.Reset());
+
         if (!class_name || !class_name[0] || !field_name || !field_name[0])
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         if (!*this)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         const KeelSchemaFieldSpec spec{
             sizeof(KeelSchemaFieldSpec),
             KEELS2_SCHEMA_MODULE_SERVER,
@@ -296,13 +309,16 @@ public:
         };
         KeelSchemaFieldHandle handle{};
         KeelResult result = api_->resolve_field(context_->plugin, &spec, &handle);
+
         if (result != KEEL_RESULT_OK)
         {
             return result;
         }
+
         KeelSchemaFieldInfo info{};
         info.size = sizeof(info);
         result = api_->describe_field(context_->plugin, handle, &info);
+
         if (result != KEEL_RESULT_OK || info.size != sizeof(info) ||
             info.module != KEELS2_SCHEMA_MODULE_SERVER ||
             info.value_type != detail::ValueType<Value>() ||
@@ -316,6 +332,7 @@ public:
             static_cast<void>(api_->release_field(context_->plugin, handle));
             return result == KEEL_RESULT_OK ? KEEL_RESULT_INCOMPATIBLE : result;
         }
+
         output.Adopt(context_, api_, handle, info);
         return KEEL_RESULT_OK;
     }

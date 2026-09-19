@@ -79,15 +79,19 @@ bool CopyText(const char* value, std::size_t maximum, bool allow_empty, std::str
     {
         return false;
     }
+
     std::size_t length{};
+
     while (length <= maximum && value[length] != '\0')
     {
         ++length;
     }
+
     if (length > maximum || (!allow_empty && length == 0))
     {
         return false;
     }
+
     output.assign(value, length);
     return true;
 }
@@ -129,6 +133,7 @@ int HexDigit(unsigned char value)
     {
         return value - '0';
     }
+
     value = static_cast<unsigned char>(std::tolower(value));
     return value >= 'a' && value <= 'f'
         ? value - 'a' + 10
@@ -138,21 +143,27 @@ int HexDigit(unsigned char value)
 bool ApplyOffset(void* address, std::int64_t offset, void*& result)
 {
     const auto value = reinterpret_cast<std::uintptr_t>(address);
+
     if (offset >= 0)
     {
         const auto amount = static_cast<std::uint64_t>(offset);
+
         if (amount > std::numeric_limits<std::uintptr_t>::max() - value)
         {
             return false;
         }
+
         result = reinterpret_cast<void*>(value + static_cast<std::uintptr_t>(amount));
         return true;
     }
+
     const std::uint64_t amount = static_cast<std::uint64_t>(-(offset + 1)) + 1;
+
     if (amount > value)
     {
         return false;
     }
+
     result = reinterpret_cast<void*>(value - static_cast<std::uintptr_t>(amount));
     return true;
 }
@@ -207,17 +218,28 @@ public:
     static KeelResult DeferInternal(KeelHookFrame* frame, void (*cleanup)(void*), void* data) noexcept
     {
         auto* instance = active_.load(std::memory_order_acquire);
-        if (!cleanup) return KEEL_RESULT_INVALID_ARGUMENT;
+
+        if (!cleanup)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+
         auto* control = instance ? instance->CurrentControl(0,frame) : nullptr;
-        if (!control || !control->completions) return KEEL_RESULT_NOT_READY;
+
+        if (!control || !control->completions)
+            return KEEL_RESULT_NOT_READY;
+
         auto& completions = *control->completions;
+
         for (std::size_t i = 0; i < completions.count; ++i)
             if (completions.entries[i].cleanup == cleanup && completions.entries[i].data == data)
                 return KEEL_RESULT_ALREADY_EXISTS;
-        if (completions.count == completions.entries.size()) return KEEL_RESULT_BUSY;
+
+        if (completions.count == completions.entries.size())
+            return KEEL_RESULT_BUSY;
+
         completions.entries[completions.count++] = {cleanup,data};
         return KEEL_RESULT_OK;
     }
+
     Implementation(
         KeelHookService& service,
         std::string profile,
@@ -228,9 +250,11 @@ public:
         {
             profile_targets_.emplace(target.name, target);
         }
+
         const auto callback_entry = &CallbackDispatch;
         platform::LoadedModule module;
         std::string error;
+
         if (platform::FindLoadedModuleForAddress(
                 BitCopy<void*>(callback_entry),
                 module,
@@ -238,6 +262,7 @@ public:
         {
             throw std::runtime_error("KeelHook callback module could not be inspected");
         }
+
         for (const auto& range : module.ranges)
         {
             if (range.executable)
@@ -248,15 +273,19 @@ public:
                 });
             }
         }
+
         if (entry_hazards_.empty())
         {
             throw std::runtime_error("KeelHook callback module has no executable range");
         }
+
         Implementation* expected{};
+
         if (!active_.compare_exchange_strong(expected, this, std::memory_order_acq_rel))
         {
             throw std::runtime_error("KeelHook service already exists");
         }
+
         api_v3_ = {
             sizeof(KeelHookApiV3),
             KEELHOOK_API_VERSION_3,
@@ -323,12 +352,12 @@ public:
     void Authorize(KeelPluginHandle plugin, const std::filesystem::path& path, bool active)
     {
         std::scoped_lock lock(registry_mutex_);
+
         if (!shutting_down_)
         {
             const auto normalized = NormalizePath(path);
-            const auto [iterator, inserted] = owners_.try_emplace(
-                plugin,
-                OwnerState{normalized, true, active});
+            const auto [iterator, inserted] = owners_.try_emplace(plugin, OwnerState{normalized, true, active});
+
             if (!inserted && EqualPath(iterator->second.path, normalized))
             {
                 iterator->second.accepting = true;
@@ -341,15 +370,19 @@ public:
     {
         std::scoped_lock lock(registry_mutex_);
         const auto owner = owners_.find(plugin);
+
         if (owner == owners_.end() || shutting_down_)
         {
             return;
         }
+
         owner->second.accepting = true;
         owner->second.active = true;
+
         for (const auto& [handle, callback] : callbacks_)
         {
             static_cast<void>(handle);
+
             if (callback->owner == plugin)
             {
                 callback->enabled.store(true, std::memory_order_release);
@@ -360,14 +393,20 @@ public:
     bool OnCurrentTarget(KeelPluginHandle plugin) const
     {
         std::scoped_lock lock(registry_mutex_);
+
         for (std::size_t index{}; index < target_depth_; ++index)
         {
             const auto* target = target_stack_[index];
-            if (target && (target->leases.contains(plugin) ||
-                std::any_of(target->callbacks.begin(), target->callbacks.end(),
-                    [plugin](const auto& callback) { return callback->owner == plugin; })))
+
+            if (target && (target->leases.contains(plugin) || std::any_of(target->callbacks.begin(),
+                                                                          target->callbacks.end(),
+                                                                          [plugin](const auto& callback)
+                                                                          {
+                                                                              return callback->owner == plugin;
+                                                                          })))
                 return true;
         }
+
         return false;
     }
 
@@ -377,19 +416,24 @@ public:
         {
             std::scoped_lock lock(registry_mutex_);
             const auto owner = owners_.find(plugin);
+
             if (owner == owners_.end())
             {
                 return KEEL_RESULT_OK;
             }
+
             if (IsCurrentOwner(plugin))
             {
                 return KEEL_RESULT_BUSY;
             }
+
             owner->second.accepting = false;
             owner->second.active = false;
+
             for (const auto& [handle, callback] : callbacks_)
             {
                 static_cast<void>(handle);
+
                 if (callback->owner == plugin)
                 {
                     callback->enabled.store(false, std::memory_order_release);
@@ -397,16 +441,19 @@ public:
                 }
             }
         }
+
         for (const auto& callback : callbacks)
         {
             WaitForZero(callback->active);
         }
+
         return KEEL_RESULT_OK;
     }
 
     KeelResult ReleasePlugin(KeelPluginHandle plugin)
     {
         CollectPhysical();
+
         struct ReleaseOperation
         {
             std::shared_ptr<TargetRecord> target;
@@ -420,20 +467,25 @@ public:
         {
             std::scoped_lock lock(registry_mutex_);
             const auto owner = owners_.find(plugin);
+
             if (owner == owners_.end())
             {
                 return KEEL_RESULT_OK;
             }
+
             if (IsCurrentOwner(plugin))
             {
                 return KEEL_RESULT_BUSY;
             }
+
             owner_path = owner->second.path;
+
             for (const auto& [handle, target] : targets_)
             {
                 static_cast<void>(handle);
                 const bool owned_lease = target->leases.contains(plugin);
                 std::vector<std::shared_ptr<CallbackRecord>> owned_callbacks;
+
                 for (const auto& callback : target->callbacks)
                 {
                     if (callback->owner == plugin)
@@ -441,29 +493,39 @@ public:
                         owned_callbacks.push_back(callback);
                     }
                 }
+
                 if (TargetTouchesModule(*target, owner_path))
                 {
-                    const bool other_lease = std::any_of(
-                        target->leases.begin(),
-                        target->leases.end(),
-                        [plugin](KeelPluginHandle lease) { return lease != plugin; });
-                    const bool other_callback = std::any_of(
-                        target->callbacks.begin(),
-                        target->callbacks.end(),
-                        [plugin](const auto& callback) { return callback->owner != plugin; });
+                    const bool other_lease = std::any_of(target->leases.begin(),
+                                                         target->leases.end(),
+                                                         [plugin](KeelPluginHandle lease)
+                                                         {
+                                                             return lease != plugin;
+                                                         });
+
+                    const bool other_callback = std::any_of(target->callbacks.begin(),
+                                                            target->callbacks.end(),
+                                                            [plugin](const auto& callback)
+                                                            {
+                                                                return callback->owner != plugin;
+                                                            });
+
                     if (other_lease || other_callback)
                     {
                         return KEEL_RESULT_BUSY;
                     }
                 }
+
                 if (!owned_lease && owned_callbacks.empty())
                 {
                     continue;
                 }
+
                 if (target->transition || IsCurrentTarget(target.get()))
                 {
                     return KEEL_RESULT_BUSY;
                 }
+
                 const std::size_t remaining_callbacks = target->callbacks.size() - owned_callbacks.size();
                 operations.push_back({
                     target,
@@ -479,9 +541,11 @@ public:
             });
 
             owner->second.accepting = false;
+
             for (auto& operation : operations)
             {
                 operation.target->transition = true;
+
                 for (const auto& callback : operation.callbacks)
                 {
                     callback->enabled.store(false, std::memory_order_release);
@@ -495,14 +559,17 @@ public:
             {
                 operation.restored = DisablePhysical(*operation.target);
             }
+
             for (const auto& callback : operation.callbacks)
             {
                 WaitForZero(callback->active);
             }
+
             if (operation.disable && !operation.restored)
             {
                 operation.restored = DisablePhysical(*operation.target);
             }
+
             if (operation.restored && TargetTouchesModule(*operation.target, owner_path))
             {
                 WaitForZero(operation.target->active);
@@ -512,9 +579,11 @@ public:
         bool restored = true;
         {
             std::scoped_lock lock(registry_mutex_);
+
             for (auto& operation : operations)
             {
                 auto& target = operation.target;
+
                 if (operation.restored)
                 {
                     if (operation.leased)
@@ -522,6 +591,7 @@ public:
                         target->leases.erase(plugin);
                         target->bindings.erase(plugin);
                     }
+
                     for (const auto& callback : operation.callbacks)
                     {
                         callbacks_.erase(callback->handle);
@@ -534,14 +604,18 @@ public:
                 {
                     restored = false;
                 }
+
                 target->transition = false;
             }
+
             if (restored)
             {
                 owners_.erase(plugin);
             }
+
             PruneTargetsLocked();
         }
+
         CollectPhysical();
         return restored ? KEEL_RESULT_OK : KEEL_RESULT_ENGINE_FAILURE;
     }
@@ -552,22 +626,27 @@ public:
         std::vector<std::shared_ptr<TargetRecord>> targets;
         {
             std::scoped_lock lock(registry_mutex_);
+
             if (shutdown_complete_)
             {
                 return true;
             }
+
             if (!shutting_down_)
             {
                 shutting_down_ = true;
                 owners_.clear();
                 callbacks.reserve(callbacks_.size());
+
                 for (auto& [handle, callback] : callbacks_)
                 {
                     static_cast<void>(handle);
                     callback->enabled.store(false, std::memory_order_release);
                     callbacks.push_back(callback);
                 }
+
                 callbacks_.clear();
+
                 for (auto& [handle, target] : targets_)
                 {
                     static_cast<void>(handle);
@@ -576,12 +655,15 @@ public:
                     target->transition = true;
                 }
             }
+
             targets.reserve(targets_.size() + retired_targets_.size());
+
             for (auto& [handle, target] : targets_)
             {
                 static_cast<void>(handle);
                 targets.push_back(target);
             }
+
             targets.insert(targets.end(), retired_targets_.begin(), retired_targets_.end());
             std::sort(targets.begin(), targets.end(), [](const auto& left, const auto& right) {
                 return left->handle < right->handle;
@@ -591,16 +673,19 @@ public:
         std::vector<bool> disabled;
         disabled.reserve(targets.size());
         bool restored = true;
+
         for (const auto& target : targets)
         {
             const bool result = DisablePhysical(*target);
             disabled.push_back(result);
             restored = result && restored;
         }
+
         for (const auto& callback : callbacks)
         {
             WaitForZero(callback->active);
         }
+
         for (std::size_t index{}; index < targets.size(); ++index)
         {
             if (disabled[index])
@@ -612,6 +697,7 @@ public:
 
         {
             std::scoped_lock lock(registry_mutex_);
+
             if (restored)
             {
                 targets_.clear();
@@ -621,6 +707,7 @@ public:
                 shutdown_complete_ = true;
             }
         }
+
         return restored;
     }
 
@@ -698,6 +785,7 @@ private:
             const auto mechanism = std::hash<std::uint32_t>{}(key.mechanism);
             const auto first = primary ^
                 (secondary + 0x9e3779b9u + (primary << 6u) + (primary >> 2u));
+
             return first ^ (mechanism + 0x9e3779b9u + (first << 6u) + (first >> 2u));
         }
     };
@@ -784,11 +872,14 @@ private:
         {
             *target = 0;
         }
+
         Implementation* instance = active_.load(std::memory_order_acquire);
+
         if (!instance)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         try
         {
             return instance->ResolveTarget(plugin, spec, prototype, target);
@@ -810,16 +901,21 @@ private:
         {
             *target = 0;
         }
+
         Implementation* instance = active_.load(std::memory_order_acquire);
+
         if (!instance)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         if (!prototype || prototype->size != sizeof(KeelHookPrototypeV4))
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         const KeelHookPrototype upgraded = UpgradePrototype(*prototype);
+
         try
         {
             return instance->ResolveTarget(plugin, spec, &upgraded, target);
@@ -834,10 +930,12 @@ private:
     static KeelResult ReleaseTargetEntry(KeelPluginHandle plugin, KeelHookTargetHandle target)
     {
         Implementation* instance = active_.load(std::memory_order_acquire);
+
         if (!instance)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         try
         {
             return instance->ReleaseTarget(plugin, target);
@@ -856,10 +954,12 @@ private:
         KeelHookCallbackHandle* callback)
     {
         Implementation* instance = active_.load(std::memory_order_acquire);
+
         if (!instance)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         try
         {
             return instance->AddCallback(plugin, target, spec, callback);
@@ -874,10 +974,12 @@ private:
     static KeelResult RemoveCallbackEntry(KeelPluginHandle plugin, KeelHookCallbackHandle callback)
     {
         Implementation* instance = active_.load(std::memory_order_acquire);
+
         if (!instance)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         try
         {
             return instance->RemoveCallback(plugin, callback);
@@ -899,11 +1001,14 @@ private:
         {
             *target = 0;
         }
+
         Implementation* instance = active_.load(std::memory_order_acquire);
+
         if (!instance)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         try
         {
             return instance->ResolveVirtualTarget(plugin, spec, prototype, target);
@@ -925,18 +1030,23 @@ private:
         {
             *target = 0;
         }
+
         Implementation* instance = active_.load(std::memory_order_acquire);
+
         if (!instance)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         if (!spec || spec->size != sizeof(KeelHookVirtualTargetSpecV4) || !prototype ||
             prototype->size != sizeof(KeelHookPrototypeV4))
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         const KeelHookVirtualTargetSpec upgraded_spec = UpgradeVirtualTarget(*spec);
         const KeelHookPrototype upgraded_prototype = UpgradePrototype(*prototype);
+
         try
         {
             return instance->ResolveVirtualTarget(
@@ -955,10 +1065,12 @@ private:
     static KeelResult CallOriginalEntry(KeelPluginHandle plugin, KeelHookFrame* frame)
     {
         Implementation* instance = active_.load(std::memory_order_acquire);
+
         if (!instance)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         try
         {
             return instance->CallOriginalControl(plugin, frame);
@@ -973,10 +1085,12 @@ private:
     static KeelResult RecallEntry(KeelPluginHandle plugin, KeelHookFrame* frame)
     {
         Implementation* instance = active_.load(std::memory_order_acquire);
+
         if (!instance)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         try
         {
             return instance->RecallControl(plugin, frame);
@@ -994,10 +1108,12 @@ private:
         KeelBool enabled)
     {
         Implementation* instance = active_.load(std::memory_order_acquire);
+
         if (!instance)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         try
         {
             return instance->SetCallbackEnabled(plugin, callback, enabled);
@@ -1016,13 +1132,16 @@ private:
         KeelHookTargetHandle* output)
     {
         CollectPhysical();
+
         if (!spec || spec->size != sizeof(KeelHookTargetSpec) || !prototype || !output)
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         *output = 0;
         {
             std::scoped_lock lock(registry_mutex_);
+
             if (!OwnerReadyLocked(plugin))
             {
                 return KEEL_RESULT_NOT_READY;
@@ -1038,13 +1157,16 @@ private:
             canonical,
             binding,
             error);
+
         if (prototype_result != KEEL_RESULT_OK)
         {
             Log(error);
             return prototype_result;
         }
+
         ResolvedTarget resolved;
         const KeelResult resolution_result = ResolveSpec(*spec, resolved, error);
+
         if (resolution_result != KEEL_RESULT_OK)
         {
             Log(error);
@@ -1057,10 +1179,12 @@ private:
             spec->mechanism
         };
         std::scoped_lock lock(registry_mutex_);
+
         if (!OwnerReadyLocked(plugin))
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         return RegisterTargetLocked(plugin, key, resolved, canonical, binding, output);
     }
 
@@ -1071,11 +1195,14 @@ private:
         KeelHookTargetHandle* output)
     {
         CollectPhysical();
+
         if (!spec || spec->size != sizeof(KeelHookVirtualTargetSpec) || !prototype || !output)
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         *output = 0;
+
         if (!spec->instance || spec->flags != 0 || spec->reserved != 0 ||
             (spec->mechanism != KH_MECHANISM_VIRTUAL &&
                 spec->mechanism != KH_MECHANISM_VIRTUAL_INSTANCE) ||
@@ -1085,20 +1212,25 @@ private:
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         void* adjusted_instance{};
         void* vtable_instance{};
+
         if (!ApplyOffset(spec->instance, spec->this_adjustment, adjusted_instance) ||
             !ApplyOffset(adjusted_instance, spec->vtable_offset, vtable_instance))
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         if (spec->profile)
         {
             std::string profile;
+
             if (!CopyText(spec->profile, 512, false, profile))
             {
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             if (profile != service_profile_)
             {
                 Log("virtual target compatibility profile does not match the running server");
@@ -1115,11 +1247,13 @@ private:
             canonical,
             binding,
             error);
+
         if (prototype_result != KEEL_RESULT_OK)
         {
             Log(error);
             return prototype_result;
         }
+
         if (canonical.arguments.empty() || canonical.arguments.front() != KH_VALUE_POINTER)
         {
             Log("virtual target prototype must begin with an object pointer");
@@ -1130,18 +1264,22 @@ private:
         {
             {
                 std::scoped_lock lock(registry_mutex_);
+
                 if (!OwnerReadyLocked(plugin))
                 {
                     return KEEL_RESULT_NOT_READY;
                 }
+
                 if (instance_tables_.contains(vtable_instance))
                 {
                     Log("shared and per-instance virtual targets cannot manage the same object");
                     return KEEL_RESULT_BUSY;
                 }
             }
+
             ResolvedTarget resolved;
             void* original{};
+
             if (hooking::ResolveVtableSlot(
                     vtable_instance,
                     spec->index,
@@ -1151,6 +1289,7 @@ private:
                 Log("virtual target object or slot is invalid");
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             resolved.address = original;
             resolved.virtual_index = spec->index;
             const TargetKey key{
@@ -1160,33 +1299,41 @@ private:
             };
             {
                 std::scoped_lock lock(registry_mutex_);
+
                 if (!OwnerReadyLocked(plugin))
                 {
                     return KEEL_RESULT_NOT_READY;
                 }
+
                 if (instance_tables_.contains(vtable_instance) ||
                     VirtualScopeConflictLocked(resolved.virtual_slot, spec->mechanism))
                 {
                     Log("shared and per-instance virtual targets cannot overlap");
                     return KEEL_RESULT_BUSY;
                 }
+
                 const auto existing = targets_by_key_.find(key);
+
                 if (existing != targets_by_key_.end())
                 {
                     const auto& target = existing->second;
+
                     if (!target->transition)
                     {
                         const void* expected = target->address;
+
                         if (target->virtual_hook && target->virtual_hook->Enabled())
                         {
                             expected = target->closure;
                         }
+
                         if (original != expected)
                         {
                             Log("shared virtual slot no longer matches the registered target");
                             return KEEL_RESULT_INCOMPATIBLE;
                         }
                     }
+
                     return RegisterTargetLocked(
                         plugin,
                         key,
@@ -1196,60 +1343,74 @@ private:
                         output);
                 }
             }
+
             const auto code_lookup = platform::FindLoadedModuleForAddress(
                 original,
                 resolved.module,
                 error);
+
             if (code_lookup != platform::ModuleLookup::found)
             {
                 Log(error);
                 return ModuleResult(code_lookup);
             }
+
             if (!platform::IsExecutableAddress(resolved.module, original) ||
                 !resolved.pin.Acquire(resolved.module, error))
             {
                 Log("virtual target does not resolve to pinned executable code");
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             const auto storage_lookup = platform::FindLoadedModuleForAddress(
                 resolved.virtual_slot,
                 resolved.storage_module,
                 error);
+
             if (storage_lookup != platform::ModuleLookup::found)
             {
                 Log(error);
                 return ModuleResult(storage_lookup);
             }
+
             if (!resolved.storage_pin.Acquire(resolved.storage_module, error))
             {
                 Log(error);
                 return KEEL_RESULT_ENGINE_FAILURE;
             }
+
             std::scoped_lock lock(registry_mutex_);
+
             if (!OwnerReadyLocked(plugin))
             {
                 return KEEL_RESULT_NOT_READY;
             }
+
             if (instance_tables_.contains(vtable_instance) ||
                 VirtualScopeConflictLocked(resolved.virtual_slot, spec->mechanism))
             {
                 Log("shared and per-instance virtual targets cannot overlap");
                 return KEEL_RESULT_BUSY;
             }
+
             return RegisterTargetLocked(plugin, key, resolved, canonical, binding, output);
         }
 
         std::scoped_lock lock(registry_mutex_);
+
         if (!OwnerReadyLocked(plugin))
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         std::shared_ptr<InstanceTableRecord> table_record;
         bool created{};
         const auto known = instance_tables_.find(vtable_instance);
+
         if (known != instance_tables_.end())
         {
             table_record = known->second;
+
             if (table_record->table->EntryCount() != spec->table_size ||
                 !table_record->table->Intact())
             {
@@ -1260,6 +1421,7 @@ private:
         else
         {
             std::shared_ptr<hooking::InstanceVtable> table;
+
             if (hooking::InstanceVtable::Create(
                     vtable_instance,
                     spec->table_size,
@@ -1268,24 +1430,29 @@ private:
                 Log("per-instance virtual table could not be cloned");
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             platform::LoadedModule storage_module;
             const auto storage_lookup = platform::FindLoadedModuleForAddress(
                 table->OriginalSlot(spec->index),
                 storage_module,
                 error);
+
             if (storage_lookup != platform::ModuleLookup::found)
             {
                 Log(error);
                 return ModuleResult(storage_lookup);
             }
+
             auto record = std::make_shared<InstanceTableRecord>();
             record->table = std::move(table);
             record->module_path = storage_module.path;
+
             if (!record->module_pin.Acquire(storage_module, error))
             {
                 Log(error);
                 return KEEL_RESULT_ENGINE_FAILURE;
             }
+
             table_record = std::move(record);
             created = true;
         }
@@ -1299,22 +1466,26 @@ private:
             resolved.address,
             resolved.module,
             error);
+
         if (code_lookup != platform::ModuleLookup::found)
         {
             Log(error);
             return ModuleResult(code_lookup);
         }
+
         if (!platform::IsExecutableAddress(resolved.module, resolved.address) ||
             !resolved.pin.Acquire(resolved.module, error))
         {
             Log("per-instance virtual target does not resolve to pinned executable code");
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         if (VirtualScopeConflictLocked(resolved.virtual_slot, spec->mechanism))
         {
             Log("shared and per-instance virtual targets cannot overlap");
             return KEEL_RESULT_BUSY;
         }
+
         const TargetKey key{
             reinterpret_cast<std::uintptr_t>(vtable_instance),
             spec->index,
@@ -1327,10 +1498,12 @@ private:
             canonical,
             binding,
             output);
+
         if (result == KEEL_RESULT_OK && created)
         {
             instance_tables_.emplace(vtable_instance, std::move(table_record));
         }
+
         return result;
     }
 
@@ -1343,22 +1516,26 @@ private:
         KeelHookTargetHandle* output)
     {
         const auto existing = targets_by_key_.find(key);
+
         if (existing != targets_by_key_.end())
         {
             if (existing->second->transition)
             {
                 return KEEL_RESULT_BUSY;
             }
+
             if (!(existing->second->prototype == canonical))
             {
                 Log("target is already managed with an incompatible prototype");
                 return KEEL_RESULT_INCOMPATIBLE;
             }
+
             existing->second->leases.insert(plugin);
             existing->second->bindings.insert_or_assign(plugin, binding);
             *output = existing->second->handle;
             return KEEL_RESULT_OK;
         }
+
         if (next_target_ == 0)
         {
             Log("target handle space is exhausted");
@@ -1391,10 +1568,12 @@ private:
         for (const auto& [handle, target] : targets_)
         {
             static_cast<void>(handle);
+
             if (target->virtual_slot != slot)
             {
                 continue;
             }
+
             if ((mechanism == KH_MECHANISM_VIRTUAL &&
                     target->key.mechanism == KH_MECHANISM_VIRTUAL_INSTANCE) ||
                 (mechanism == KH_MECHANISM_VIRTUAL_INSTANCE &&
@@ -1403,6 +1582,7 @@ private:
                 return true;
             }
         }
+
         return false;
     }
 
@@ -1411,30 +1591,38 @@ private:
         CollectPhysical();
         {
             std::scoped_lock lock(registry_mutex_);
+
             if (!OwnerExistsLocked(plugin))
             {
                 return KEEL_RESULT_NOT_READY;
             }
+
             const auto iterator = targets_.find(handle);
+
             if (iterator == targets_.end() || !iterator->second->leases.contains(plugin))
             {
                 return KEEL_RESULT_NOT_FOUND;
             }
+
             const auto& target = iterator->second;
+
             if (target->transition || target->direct_calls != 0)
             {
                 return KEEL_RESULT_BUSY;
             }
+
             if (std::any_of(target->callbacks.begin(), target->callbacks.end(), [plugin](const auto& callback) {
                     return callback->owner == plugin;
                 }))
             {
                 return KEEL_RESULT_BUSY;
             }
+
             target->leases.erase(plugin);
             target->bindings.erase(plugin);
             PruneTargetsLocked();
         }
+
         CollectPhysical();
         return KEEL_RESULT_OK;
     }
@@ -1446,41 +1634,52 @@ private:
         KeelHookCallbackHandle* output)
     {
         CollectPhysical();
+
         if (!spec || spec->size != sizeof(KeelHookCallbackSpec) || !output || !spec->callback ||
             spec->reserved != 0 || spec->phases == 0 || (spec->phases & ~KH_PHASE_BOTH) != 0)
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         *output = 0;
         std::shared_ptr<TargetRecord> target;
         std::shared_ptr<CallbackRecord> callback;
         bool first{};
         {
             std::scoped_lock lock(registry_mutex_);
+
             if (!OwnerReadyLocked(plugin))
             {
                 return KEEL_RESULT_NOT_READY;
             }
+
             const auto target_iterator = targets_.find(target_handle);
+
             if (target_iterator == targets_.end() || !target_iterator->second->leases.contains(plugin))
             {
                 return KEEL_RESULT_NOT_FOUND;
             }
+
             target = target_iterator->second;
+
             if (target->transition || target->direct_calls != 0)
             {
                 return KEEL_RESULT_BUSY;
             }
+
             if (next_callback_ == 0 || next_sequence_ == 0)
             {
                 Log("callback handle space is exhausted");
                 return KEEL_RESULT_ENGINE_FAILURE;
             }
+
             first = target->callbacks.empty();
+
             if (first)
             {
                 target->transition = true;
             }
+
             callback = std::make_shared<CallbackRecord>();
             callback->handle = next_callback_++;
             callback->owner = plugin;
@@ -1498,6 +1697,7 @@ private:
         if (first)
         {
             std::string error;
+
             if (!EnablePhysical(*target, error))
             {
                 callback->enabled.store(false, std::memory_order_release);
@@ -1506,13 +1706,16 @@ private:
                 target->callbacks.erase(
                     std::remove(target->callbacks.begin(), target->callbacks.end(), callback),
                     target->callbacks.end());
+
                 target->transition = false;
                 Log(error);
                 return KEEL_RESULT_ENGINE_FAILURE;
             }
+
             std::scoped_lock lock(registry_mutex_);
             target->transition = false;
         }
+
         *output = callback->handle;
         return KEEL_RESULT_OK;
     }
@@ -1526,21 +1729,27 @@ private:
         bool was_enabled{};
         {
             std::scoped_lock lock(registry_mutex_);
+
             if (!OwnerExistsLocked(plugin))
             {
                 return KEEL_RESULT_NOT_READY;
             }
+
             const auto iterator = callbacks_.find(handle);
+
             if (iterator == callbacks_.end() || iterator->second->owner != plugin)
             {
                 return KEEL_RESULT_NOT_FOUND;
             }
+
             callback = iterator->second;
             target = callback->target.lock();
+
             if (!target || target->transition || target->direct_calls != 0)
             {
                 return KEEL_RESULT_BUSY;
             }
+
             was_enabled = callback->enabled.load(std::memory_order_acquire);
             callback->enabled.store(false, std::memory_order_release);
             target->transition = true;
@@ -1548,10 +1757,12 @@ private:
         }
 
         bool restored = true;
+
         if (last)
         {
             restored = DisablePhysical(*target);
         }
+
         if (!restored)
         {
             std::scoped_lock lock(registry_mutex_);
@@ -1559,19 +1770,23 @@ private:
             target->transition = false;
             return KEEL_RESULT_ENGINE_FAILURE;
         }
+
         if (!IsCurrentCallback(callback.get()))
         {
             WaitForZero(callback->active);
         }
+
         {
             std::scoped_lock lock(registry_mutex_);
             callbacks_.erase(callback->handle);
             target->callbacks.erase(
                 std::remove(target->callbacks.begin(), target->callbacks.end(), callback),
                 target->callbacks.end());
+
             target->transition = false;
             PruneTargetsLocked();
         }
+
         CollectPhysical();
         return KEEL_RESULT_OK;
     }
@@ -1585,29 +1800,38 @@ private:
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         std::shared_ptr<CallbackRecord> callback;
         {
             std::scoped_lock lock(registry_mutex_);
+
             if (!OwnerExistsLocked(plugin))
             {
                 return KEEL_RESULT_NOT_READY;
             }
+
             const auto position = callbacks_.find(handle);
+
             if (position == callbacks_.end() || position->second->owner != plugin)
             {
                 return KEEL_RESULT_NOT_FOUND;
             }
+
             callback = position->second;
+
             if (enabled == KEEL_TRUE && !OwnerReadyLocked(plugin))
             {
                 return KEEL_RESULT_NOT_READY;
             }
+
             callback->enabled.store(enabled == KEEL_TRUE, std::memory_order_release);
         }
+
         if (enabled == KEEL_FALSE && !IsCurrentCallback(callback.get()))
         {
             WaitForZero(callback->active);
         }
+
         return KEEL_RESULT_OK;
     }
 
@@ -1635,11 +1859,13 @@ private:
             error = "aggregate descriptor nesting is invalid";
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         if (const auto completed = context.completed.find(input); completed != context.completed.end())
         {
             output = completed->second;
             return KEEL_RESULT_OK;
         }
+
         if (!context.active.insert(input).second ||
             ++context.count > KEELHOOK_MAX_AGGREGATE_DESCRIPTORS ||
             input->size != sizeof(KeelHookAggregate) || input->flags != 0 ||
@@ -1657,9 +1883,11 @@ private:
         aggregate->children.reserve(input->field_count);
         std::vector<std::shared_ptr<AggregateData>> nested(input->field_count);
         std::uint32_t previous_offset{};
+
         for (std::uint32_t index{}; index < input->field_count; ++index)
         {
             const KeelHookAggregateField& field = input->fields[index];
+
             if (field.size != sizeof(KeelHookAggregateField) || field.array_length == 0 ||
                 field.offset >= input->byte_size || (index != 0 && field.offset < previous_offset))
             {
@@ -1667,8 +1895,10 @@ private:
                 error = "aggregate field descriptor is invalid";
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             previous_offset = field.offset;
             std::size_t field_size{};
+
             if (field.type == KH_VALUE_AGGREGATE)
             {
                 const KeelResult result = CanonicalAggregate(
@@ -1677,11 +1907,13 @@ private:
                     context,
                     nested[index],
                     error);
+
                 if (result != KEEL_RESULT_OK)
                 {
                     context.active.erase(input);
                     return result;
                 }
+
                 field_size = nested[index]->byte_size;
                 aggregate->children.push_back(nested[index]);
             }
@@ -1695,21 +1927,27 @@ private:
                 error = "aggregate field type is invalid";
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             const std::size_t available = input->byte_size - field.offset;
+
             if (field_size == 0 || field.array_length > available / field_size)
             {
                 context.active.erase(input);
                 error = "aggregate field exceeds its containing object";
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             aggregate->identity += std::to_string(field.type) + ":" +
                 std::to_string(field.offset) + ":" + std::to_string(field.array_length) + ":";
+
             if (nested[index])
             {
                 aggregate->identity += nested[index]->identity;
             }
+
             aggregate->identity.push_back(';');
         }
+
         aggregate->identity.push_back('}');
 
         aggregate->native = std::shared_ptr<DCaggr>(
@@ -1720,15 +1958,18 @@ private:
                     dcFreeAggr(value);
                 }
             });
+
         if (!aggregate->native)
         {
             context.active.erase(input);
             error = "aggregate adapter allocation failed";
             return KEEL_RESULT_ENGINE_FAILURE;
         }
+
         for (std::uint32_t index{}; index < input->field_count; ++index)
         {
             const KeelHookAggregateField& field = input->fields[index];
+
             if (nested[index])
             {
                 dcAggrField(
@@ -1747,6 +1988,7 @@ private:
                     field.array_length);
             }
         }
+
         dcCloseAggr(aggregate->native.get());
         context.active.erase(input);
         context.completed.emplace(input, aggregate);
@@ -1761,6 +2003,7 @@ private:
         std::string& error) const
     {
         std::string identity;
+
         if (!input || input->size != sizeof(KeelHookObject) || input->flags != 0 ||
             input->byte_size == 0 || input->byte_size > KEELHOOK_MAX_AGGREGATE_SIZE ||
             input->alignment == 0 || input->alignment > KEELHOOK_MAX_AGGREGATE_ALIGNMENT ||
@@ -1780,6 +2023,7 @@ private:
             BitCopy<void*>(input->destroy)
         };
         platform::LoadedModule module;
+
         for (std::size_t index{}; index < callbacks.size(); ++index)
         {
             platform::LoadedModule candidate;
@@ -1787,6 +2031,7 @@ private:
                 callbacks[index],
                 candidate,
                 error);
+
             if (lookup != platform::ModuleLookup::found ||
                 !platform::IsExecutableAddress(candidate, callbacks[index]))
             {
@@ -1795,6 +2040,7 @@ private:
                     ? KEEL_RESULT_INVALID_ARGUMENT
                     : ModuleResult(lookup);
             }
+
             if (index == 0)
             {
                 module = std::move(candidate);
@@ -1816,10 +2062,12 @@ private:
         operations->copy_construct = input->copy_construct;
         operations->copy_assign = input->copy_assign;
         operations->destroy = input->destroy;
+
         if (!operations->module_pin.Acquire(module, error))
         {
             return KEEL_RESULT_ENGINE_FAILURE;
         }
+
         object_output = std::move(object);
         operations_output = std::move(operations);
         return KEEL_RESULT_OK;
@@ -1843,15 +2091,18 @@ private:
                 ? KEEL_RESULT_INVALID_ARGUMENT
                 : KEEL_RESULT_UNSUPPORTED;
         }
+
         output = {};
         output.calling_convention = input.calling_convention;
         output.return_type = input.return_type;
         output.method = method;
         output.vafmt = (input.flags & KH_PROTOTYPE_VAFMT) != 0;
+
         if (input.argument_count != 0)
         {
             output.arguments.assign(input.argument_types, input.argument_types + input.argument_count);
         }
+
         if (std::any_of(output.arguments.begin(), output.arguments.end(), [](KeelHookValueType type) {
                 return !IsValueType(type, false);
             }))
@@ -1859,11 +2110,13 @@ private:
             error = "prototype contains an unsupported argument type";
             return KEEL_RESULT_UNSUPPORTED;
         }
+
         if (method && (output.arguments.empty() || output.arguments.front() != KH_VALUE_POINTER))
         {
             error = "method prototype must begin with an object pointer";
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         if (output.vafmt &&
             (output.arguments.empty() || output.arguments.back() != KH_VALUE_POINTER))
         {
@@ -1876,6 +2129,7 @@ private:
             output.arguments.begin(),
             output.arguments.end(),
             KH_VALUE_AGGREGATE) != output.arguments.end();
+
         if (aggregate_return !=
                 ((input.return_aggregate != nullptr) != (input.return_object != nullptr)) ||
             (aggregate_argument && !input.argument_aggregates && !input.argument_objects) ||
@@ -1887,6 +2141,7 @@ private:
 
         auto binding = std::make_shared<PrototypeBinding>();
         AggregateBuildContext aggregate_context;
+
         if (input.return_aggregate)
         {
             const KeelResult result = CanonicalAggregate(
@@ -1895,6 +2150,7 @@ private:
                 aggregate_context,
                 output.return_aggregate,
                 error);
+
             if (result != KEEL_RESULT_OK)
             {
                 return result;
@@ -1907,29 +2163,36 @@ private:
                 output.return_object,
                 binding->return_object,
                 error);
+
             if (result != KEEL_RESULT_OK)
             {
                 return result;
             }
         }
+
         output.argument_aggregates.resize(output.arguments.size());
         output.argument_objects.resize(output.arguments.size());
         binding->argument_objects.resize(output.arguments.size());
+
         for (std::size_t index{}; index < output.arguments.size(); ++index)
         {
             const KeelHookAggregate* descriptor = input.argument_aggregates
                 ? input.argument_aggregates[index]
                 : nullptr;
+
             const KeelHookObject* object = input.argument_objects
                 ? input.argument_objects[index]
                 : nullptr;
+
             const bool aggregate = output.arguments[index] == KH_VALUE_AGGREGATE;
+
             if (aggregate != ((descriptor != nullptr) != (object != nullptr)) ||
                 (!aggregate && (descriptor || object)))
             {
                 error = "prototype argument aggregate descriptors are inconsistent";
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             if (!descriptor)
             {
                 if (object)
@@ -1939,19 +2202,23 @@ private:
                         output.argument_objects[index],
                         binding->argument_objects[index],
                         error);
+
                     if (result != KEEL_RESULT_OK)
                     {
                         return result;
                     }
                 }
+
                 continue;
             }
+
             const KeelResult result = CanonicalAggregate(
                 descriptor,
                 1,
                 aggregate_context,
                 output.argument_aggregates[index],
                 error);
+
             if (result != KEEL_RESULT_OK)
             {
                 return result;
@@ -1959,11 +2226,13 @@ private:
         }
 
         output.callback_signature.reserve(output.arguments.size() + 5);
+
         if (method)
         {
             output.callback_signature.push_back(DC_SIGCHAR_CC_PREFIX);
             output.callback_signature.push_back(DC_SIGCHAR_CC_THISCALL);
         }
+
         output.aggregate_identity = aggregate_return
             ? output.return_aggregate
                 ? "RA" + output.return_aggregate->identity
@@ -1971,9 +2240,11 @@ private:
                     std::to_string(output.return_object->alignment) + ":" +
                     output.return_object->identity
             : "R-";
+
         for (std::size_t index{}; index < output.arguments.size(); ++index)
         {
             output.callback_signature.push_back(SignatureCharacter(output.arguments[index]));
+
             if (output.argument_aggregates[index])
             {
                 output.callback_aggregates.push_back(output.argument_aggregates[index]->native.get());
@@ -1992,8 +2263,10 @@ private:
                 output.aggregate_identity += "A-";
             }
         }
+
         output.callback_signature.push_back(DC_SIGCHAR_ENDARG);
         output.callback_signature.push_back(SignatureCharacter(output.return_type));
+
         if (output.return_aggregate)
         {
             output.callback_aggregates.push_back(output.return_aggregate->native.get());
@@ -2002,6 +2275,7 @@ private:
         {
             output.callback_aggregates.push_back(nullptr);
         }
+
         binding_output = std::move(binding);
         return KEEL_RESULT_OK;
     }
@@ -2016,6 +2290,7 @@ private:
             error = "target specification contains unsupported flags";
             return KEEL_RESULT_UNSUPPORTED;
         }
+
         if (spec.mechanism != KH_MECHANISM_DETOUR)
         {
             error = "target mechanism is unsupported";
@@ -2023,6 +2298,7 @@ private:
         }
 
         void* base_address{};
+
         if (spec.source == KH_TARGET_ADDRESS)
         {
             if (!spec.address || spec.occurrence != 0 || spec.symbol || spec.pattern || spec.profile)
@@ -2030,20 +2306,26 @@ private:
                 error = "direct target address is invalid";
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             base_address = spec.address;
+
             if (spec.module)
             {
                 std::string module_name;
+
                 if (!CopyText(spec.module, 4096, false, module_name))
                 {
                     error = "module selector is invalid";
                     return KEEL_RESULT_INVALID_ARGUMENT;
                 }
+
                 const auto lookup = platform::FindLoadedModule(module_name, resolved.module, error);
+
                 if (lookup != platform::ModuleLookup::found)
                 {
                     return ModuleResult(lookup);
                 }
+
                 if (!resolved.pin.Acquire(resolved.module, error))
                 {
                     return KEEL_RESULT_ENGINE_FAILURE;
@@ -2052,10 +2334,12 @@ private:
             else
             {
                 const auto lookup = platform::FindLoadedModuleForAddress(base_address, resolved.module, error);
+
                 if (lookup != platform::ModuleLookup::found)
                 {
                     return ModuleResult(lookup);
                 }
+
                 if (!resolved.pin.Acquire(resolved.module, error))
                 {
                     return KEEL_RESULT_ENGINE_FAILURE;
@@ -2069,24 +2353,31 @@ private:
                 error = "symbol target occurrence must be zero";
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             std::string module_name;
             std::string symbol;
+
             if (!CopyText(spec.module, 4096, false, module_name) ||
                 !CopyText(spec.symbol, 512, false, symbol))
             {
                 error = "symbol target is incomplete";
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             const auto lookup = platform::FindLoadedModule(module_name, resolved.module, error);
+
             if (lookup != platform::ModuleLookup::found)
             {
                 return ModuleResult(lookup);
             }
+
             if (!resolved.pin.Acquire(resolved.module, error))
             {
                 return KEEL_RESULT_ENGINE_FAILURE;
             }
+
             base_address = platform::FindLoadedSymbol(resolved.module, symbol, error);
+
             if (!base_address)
             {
                 return KEEL_RESULT_NOT_FOUND;
@@ -2099,9 +2390,11 @@ private:
                 error = "pattern target contains fields for another resolver";
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             std::string module_name;
             std::string profile;
             std::string pattern;
+
             if (!CopyText(spec.module, 4096, false, module_name) ||
                 !CopyText(spec.profile, 512, false, profile) ||
                 !CopyText(spec.pattern, 16384, false, pattern))
@@ -2109,32 +2402,41 @@ private:
                 error = "pattern target is incomplete";
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             if (profile != service_profile_)
             {
                 error = "pattern target compatibility profile does not match the running server";
                 return KEEL_RESULT_INCOMPATIBLE;
             }
+
             const auto lookup = platform::FindLoadedModule(module_name, resolved.module, error);
+
             if (lookup != platform::ModuleLookup::found)
             {
                 return ModuleResult(lookup);
             }
+
             if (!resolved.pin.Acquire(resolved.module, error))
             {
                 return KEEL_RESULT_ENGINE_FAILURE;
             }
+
             std::vector<std::optional<std::uint8_t>> bytes;
+
             if (!ParsePattern(pattern, bytes))
             {
                 error = "pattern syntax is invalid";
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             const KeelResult scan_result = ScanPattern(resolved.module, bytes, spec.occurrence, base_address);
+
             if (scan_result != KEEL_RESULT_OK)
             {
                 error = scan_result == KEEL_RESULT_AMBIGUOUS
                     ? "pattern target is ambiguous"
                     : "pattern target was not found";
+
                 return scan_result;
             }
         }
@@ -2146,18 +2448,23 @@ private:
                 error = "profile target contains fields for another resolver";
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             std::string name;
+
             if (!CopyText(spec.symbol, 127, false, name))
             {
                 error = "profile target name is invalid";
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
+
             const auto target = profile_targets_.find(name);
+
             if (target == profile_targets_.end())
             {
                 error = "profile target is unavailable for the running server";
                 return KEEL_RESULT_NOT_FOUND;
             }
+
             KeelHookTargetSpec expanded{};
             expanded.size = sizeof(expanded);
             expanded.source = KH_TARGET_PATTERN;
@@ -2182,6 +2489,7 @@ private:
             error = "resolved target is not an executable address in the requested module";
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         return KEEL_RESULT_OK;
     }
 
@@ -2190,43 +2498,55 @@ private:
         std::vector<std::optional<std::uint8_t>>& bytes)
     {
         std::size_t position{};
+
         while (position < text.size())
         {
             while (position < text.size() && std::isspace(static_cast<unsigned char>(text[position])))
             {
                 ++position;
             }
+
             if (position == text.size())
             {
                 break;
             }
+
             const std::size_t start = position;
+
             while (position < text.size() && !std::isspace(static_cast<unsigned char>(text[position])))
             {
                 ++position;
             }
+
             const auto token = text.substr(start, position - start);
+
             if (token == "?" || token == "??")
             {
                 bytes.emplace_back(std::nullopt);
                 continue;
             }
+
             if (token.size() != 2)
             {
                 return false;
             }
+
             const int high = HexDigit(static_cast<unsigned char>(token[0]));
             const int low = HexDigit(static_cast<unsigned char>(token[1]));
+
             if (high < 0 || low < 0)
             {
                 return false;
             }
+
             bytes.emplace_back(static_cast<std::uint8_t>((high << 4) | low));
+
             if (bytes.size() > 4096)
             {
                 return false;
             }
         }
+
         return !bytes.empty();
     }
 
@@ -2242,23 +2562,29 @@ private:
             std::uintptr_t end{};
         };
         std::vector<ScanRange> ranges;
+
         for (const auto& range : module.ranges)
         {
             if (!range.readable || !range.executable || range.size < pattern.size())
             {
                 continue;
             }
+
             const auto begin = reinterpret_cast<std::uintptr_t>(range.address);
+
             if (range.size > std::numeric_limits<std::uintptr_t>::max() - begin)
             {
                 continue;
             }
+
             ranges.push_back({begin, begin + range.size});
         }
+
         std::sort(ranges.begin(), ranges.end(), [](const auto& left, const auto& right) {
             return left.begin < right.begin;
         });
         std::vector<ScanRange> merged;
+
         for (const auto& range : ranges)
         {
             if (merged.empty() || range.begin > merged.back().end)
@@ -2273,13 +2599,16 @@ private:
 
         std::uint32_t matches{};
         void* selected{};
+
         for (const auto& range : merged)
         {
             const auto* bytes = reinterpret_cast<const std::byte*>(range.begin);
             const auto size = static_cast<std::size_t>(range.end - range.begin);
+
             for (std::size_t position{}; position <= size - pattern.size(); ++position)
             {
                 bool matched = true;
+
                 for (std::size_t index{}; index < pattern.size(); ++index)
                 {
                     if (pattern[index] &&
@@ -2289,17 +2618,21 @@ private:
                         break;
                     }
                 }
+
                 if (!matched)
                 {
                     continue;
                 }
+
                 ++matches;
+
                 if (occurrence == 0)
                 {
                     if (matches > 1)
                     {
                         return KEEL_RESULT_AMBIGUOUS;
                     }
+
                     selected = const_cast<std::byte*>(bytes + position);
                 }
                 else if (matches == occurrence)
@@ -2309,21 +2642,25 @@ private:
                 }
             }
         }
+
         if (occurrence == 0 && matches == 1)
         {
             address = selected;
             return KEEL_RESULT_OK;
         }
+
         return KEEL_RESULT_NOT_FOUND;
     }
 
     bool EnablePhysical(TargetRecord& target, std::string& error)
     {
         std::scoped_lock lock(target.physical_mutex);
+
         if (PhysicalEnabled(target))
         {
             return true;
         }
+
         if (!target.closure)
         {
             target.closure = target.prototype.callback_aggregates.empty()
@@ -2336,12 +2673,14 @@ private:
                     &CallbackDispatch,
                     &target,
                     target.prototype.callback_aggregates.data());
+
             if (!target.closure)
             {
                 error = "could not allocate a native callback closure";
                 return false;
             }
         }
+
         if (target.key.mechanism == KH_MECHANISM_DETOUR)
         {
             if (!target.hook)
@@ -2350,32 +2689,40 @@ private:
                     target.address,
                     static_cast<void*>(target.closure),
                     safetyhook::InlineHook::StartDisabled);
+
                 if (!hook)
                 {
                     error = "could not relocate target prologue, backend error " +
                         std::to_string(hook.error().type);
+
                     dcbFreeCallback(target.closure);
                     target.closure = nullptr;
                     return false;
                 }
+
                 target.hook = std::make_unique<safetyhook::InlineHook>(std::move(*hook));
                 target.trampoline.store(target.hook->original<void*>(), std::memory_order_release);
             }
+
             const auto enabled = target.hook->enable();
+
             if (!enabled)
             {
                 error = "could not activate target detour, backend error " +
                     std::to_string(enabled.error().type);
+
                 target.trampoline.store(nullptr, std::memory_order_release);
                 target.hook.reset();
                 dcbFreeCallback(target.closure);
                 target.closure = nullptr;
                 return false;
             }
+
             return true;
         }
 
         target.trampoline.store(target.address, std::memory_order_release);
+
         if (target.key.mechanism == KH_MECHANISM_VIRTUAL)
         {
             if (!target.virtual_hook)
@@ -2384,6 +2731,7 @@ private:
                     target.virtual_slot,
                     static_cast<void*>(target.closure),
                     target.virtual_hook);
+
                 if (created != hooking::VtableHookResult::ok ||
                     !target.virtual_hook || target.virtual_hook->Original() != target.address)
                 {
@@ -2395,6 +2743,7 @@ private:
                     return false;
                 }
             }
+
             if (target.virtual_hook->Enable() != hooking::VtableHookResult::ok)
             {
                 error = "shared virtual slot could not be activated";
@@ -2404,6 +2753,7 @@ private:
                 target.closure = nullptr;
                 return false;
             }
+
             return true;
         }
 
@@ -2415,6 +2765,7 @@ private:
             target.instance_enabled = true;
             return true;
         }
+
         error = "per-instance virtual slot could not be activated";
         target.trampoline.store(nullptr, std::memory_order_release);
         dcbFreeCallback(target.closure);
@@ -2425,18 +2776,22 @@ private:
     bool DisablePhysical(TargetRecord& target)
     {
         std::scoped_lock lock(target.physical_mutex);
+
         if (!PhysicalEnabled(target))
         {
             target.restore_failure_reported = false;
             return true;
         }
+
         bool restored{};
         std::uint32_t backend_error{};
+
         if (target.key.mechanism == KH_MECHANISM_DETOUR)
         {
             const auto hazards = PhysicalHazards(target);
             const auto disabled = target.hook->disable(hazards);
             restored = disabled.has_value();
+
             if (!restored)
             {
                 backend_error = disabled.error().type;
@@ -2451,11 +2806,13 @@ private:
             restored = target.instance_table->table->Disable(
                 target.virtual_index,
                 static_cast<void*>(target.closure)) == hooking::VtableHookResult::ok;
+
             if (restored)
             {
                 target.instance_enabled = false;
             }
         }
+
         if (!restored)
         {
             if (!target.restore_failure_reported)
@@ -2463,11 +2820,14 @@ private:
                 const std::string suffix = backend_error == 0
                     ? std::string{}
                     : ", backend error " + std::to_string(backend_error);
+
                 Log("could not restore a physical target" + suffix);
                 target.restore_failure_reported = true;
             }
+
             return false;
         }
+
         target.restore_failure_reported = false;
         return true;
     }
@@ -2478,10 +2838,12 @@ private:
         {
             return target.hook && target.hook->enabled();
         }
+
         if (target.key.mechanism == KH_MECHANISM_VIRTUAL)
         {
             return target.virtual_hook && target.virtual_hook->Enabled();
         }
+
         return target.key.mechanism == KH_MECHANISM_VIRTUAL_INSTANCE && target.instance_enabled;
     }
 
@@ -2492,20 +2854,24 @@ private:
         void* user_data)
     {
         auto* target = static_cast<TargetRecord*>(user_data);
+
         if (!target || !target->service)
         {
             return DC_SIGCHAR_VOID;
         }
+
         return target->service->Dispatch(*target, native_arguments, native_result);
     }
 
     struct alignas(KEELHOOK_MAX_AGGREGATE_ALIGNMENT) AggregateStorage final
     {
         AggregateStorage() = default;
+
         ~AggregateStorage()
         {
             Reset();
         }
+
         AggregateStorage(const AggregateStorage&) = delete;
         AggregateStorage& operator=(const AggregateStorage&) = delete;
 
@@ -2536,6 +2902,7 @@ private:
                 {
                 }
             }
+
             constructed = false;
             operations = nullptr;
         }
@@ -2545,10 +2912,12 @@ private:
             Reset();
             bytes.fill(std::byte{});
             operations = value_operations;
+
             if (!initialize || !operations)
             {
                 return true;
             }
+
             try
             {
                 constructed = operations->default_construct(data()) == KEEL_TRUE;
@@ -2557,6 +2926,7 @@ private:
             {
                 constructed = false;
             }
+
             return constructed;
         }
 
@@ -2566,12 +2936,14 @@ private:
             {
                 return false;
             }
+
             try
             {
                 if (constructed)
                 {
                     return operations->copy_assign(data(), source) == KEEL_TRUE;
                 }
+
                 constructed = operations->copy_construct(data(), source) == KEEL_TRUE;
                 return constructed;
             }
@@ -2588,6 +2960,7 @@ private:
 
         alignas(KEELHOOK_MAX_AGGREGATE_ALIGNMENT)
             std::array<std::byte, KEELHOOK_MAX_AGGREGATE_SIZE> bytes{};
+
         const ObjectOperations* operations{};
         bool constructed{};
     };
@@ -2596,17 +2969,33 @@ private:
 
     struct Completions
     {
-        struct Entry { void (*cleanup)(void*); void* data; };
+        struct Entry
+        {
+            void (*cleanup)(void*);
+            void* data;
+        };
         std::array<Entry,8> entries{};
         std::size_t count{};
         void Run() noexcept {
             while (count) {
                 const auto entry = entries[--count];
-                try { entry.cleanup(entry.data); } catch (...) {}
+
+                try
+                {
+                    entry.cleanup(entry.data);
+                }
+                catch (...)
+                {
+                }
             }
         }
-        ~Completions() { Run(); }
+
+        ~Completions()
+        {
+            Run();
+        }
     };
+
     struct DispatchControl
     {
         KeelHookFrame* frame{};
@@ -2639,6 +3028,7 @@ private:
     {
         output.fill('\0');
         written = -1;
+
         if (!format)
         {
             return false;
@@ -2648,28 +3038,35 @@ private:
         {
             return false;
         }
+
         int64* list_address = source.stack_ptr;
         std::array<int64, numIntRegs> saved{};
         const int first = source.reg_count.i;
+
         if (first < numIntRegs)
         {
             list_address -= numIntRegs;
+
             for (int index = first; index < numIntRegs; ++index)
             {
                 saved[static_cast<std::size_t>(index)] = list_address[index];
                 list_address[index] = source.reg_data.i[index];
             }
+
             list_address += first;
         }
+
         static_assert(sizeof(va_list) == sizeof(void*));
         va_list arguments;
         auto* address = reinterpret_cast<char*>(list_address);
         std::memcpy(&arguments, &address, sizeof(arguments));
         written = std::vsnprintf(output.data(), output.size(), format, arguments);
         va_end(arguments);
+
         if (first < numIntRegs)
         {
             int64* homes = source.stack_ptr - numIntRegs;
+
             for (int index = first; index < numIntRegs; ++index)
             {
                 homes[index] = saved[static_cast<std::size_t>(index)];
@@ -2681,7 +3078,9 @@ private:
         {
             return false;
         }
+
         alignas(16) std::array<std::byte, 48 + numFloatRegs * 16> registers{};
+
         for (int index{}; index < numIntRegs; ++index)
         {
             std::memcpy(
@@ -2689,6 +3088,7 @@ private:
                 &source.reg_data.i[index],
                 sizeof(int64));
         }
+
         for (int index{}; index < numFloatRegs; ++index)
         {
             std::memcpy(
@@ -2696,6 +3096,7 @@ private:
                 &source.reg_data.f[index],
                 sizeof(double));
         }
+
         struct VaListState
         {
             std::uint32_t gp_offset;
@@ -2726,16 +3127,19 @@ private:
         std::shared_ptr<PrototypeBinding> binding;
         {
             std::scoped_lock lock(registry_mutex_);
+
             if (!target.bindings.empty())
             {
                 binding = target.bindings.begin()->second;
             }
         }
+
         if (!binding)
         {
             Log("target has no live prototype binding");
             return return_character;
         }
+
         std::array<KeelHookValue, KEELHOOK_MAX_ARGUMENTS> arguments{};
         ArgumentAggregateStorage argument_storage{};
         ExtractArguments(
@@ -2744,12 +3148,15 @@ private:
             native_arguments,
             arguments,
             argument_storage);
+
         std::array<char, KEELHOOK_VAFMT_BUFFER_SIZE> formatted{};
+
         if (target.prototype.vafmt)
         {
             const std::size_t format_index = target.prototype.arguments.size() - 1;
             const char* format = static_cast<const char*>(arguments[format_index].scalar.pointer);
             int written{};
+
             if (!FormatVafmt(*native_arguments, format, formatted, written))
             {
                 Log(
@@ -2758,8 +3165,10 @@ private:
                     std::to_string(native_arguments->reg_count.f) + ", result=" +
                     std::to_string(written));
             }
+
             arguments[format_index].scalar.pointer = formatted.data();
         }
+
         AggregateStorage result_storage{};
         KeelHookValue result{};
         InitializeValue(
@@ -2770,8 +3179,10 @@ private:
             result,
             result_storage,
             true);
+
         const RecallState* recall_state = recall_state_;
         recall_state_ = nullptr;
+
         if (recall_state && recall_state->target == &target && recall_state->overridden)
         {
             CopyValue(
@@ -2783,7 +3194,9 @@ private:
                 result,
                 result_storage);
         }
+
         target.active.fetch_add(1, std::memory_order_acq_rel);
+
         if (target_depth_ >= target_stack_.size())
         {
             result = CallOriginal(target, *binding, arguments, result_storage);
@@ -2793,9 +3206,11 @@ private:
                 result_storage,
                 native_arguments,
                 native_result);
+
             LeaveActive(target.active);
             return return_character;
         }
+
         target_stack_[target_depth_++] = &target;
 
         bool original_called{};
@@ -2806,6 +3221,7 @@ private:
         Completions completions;
         const CallbackRecord* recall_from =
             recall_state && recall_state->target == &target ? recall_state->callback : nullptr;
+
         try
         {
             std::vector<std::shared_ptr<CallbackRecord>> callbacks;
@@ -2813,6 +3229,7 @@ private:
                 std::scoped_lock lock(registry_mutex_);
                 callbacks = target.callbacks;
             }
+
             std::stable_sort(callbacks.begin(), callbacks.end(), [](const auto& left, const auto& right) {
                 return left->priority != right->priority
                     ? left->priority > right->priority
@@ -2845,13 +3262,16 @@ private:
                 &recalled,
                 &completions
             };
+
             if (dispatch_depth_ >= dispatch_stack_.size())
             {
                 throw std::runtime_error("dispatch control recursion limit was reached");
             }
+
             dispatch_stack_[dispatch_depth_++] = &control;
             control_pushed = true;
             std::size_t pre_start{};
+
             if (recall_from)
             {
                 const auto iterator = std::find_if(
@@ -2860,17 +3280,21 @@ private:
                     [recall_from](const auto& callback) {
                         return callback.get() == recall_from;
                     });
+
                 pre_start = iterator == callbacks.end()
                     ? callbacks.size()
                     : static_cast<std::size_t>(std::distance(callbacks.begin(), iterator)) + 1;
             }
+
             for (std::size_t index = pre_start; index < callbacks.size(); ++index)
             {
                 const auto& callback = callbacks[index];
+
                 if ((callback->phases & KH_PHASE_PRE) == 0)
                 {
                     continue;
                 }
+
                 const bool original_before = original_called;
                 SnapshotValues(
                     target.prototype,
@@ -2882,6 +3306,7 @@ private:
                     before_argument_storage,
                     before_result,
                     before_result_storage);
+
                 const KeelHookAction action = InvokeCallback(*callback, frame);
                 ValidateFrame(
                     frame,
@@ -2896,7 +3321,9 @@ private:
                     result_storage,
                     before_result,
                     before_result_storage);
+
                 const bool explicit_call = !original_before && original_called;
+
                 if (action == KH_ACTION_CONTINUE)
                 {
                     if (!explicit_call)
@@ -2942,6 +3369,7 @@ private:
                             argument_storage,
                             before_arguments,
                             before_argument_storage);
+
                         RestoreResult(
                             target.prototype,
                             result,
@@ -2949,9 +3377,12 @@ private:
                             before_result,
                             before_result_storage);
                     }
+
                     Log("callback returned an invalid action");
                 }
+
                 frame.result = result;
+
                 if (recalled)
                 {
                     break;
@@ -2966,7 +3397,9 @@ private:
                     *binding,
                     arguments,
                     original_storage);
+
                 original_called = true;
+
                 if (!overridden)
                 {
                     CopyValue(
@@ -2978,19 +3411,24 @@ private:
                         result,
                         result_storage);
                 }
+
                 frame.flags |= KH_FRAME_ORIGINAL_CALLED;
             }
+
             if (!recalled)
             {
                 frame.phase = KH_PHASE_POST;
                 frame.result = result;
+
                 for (auto iterator = callbacks.rbegin(); iterator != callbacks.rend(); ++iterator)
                 {
                     const auto& callback = *iterator;
+
                     if ((callback->phases & KH_PHASE_POST) == 0)
                     {
                         continue;
                     }
+
                     SnapshotValues(
                         target.prototype,
                         arguments,
@@ -3001,6 +3439,7 @@ private:
                         before_argument_storage,
                         before_result,
                         before_result_storage);
+
                     const KeelHookAction action = InvokeCallback(*callback, frame);
                     ValidateFrame(
                         frame,
@@ -3015,6 +3454,7 @@ private:
                         result_storage,
                         before_result,
                         before_result_storage);
+
                     if (action == KH_ACTION_OVERRIDE)
                     {
                         result = frame.result;
@@ -3029,8 +3469,10 @@ private:
                                 argument_storage,
                                 before_arguments,
                                 before_argument_storage);
+
                             Log("post callback returned an invalid action");
                         }
+
                         RestoreResult(
                             target.prototype,
                             result,
@@ -3038,6 +3480,7 @@ private:
                             before_result,
                             before_result_storage);
                     }
+
                     frame.result = result;
                 }
             }
@@ -3045,6 +3488,7 @@ private:
         catch (...)
         {
             Log("internal exception during callback dispatch");
+
             if (!original_called && !superseded)
             {
                 result = CallOriginal(target, *binding, arguments, result_storage);
@@ -3063,6 +3507,7 @@ private:
             result_storage,
             native_arguments,
             native_result);
+
         completions.Run();
         --target_depth_;
         target_stack_[target_depth_] = nullptr;
@@ -3073,19 +3518,23 @@ private:
     KeelHookAction InvokeCallback(CallbackRecord& callback, KeelHookFrame& frame) noexcept
     {
         callback.active.fetch_add(1, std::memory_order_acq_rel);
+
         if (!callback.enabled.load(std::memory_order_acquire))
         {
             LeaveActive(callback.active);
             return KH_ACTION_CONTINUE;
         }
+
         if (callback_depth_ >= callback_stack_.size())
         {
             LeaveActive(callback.active);
             Log("callback recursion limit was reached");
             return KH_ACTION_CONTINUE;
         }
+
         callback_stack_[callback_depth_++] = &callback;
         KeelHookAction action = KH_ACTION_CONTINUE;
+
         try
         {
             action = callback.callback(&frame, callback.user_data);
@@ -3094,6 +3543,7 @@ private:
         {
             Log("plugin threw from a KeelHook callback");
         }
+
         --callback_depth_;
         callback_stack_[callback_depth_] = nullptr;
         LeaveActive(callback.active);
@@ -3110,6 +3560,7 @@ private:
         {
             return nullptr;
         }
+
         DispatchControl* control = dispatch_stack_[dispatch_depth_ - 1];
         return control && control->frame == frame ? control : nullptr;
     }
@@ -3117,24 +3568,29 @@ private:
     KeelResult CallOriginalControl(KeelPluginHandle plugin, KeelHookFrame* frame)
     {
         DispatchControl* control = CurrentControl(plugin, frame);
+
         if (!control)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         if (frame->phase != KH_PHASE_PRE)
         {
             return KEEL_RESULT_UNSUPPORTED;
         }
+
         if (*control->original_called || *control->superseded)
         {
             return KEEL_RESULT_ALREADY_EXISTS;
         }
+
         AggregateStorage storage{};
         const KeelHookValue value = CallOriginal(
             *control->target,
             *control->binding,
             *control->arguments,
             storage);
+
         CopyValue(
             control->target->prototype.return_type,
             control->target->prototype.return_aggregate,
@@ -3143,6 +3599,7 @@ private:
             storage,
             *control->result,
             *control->result_storage);
+
         frame->result = *control->result;
         *control->original_called = true;
         frame->flags |= KH_FRAME_ORIGINAL_CALLED;
@@ -3152,22 +3609,27 @@ private:
     KeelResult RecallControl(KeelPluginHandle plugin, KeelHookFrame* frame)
     {
         DispatchControl* control = CurrentControl(plugin, frame);
+
         if (!control)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         if (frame->phase != KH_PHASE_PRE || !control->target->closure)
         {
             return KEEL_RESULT_UNSUPPORTED;
         }
+
         if (*control->original_called || *control->superseded)
         {
             return KEEL_RESULT_ALREADY_EXISTS;
         }
+
         if (target_depth_ >= target_stack_.size())
         {
             return KEEL_RESULT_BUSY;
         }
+
         const RecallState* previous_state = recall_state_;
         const RecallState recall_state{
             control->target,
@@ -3184,6 +3646,7 @@ private:
             static_cast<void*>(control->target->closure),
             *control->arguments,
             storage);
+
         recall_state_ = previous_state;
         CopyValue(
             control->target->prototype.return_type,
@@ -3193,6 +3656,7 @@ private:
             storage,
             *control->result,
             *control->result_storage);
+
         frame->result = *control->result;
         *control->original_called = true;
         *control->recalled = true;
@@ -3209,12 +3673,14 @@ private:
     {
         output = {};
         output.type = type;
+
         if (type == KH_VALUE_AGGREGATE && (aggregate || object))
         {
             output.scalar.aggregate.data = storage.data();
             output.scalar.aggregate.size = aggregate
                 ? aggregate->byte_size
                 : object->byte_size;
+
             output.scalar.aggregate.reserved = storage.constructed
                 ? KH_VALUE_OBJECT_CONSTRUCTED
                 : 0;
@@ -3246,24 +3712,29 @@ private:
         {
             return false;
         }
+
         if (type != KH_VALUE_AGGREGATE)
         {
             return true;
         }
+
         if ((!aggregate && !object) || value.scalar.aggregate.data != storage.data() ||
             value.scalar.aggregate.size != (aggregate ? aggregate->byte_size : object->byte_size))
         {
             return false;
         }
+
         if (aggregate)
         {
             return value.scalar.aggregate.reserved == 0;
         }
+
         if (value.scalar.aggregate.reserved == KH_VALUE_OBJECT_CONSTRUCTED &&
             !storage.constructed && storage.operations)
         {
             storage.AdoptConstructed();
         }
+
         return value.scalar.aggregate.reserved ==
             (storage.constructed ? KH_VALUE_OBJECT_CONSTRUCTED : 0);
     }
@@ -3282,9 +3753,11 @@ private:
             output = source;
             return;
         }
+
         if (object)
         {
             static_cast<void>(output_storage.Prepare(source_storage.operations, false));
+
             if (source_storage.constructed && !output_storage.CopyFrom(source_storage.data()))
             {
                 static_cast<void>(output_storage.Prepare(source_storage.operations, true));
@@ -3293,11 +3766,13 @@ private:
         else
         {
             static_cast<void>(output_storage.Prepare(nullptr, false));
+
             if (aggregate)
             {
                 std::memcpy(output_storage.data(), source_storage.data(), aggregate->byte_size);
             }
         }
+
         BindValue(type, aggregate, object, output, output_storage);
     }
 
@@ -3323,6 +3798,7 @@ private:
                 output_arguments[index],
                 output_argument_storage[index]);
         }
+
         CopyValue(
             prototype.return_type,
             prototype.return_aggregate,
@@ -3402,6 +3878,7 @@ private:
                     argument_storage[index]);
             }
         }
+
         if (!RuntimeValueValid(
                 target.prototype.return_type,
                 target.prototype.return_aggregate,
@@ -3418,6 +3895,7 @@ private:
                 frame.result,
                 result_storage);
         }
+
         frame.size = sizeof(KeelHookFrame);
         frame.phase = phase;
         frame.target = target.handle;
@@ -3443,38 +3921,77 @@ private:
                 binding.argument_objects[index].get(),
                 value,
                 storage[index]);
+
             switch (value.type)
             {
-                case KH_VALUE_BOOL: value.scalar.boolean = dcbArgBool(source) ? KEEL_TRUE : KEEL_FALSE; break;
-                case KH_VALUE_INT8: value.scalar.int8 = dcbArgChar(source); break;
-                case KH_VALUE_UINT8: value.scalar.uint8 = dcbArgUChar(source); break;
-                case KH_VALUE_INT16: value.scalar.int16 = dcbArgShort(source); break;
-                case KH_VALUE_UINT16: value.scalar.uint16 = dcbArgUShort(source); break;
-                case KH_VALUE_INT32: value.scalar.int32 = dcbArgInt(source); break;
-                case KH_VALUE_UINT32: value.scalar.uint32 = dcbArgUInt(source); break;
-                case KH_VALUE_INT64: value.scalar.int64 = dcbArgLongLong(source); break;
-                case KH_VALUE_UINT64: value.scalar.uint64 = dcbArgULongLong(source); break;
-                case KH_VALUE_POINTER: value.scalar.pointer = dcbArgPointer(source); break;
-                case KH_VALUE_FLOAT32: value.scalar.float32 = dcbArgFloat(source); break;
-                case KH_VALUE_FLOAT64: value.scalar.float64 = dcbArgDouble(source); break;
-                case KH_VALUE_AGGREGATE:
-                    if (prototype.argument_objects[index])
-                    {
-                        void* object = dcbArgAggr(source, nullptr);
-                        static_cast<void>(storage[index].CopyFrom(object));
-                        BindValue(
-                            value.type,
-                            prototype.argument_aggregates[index],
-                            prototype.argument_objects[index],
-                            value,
-                            storage[index]);
-                    }
-                    else
-                    {
-                        dcbArgAggr(source, storage[index].data());
-                    }
-                    break;
-                default: break;
+            case KH_VALUE_BOOL:
+                value.scalar.boolean = dcbArgBool(source) ? KEEL_TRUE : KEEL_FALSE;
+                break;
+
+            case KH_VALUE_INT8:
+                value.scalar.int8 = dcbArgChar(source);
+                break;
+
+            case KH_VALUE_UINT8:
+                value.scalar.uint8 = dcbArgUChar(source);
+                break;
+
+            case KH_VALUE_INT16:
+                value.scalar.int16 = dcbArgShort(source);
+                break;
+
+            case KH_VALUE_UINT16:
+                value.scalar.uint16 = dcbArgUShort(source);
+                break;
+
+            case KH_VALUE_INT32:
+                value.scalar.int32 = dcbArgInt(source);
+                break;
+
+            case KH_VALUE_UINT32:
+                value.scalar.uint32 = dcbArgUInt(source);
+                break;
+
+            case KH_VALUE_INT64:
+                value.scalar.int64 = dcbArgLongLong(source);
+                break;
+
+            case KH_VALUE_UINT64:
+                value.scalar.uint64 = dcbArgULongLong(source);
+                break;
+
+            case KH_VALUE_POINTER:
+                value.scalar.pointer = dcbArgPointer(source);
+                break;
+
+            case KH_VALUE_FLOAT32:
+                value.scalar.float32 = dcbArgFloat(source);
+                break;
+
+            case KH_VALUE_FLOAT64:
+                value.scalar.float64 = dcbArgDouble(source);
+                break;
+
+            case KH_VALUE_AGGREGATE:
+                if (prototype.argument_objects[index])
+                {
+                    void* object = dcbArgAggr(source, nullptr);
+                    static_cast<void>(storage[index].CopyFrom(object));
+                    BindValue(value.type,
+                              prototype.argument_aggregates[index],
+                              prototype.argument_objects[index],
+                              value,
+                              storage[index]);
+                }
+                else
+                {
+                    dcbArgAggr(source, storage[index].data());
+                }
+
+                break;
+
+            default:
+                break;
             }
         }
     }
@@ -3486,25 +4003,61 @@ private:
     {
         switch (value.type)
         {
-            case KH_VALUE_BOOL: dcArgBool(machine, value.scalar.boolean != KEEL_FALSE); break;
-            case KH_VALUE_INT8: dcArgChar(machine, value.scalar.int8); break;
-            case KH_VALUE_UINT8: dcArgChar(machine, BitCopy<DCchar>(value.scalar.uint8)); break;
-            case KH_VALUE_INT16: dcArgShort(machine, value.scalar.int16); break;
-            case KH_VALUE_UINT16: dcArgShort(machine, BitCopy<DCshort>(value.scalar.uint16)); break;
-            case KH_VALUE_INT32: dcArgInt(machine, value.scalar.int32); break;
-            case KH_VALUE_UINT32: dcArgInt(machine, BitCopy<DCint>(value.scalar.uint32)); break;
-            case KH_VALUE_INT64: dcArgLongLong(machine, value.scalar.int64); break;
-            case KH_VALUE_UINT64: dcArgLongLong(machine, BitCopy<DClonglong>(value.scalar.uint64)); break;
-            case KH_VALUE_POINTER: dcArgPointer(machine, value.scalar.pointer); break;
-            case KH_VALUE_FLOAT32: dcArgFloat(machine, value.scalar.float32); break;
-            case KH_VALUE_FLOAT64: dcArgDouble(machine, value.scalar.float64); break;
-            case KH_VALUE_AGGREGATE:
-                dcArgAggr(
-                    machine,
-                    aggregate ? aggregate->native.get() : nullptr,
-                    value.scalar.aggregate.data);
-                break;
-            default: break;
+        case KH_VALUE_BOOL:
+            dcArgBool(machine, value.scalar.boolean != KEEL_FALSE);
+            break;
+
+        case KH_VALUE_INT8:
+            dcArgChar(machine, value.scalar.int8);
+            break;
+
+        case KH_VALUE_UINT8:
+            dcArgChar(machine, BitCopy<DCchar>(value.scalar.uint8));
+            break;
+
+        case KH_VALUE_INT16:
+            dcArgShort(machine, value.scalar.int16);
+            break;
+
+        case KH_VALUE_UINT16:
+            dcArgShort(machine, BitCopy<DCshort>(value.scalar.uint16));
+            break;
+
+        case KH_VALUE_INT32:
+            dcArgInt(machine, value.scalar.int32);
+            break;
+
+        case KH_VALUE_UINT32:
+            dcArgInt(machine, BitCopy<DCint>(value.scalar.uint32));
+            break;
+
+        case KH_VALUE_INT64:
+            dcArgLongLong(machine, value.scalar.int64);
+            break;
+
+        case KH_VALUE_UINT64:
+            dcArgLongLong(machine, BitCopy<DClonglong>(value.scalar.uint64));
+            break;
+
+        case KH_VALUE_POINTER:
+            dcArgPointer(machine, value.scalar.pointer);
+            break;
+
+        case KH_VALUE_FLOAT32:
+            dcArgFloat(machine, value.scalar.float32);
+            break;
+
+        case KH_VALUE_FLOAT64:
+            dcArgDouble(machine, value.scalar.float64);
+            break;
+
+        case KH_VALUE_AGGREGATE:
+            dcArgAggr(machine, aggregate ? aggregate->native.get() : nullptr, value.scalar.aggregate.data);
+
+            break;
+
+        default:
+            break;
         }
     }
 
@@ -3534,6 +4087,7 @@ private:
         {
             *status = KEEL_RESULT_ENGINE_FAILURE;
         }
+
         KeelHookValue result{};
         InitializeValue(
             target.prototype.return_type,
@@ -3542,14 +4096,17 @@ private:
             binding.return_object.get(),
             result,
             result_storage);
+
         std::array<KeelHookValue, KEELHOOK_MAX_ARGUMENTS> native_arguments = arguments;
         ArgumentAggregateStorage native_storage{};
+
         for (std::size_t index{}; index < target.prototype.arguments.size(); ++index)
         {
             if (!target.prototype.argument_objects[index])
             {
                 continue;
             }
+
             InitializeValue(
                 target.prototype.arguments[index],
                 target.prototype.argument_aggregates[index],
@@ -3557,6 +4114,7 @@ private:
                 binding.argument_objects[index].get(),
                 native_arguments[index],
                 native_storage[index]);
+
             if (arguments[index].scalar.aggregate.reserved != KH_VALUE_OBJECT_CONSTRUCTED ||
                 !native_storage[index].CopyFrom(arguments[index].scalar.aggregate.data))
             {
@@ -3569,8 +4127,10 @@ private:
                     result,
                     result_storage,
                     true));
+
                 return result;
             }
+
             BindValue(
                 target.prototype.arguments[index],
                 target.prototype.argument_aggregates[index],
@@ -3578,7 +4138,9 @@ private:
                 native_arguments[index],
                 native_storage[index]);
         }
+
         DCCallVM* machine = function ? dcNewCallVM(4096) : nullptr;
+
         if (!machine)
         {
             Log("original target could not be invoked");
@@ -3590,13 +4152,16 @@ private:
                 result,
                 result_storage,
                 true));
+
             return result;
         }
+
         dcMode(
             machine,
             target.prototype.method
                 ? DC_CALL_C_DEFAULT_THIS
                 : target.prototype.vafmt ? DC_CALL_C_ELLIPSIS : DC_CALL_C_DEFAULT);
+
         if (target.prototype.return_type == KH_VALUE_AGGREGATE)
         {
             dcBeginCallAggr(
@@ -3605,21 +4170,26 @@ private:
                     ? target.prototype.return_aggregate->native.get()
                     : nullptr);
         }
+
         std::size_t first{};
+
         if (target.prototype.method)
         {
             AddNativeArgument(
                 machine,
                 native_arguments[0],
                 target.prototype.argument_aggregates[0]);
+
             first = 1;
         }
+
         if (target.prototype.vafmt)
         {
             if (target.prototype.method)
             {
                 dcMode(machine, DC_CALL_C_ELLIPSIS);
             }
+
             for (std::size_t index = first; index + 1 < target.prototype.arguments.size(); ++index)
             {
                 AddNativeArgument(
@@ -3627,6 +4197,7 @@ private:
                     native_arguments[index],
                     target.prototype.argument_aggregates[index]);
             }
+
             dcArgPointer(machine, const_cast<char*>("%s"));
             dcMode(machine, DC_CALL_C_ELLIPSIS_VARARGS);
             dcArgPointer(
@@ -3643,6 +4214,7 @@ private:
                     target.prototype.argument_aggregates[index]);
             }
         }
+
         if (dcGetError(machine) != DC_ERROR_NONE)
         {
             Log("native call adapter rejected the calling convention or arguments");
@@ -3655,46 +4227,91 @@ private:
                 result,
                 result_storage,
                 true));
+
             return result;
         }
+
         switch (target.prototype.return_type)
         {
-            case KH_VALUE_VOID: dcCallVoid(machine, function); break;
-            // Native C/C++ bool returns occupy one byte. DCbool is an int and
-            // would include unspecified upper return-register bits.
-            case KH_VALUE_BOOL: result.scalar.boolean = dcCallChar(machine, function) ? KEEL_TRUE : KEEL_FALSE; break;
-            case KH_VALUE_INT8: result.scalar.int8 = dcCallChar(machine, function); break;
-            case KH_VALUE_UINT8: result.scalar.uint8 = BitCopy<std::uint8_t>(dcCallChar(machine, function)); break;
-            case KH_VALUE_INT16: result.scalar.int16 = dcCallShort(machine, function); break;
-            case KH_VALUE_UINT16: result.scalar.uint16 = BitCopy<std::uint16_t>(dcCallShort(machine, function)); break;
-            case KH_VALUE_INT32: result.scalar.int32 = dcCallInt(machine, function); break;
-            case KH_VALUE_UINT32: result.scalar.uint32 = BitCopy<std::uint32_t>(dcCallInt(machine, function)); break;
-            case KH_VALUE_INT64: result.scalar.int64 = dcCallLongLong(machine, function); break;
-            case KH_VALUE_UINT64: result.scalar.uint64 = BitCopy<std::uint64_t>(dcCallLongLong(machine, function)); break;
-            case KH_VALUE_POINTER: result.scalar.pointer = dcCallPointer(machine, function); break;
-            case KH_VALUE_FLOAT32: result.scalar.float32 = dcCallFloat(machine, function); break;
-            case KH_VALUE_FLOAT64: result.scalar.float64 = dcCallDouble(machine, function); break;
-            case KH_VALUE_AGGREGATE:
-                dcCallAggr(
-                    machine,
-                    function,
-                    target.prototype.return_aggregate
-                        ? target.prototype.return_aggregate->native.get()
-                        : nullptr,
-                    result_storage.data());
-                break;
-            default: break;
+        case KH_VALUE_VOID:
+            dcCallVoid(machine, function);
+            break;
+        // Native C/C++ bool returns occupy one byte. DCbool is an int and
+        // would include unspecified upper return-register bits.
+        case KH_VALUE_BOOL:
+            result.scalar.boolean = dcCallChar(machine, function) ? KEEL_TRUE : KEEL_FALSE;
+            break;
+
+        case KH_VALUE_INT8:
+            result.scalar.int8 = dcCallChar(machine, function);
+            break;
+
+        case KH_VALUE_UINT8:
+            result.scalar.uint8 = BitCopy<std::uint8_t>(dcCallChar(machine, function));
+            break;
+
+        case KH_VALUE_INT16:
+            result.scalar.int16 = dcCallShort(machine, function);
+            break;
+
+        case KH_VALUE_UINT16:
+            result.scalar.uint16 = BitCopy<std::uint16_t>(dcCallShort(machine, function));
+            break;
+
+        case KH_VALUE_INT32:
+            result.scalar.int32 = dcCallInt(machine, function);
+            break;
+
+        case KH_VALUE_UINT32:
+            result.scalar.uint32 = BitCopy<std::uint32_t>(dcCallInt(machine, function));
+            break;
+
+        case KH_VALUE_INT64:
+            result.scalar.int64 = dcCallLongLong(machine, function);
+            break;
+
+        case KH_VALUE_UINT64:
+            result.scalar.uint64 = BitCopy<std::uint64_t>(dcCallLongLong(machine, function));
+            break;
+
+        case KH_VALUE_POINTER:
+            result.scalar.pointer = dcCallPointer(machine, function);
+            break;
+
+        case KH_VALUE_FLOAT32:
+            result.scalar.float32 = dcCallFloat(machine, function);
+            break;
+
+        case KH_VALUE_FLOAT64:
+            result.scalar.float64 = dcCallDouble(machine, function);
+            break;
+
+        case KH_VALUE_AGGREGATE:
+            dcCallAggr(machine,
+                       function,
+                       target.prototype.return_aggregate ? target.prototype.return_aggregate->native.get() : nullptr,
+                       result_storage.data());
+
+            break;
+
+        default:
+            break;
         }
+
         const bool call_ok = dcGetError(machine) == DC_ERROR_NONE;
+
         if (status && call_ok)
         {
             *status = KEEL_RESULT_OK;
         }
+
         if (!call_ok)
         {
             Log("native call adapter reported an error");
         }
+
         dcFree(machine);
+
         if (target.prototype.return_object)
         {
             if (call_ok)
@@ -3705,6 +4322,7 @@ private:
             {
                 static_cast<void>(result_storage.Prepare(binding.return_object.get(), true));
             }
+
             BindValue(
                 target.prototype.return_type,
                 target.prototype.return_aggregate,
@@ -3712,6 +4330,7 @@ private:
                 result,
                 result_storage);
         }
+
         return result;
     }
 
@@ -3726,60 +4345,101 @@ private:
         {
             return;
         }
+
         std::memset(output, 0, sizeof(*output));
+
         switch (value.type)
         {
-            case KH_VALUE_BOOL: output->B = value.scalar.boolean != KEEL_FALSE; break;
-            case KH_VALUE_INT8: output->c = value.scalar.int8; break;
-            case KH_VALUE_UINT8: output->C = value.scalar.uint8; break;
-            case KH_VALUE_INT16: output->s = value.scalar.int16; break;
-            case KH_VALUE_UINT16: output->S = value.scalar.uint16; break;
-            case KH_VALUE_INT32: output->i = value.scalar.int32; break;
-            case KH_VALUE_UINT32: output->I = value.scalar.uint32; break;
-            case KH_VALUE_INT64: output->l = value.scalar.int64; break;
-            case KH_VALUE_UINT64: output->L = value.scalar.uint64; break;
-            case KH_VALUE_POINTER: output->p = value.scalar.pointer; break;
-            case KH_VALUE_FLOAT32: output->f = value.scalar.float32; break;
-            case KH_VALUE_FLOAT64: output->d = value.scalar.float64; break;
-            case KH_VALUE_AGGREGATE:
-                if (prototype.return_aggregate && arguments && value.scalar.aggregate.data)
+        case KH_VALUE_BOOL:
+            output->B = value.scalar.boolean != KEEL_FALSE;
+            break;
+
+        case KH_VALUE_INT8:
+            output->c = value.scalar.int8;
+            break;
+
+        case KH_VALUE_UINT8:
+            output->C = value.scalar.uint8;
+            break;
+
+        case KH_VALUE_INT16:
+            output->s = value.scalar.int16;
+            break;
+
+        case KH_VALUE_UINT16:
+            output->S = value.scalar.uint16;
+            break;
+
+        case KH_VALUE_INT32:
+            output->i = value.scalar.int32;
+            break;
+
+        case KH_VALUE_UINT32:
+            output->I = value.scalar.uint32;
+            break;
+
+        case KH_VALUE_INT64:
+            output->l = value.scalar.int64;
+            break;
+
+        case KH_VALUE_UINT64:
+            output->L = value.scalar.uint64;
+            break;
+
+        case KH_VALUE_POINTER:
+            output->p = value.scalar.pointer;
+            break;
+
+        case KH_VALUE_FLOAT32:
+            output->f = value.scalar.float32;
+            break;
+
+        case KH_VALUE_FLOAT64:
+            output->d = value.scalar.float64;
+            break;
+
+        case KH_VALUE_AGGREGATE:
+            if (prototype.return_aggregate && arguments && value.scalar.aggregate.data)
+            {
+                dcbReturnAggr(arguments, output, value.scalar.aggregate.data);
+            }
+            else if (prototype.return_object && arguments)
+            {
+                dcbReturnAggr(arguments, output, nullptr);
+                bool copied{};
+
+                if (output->p && value_storage.constructed && value_storage.operations)
                 {
-                    dcbReturnAggr(arguments, output, value.scalar.aggregate.data);
+                    try
+                    {
+                        copied = value_storage.operations->copy_construct(output->p, value_storage.data()) == KEEL_TRUE;
+                    }
+                    catch (...)
+                    {
+                    }
                 }
-                else if (prototype.return_object && arguments)
+
+                if (!copied)
                 {
-                    dcbReturnAggr(arguments, output, nullptr);
-                    bool copied{};
-                    if (output->p && value_storage.constructed && value_storage.operations)
+                    Log("object return value could not be copied to the caller");
+
+                    if (output->p && value_storage.operations)
                     {
                         try
                         {
-                            copied = value_storage.operations->copy_construct(
-                                output->p,
-                                value_storage.data()) == KEEL_TRUE;
+                            static_cast<void>(value_storage.operations->default_construct(output->p));
                         }
                         catch (...)
                         {
                         }
                     }
-                    if (!copied)
-                    {
-                        Log("object return value could not be copied to the caller");
-                        if (output->p && value_storage.operations)
-                        {
-                            try
-                            {
-                                static_cast<void>(
-                                    value_storage.operations->default_construct(output->p));
-                            }
-                            catch (...)
-                            {
-                            }
-                        }
-                    }
                 }
-                break;
-            default: break;
+            }
+
+            break;
+
+        default:
+            break;
         }
     }
 
@@ -3811,10 +4471,12 @@ private:
         {
             return KEEL_RESULT_AMBIGUOUS;
         }
+
         if (lookup == platform::ModuleLookup::not_found)
         {
             return KEEL_RESULT_NOT_FOUND;
         }
+
         return KEEL_RESULT_ENGINE_FAILURE;
     }
 
@@ -3838,6 +4500,7 @@ private:
                 return true;
             }
         }
+
         return false;
     }
 
@@ -3869,6 +4532,7 @@ private:
     static void WaitForZero(std::atomic<std::uint32_t>& value)
     {
         std::uint32_t current = value.load(std::memory_order_acquire);
+
         while (current != 0)
         {
             value.wait(current, std::memory_order_acquire);
@@ -3889,6 +4553,7 @@ private:
         for (auto iterator = targets_.begin(); iterator != targets_.end();)
         {
             const auto& target = iterator->second;
+
             if (!target->transition && target->leases.empty() && target->callbacks.empty())
             {
                 targets_by_key_.erase(target->key);
@@ -3908,22 +4573,27 @@ private:
         {
             return;
         }
+
         std::vector<std::shared_ptr<TargetRecord>> candidates;
         {
             std::scoped_lock lock(registry_mutex_);
+
             for (const auto& [handle, target] : targets_)
             {
                 static_cast<void>(handle);
+
                 if (!target->transition && target->callbacks.empty())
                 {
                     candidates.push_back(target);
                 }
             }
+
             candidates.insert(candidates.end(), retired_targets_.begin(), retired_targets_.end());
             std::sort(candidates.begin(), candidates.end(), [](const auto& left, const auto& right) {
                 return left->handle < right->handle;
             });
         }
+
         for (const auto& target : candidates)
         {
             if (target->active.load(std::memory_order_acquire) == 0)
@@ -3931,6 +4601,7 @@ private:
                 DestroyPhysical(*target);
             }
         }
+
         std::scoped_lock lock(registry_mutex_);
         retired_targets_.erase(
             std::remove_if(retired_targets_.begin(), retired_targets_.end(), [](const auto& target) {
@@ -3939,16 +4610,20 @@ private:
                     !target->instance_enabled && !target->closure;
             }),
             retired_targets_.end());
+
         for (auto iterator = instance_tables_.begin(); iterator != instance_tables_.end();)
         {
             const auto& record = iterator->second;
             const bool active = std::any_of(targets_.begin(), targets_.end(), [&](const auto& entry) {
                 return entry.second->instance_table == record;
             });
-            const bool retired = std::any_of(
-                retired_targets_.begin(),
-                retired_targets_.end(),
-                [&](const auto& target) { return target->instance_table == record; });
+            const bool retired = std::any_of(retired_targets_.begin(),
+                                             retired_targets_.end(),
+                                             [&](const auto& target)
+                                             {
+                                                 return target->instance_table == record;
+                                             });
+
             if (!active && !retired && record->table->Empty())
             {
                 iterator = instance_tables_.erase(iterator);
@@ -3963,15 +4638,18 @@ private:
     bool DestroyPhysical(TargetRecord& target)
     {
         std::scoped_lock lock(target.physical_mutex);
+
         if (target.active.load(std::memory_order_acquire) != 0 ||
             PhysicalEnabled(target))
         {
             return false;
         }
+
         if (target.hook)
         {
             const auto hazards = PhysicalHazards(target);
             const auto quiesced = target.hook->quiesce(hazards);
+
             if (!quiesced)
             {
                 if (!target.quiescence_failure_reported)
@@ -3979,6 +4657,7 @@ private:
                     Log("native callback retirement is waiting for a safe thread state");
                     target.quiescence_failure_reported = true;
                 }
+
                 return false;
             }
         }
@@ -3986,6 +4665,7 @@ private:
         {
             const auto hazards = PhysicalHazards(target);
             const std::span<const safetyhook::IpMapping> mappings;
+
             if (!safetyhook::trap_threads(
                     reinterpret_cast<std::uint8_t*>(target.address),
                     1,
@@ -3998,29 +4678,35 @@ private:
                     Log("native callback retirement is waiting for a safe thread state");
                     target.quiescence_failure_reported = true;
                 }
+
                 return false;
             }
         }
+
         target.quiescence_failure_reported = false;
         target.trampoline.store(nullptr, std::memory_order_release);
         target.hook.reset();
         target.virtual_hook.reset();
         target.instance_enabled = false;
+
         if (target.closure)
         {
             dcbFreeCallback(target.closure);
             target.closure = nullptr;
         }
+
         return true;
     }
 
     std::vector<safetyhook::IpRange> PhysicalHazards(const TargetRecord& target) const
     {
         std::vector<safetyhook::IpRange> hazards = entry_hazards_;
+
         if (target.closure)
         {
             hazards.push_back({reinterpret_cast<std::uint8_t*>(target.closure), 24});
         }
+
         return hazards;
     }
 
@@ -4075,40 +4761,55 @@ KeelResult KeelHookService::Implementation::InvokeScalar(
     {
         return KEEL_RESULT_BUSY;
     }
+
     std::shared_ptr<TargetRecord> target;
     std::shared_ptr<PrototypeBinding> binding;
     void* function{};
     {
         std::scoped_lock lock(registry_mutex_);
+
         if (!OwnerReadyLocked(plugin))
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         const auto found = targets_.find(handle);
+
         if (found == targets_.end() || !found->second->leases.contains(plugin))
         {
             return KEEL_RESULT_NOT_FOUND;
         }
+
         target = found->second;
+
         if (target->transition)
         {
             return KEEL_RESULT_BUSY;
         }
+
         const auto& prototype = target->prototype;
+
         if (target->key.mechanism != KH_MECHANISM_DETOUR || prototype.vafmt ||
             (prototype.return_type != KH_VALUE_VOID && !IsScalarValueType(prototype.return_type)) ||
-            std::any_of(prototype.arguments.begin(), prototype.arguments.end(),
-                [](auto type) { return !IsScalarValueType(type); }))
+            std::any_of(prototype.arguments.begin(),
+                        prototype.arguments.end(),
+                        [](auto type)
+                        {
+                            return !IsScalarValueType(type);
+                        }))
         {
             return KEEL_RESULT_UNSUPPORTED;
         }
+
         if (prototype.arguments.size() != argument_count)
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         for (std::size_t index{}; index < argument_count; ++index)
         {
             const auto& value = arguments[index];
+
             if (value.type != prototype.arguments[index] || value.reserved != 0 ||
                 (value.type == KH_VALUE_BOOL && value.scalar.boolean != KEEL_FALSE &&
                  value.scalar.boolean != KEEL_TRUE))
@@ -4116,10 +4817,12 @@ KeelResult KeelHookService::Implementation::InvokeScalar(
                 return KEEL_RESULT_INVALID_ARGUMENT;
             }
         }
+
         if (prototype.method && !arguments[0].scalar.pointer)
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         binding = target->bindings.at(plugin);
         // Take the same lock used by physical destruction before admitting this
         // call. Active retention prevents later destruction; direct_calls stops
@@ -4128,19 +4831,24 @@ KeelResult KeelHookService::Implementation::InvokeScalar(
         function = (flags & KEELCALL_INVOKE_HOOKS) && target->closure
             ? static_cast<void*>(target->closure)
             : target->trampoline.load(std::memory_order_acquire);
+
         if (!function)
         {
             function = target->address;
         }
+
         ++target->direct_calls;
         target->active.fetch_add(1, std::memory_order_acq_rel);
     }
+
     target_stack_[target_depth_++] = target.get();
     ++direct_call_depth_;
+
     struct ActiveCall
     {
         Implementation& service;
         TargetRecord& target;
+
         ~ActiveCall()
         {
             --direct_call_depth_;
@@ -4153,10 +4861,12 @@ KeelResult KeelHookService::Implementation::InvokeScalar(
     AggregateStorage storage;
     KeelResult status{};
     const auto value = CallFunction(*target, *binding, function, arguments, storage, &status);
+
     if (status == KEEL_RESULT_OK)
     {
         result = value;
     }
+
     return status;
 }
 
@@ -4166,6 +4876,7 @@ KeelHookService::Implementation::Snapshots() const
     std::scoped_lock lock(registry_mutex_);
     std::vector<KeelHookService::TargetSnapshot> output;
     output.reserve(targets_.size());
+
     for (const auto& [handle, target] : targets_)
     {
         KeelHookService::TargetSnapshot snapshot;
@@ -4175,6 +4886,7 @@ KeelHookService::Implementation::Snapshots() const
         snapshot.module_path = target->module_path.string();
         snapshot.leases = target->leases.size();
         snapshot.bindings = target->bindings.size();
+
         snapshot.active = target->active.load(std::memory_order_acquire);
         {
             std::scoped_lock physical_lock(target->physical_mutex);
@@ -4182,6 +4894,7 @@ KeelHookService::Implementation::Snapshots() const
             snapshot.virtual_slot = reinterpret_cast<std::uintptr_t>(target->virtual_slot);
             snapshot.physical_enabled = PhysicalEnabled(*target);
             snapshot.physical_intact = snapshot.physical_enabled;
+
             if (target->key.mechanism == KH_MECHANISM_VIRTUAL && target->virtual_slot)
             {
                 std::atomic_ref<void*> slot(*target->virtual_slot);
@@ -4196,7 +4909,9 @@ KeelHookService::Implementation::Snapshots() const
                 snapshot.physical_intact = target->instance_table->table->Intact();
             }
         }
+
         snapshot.callbacks.reserve(target->callbacks.size());
+
         for (const auto& callback : target->callbacks)
         {
             snapshot.callbacks.push_back({
@@ -4208,8 +4923,10 @@ KeelHookService::Implementation::Snapshots() const
                 callback->active.load(std::memory_order_acquire)
             });
         }
+
         output.push_back(std::move(snapshot));
     }
+
     std::sort(output.begin(), output.end(), [](const auto& left, const auto& right) {
         return left.handle < right.handle;
     });
@@ -4260,18 +4977,23 @@ KeelResult KeelHookService::InvokeEntry(KeelPluginHandle plugin, KeelHookTargetH
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     if (!target || (flags & ~KEELCALL_INVOKE_HOOKS) != 0 ||
         argument_count > KEELHOOK_MAX_ARGUMENTS || (argument_count && !arguments))
     {
         *result = {};
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     std::array<KeelHookValue, KEELHOOK_MAX_ARGUMENTS> snapshot{};
+
     if (argument_count)
     {
         std::copy_n(arguments, argument_count, snapshot.begin());
     }
+
     *result = {};
+
     try
     {
         Host& host = Host::Instance();
@@ -4280,26 +5002,34 @@ KeelResult KeelHookService::InvokeEntry(KeelPluginHandle plugin, KeelHookTargetH
         const bool running = owner && host.accepting_resources_ && owner->accepting_resources &&
             !owner->cleanup_pending && (owner->loading ||
                 (owner->state == PluginState::loaded && !owner->transitioning));
+
         if (!running || !host.adapter_ || !host.keelhook_)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         if (!host.adapter_->IsGameThread())
         {
             return KEEL_RESULT_WRONG_THREAD;
         }
+
         if (owner->active_native_operations == UINT32_MAX)
         {
             return KEEL_RESULT_BUSY;
         }
+
         ++owner->active_native_operations;
+
         struct Operation
         {
             std::uint32_t& active;
             std::unique_lock<std::recursive_mutex>& lock;
+
             ~Operation()
             {
-                if (!lock.owns_lock()) lock.lock();
+                if (!lock.owns_lock())
+                    lock.lock();
+
                 --active;
             }
         } hold{owner->active_native_operations, lock};

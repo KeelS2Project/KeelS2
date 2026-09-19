@@ -75,13 +75,17 @@ struct alignas(KEELHOOK_MAX_AGGREGATE_ALIGNMENT) KeelHookFixtureObject
 extern "C" KEELS2_PLUGIN_EXPORT std::int32_t KeelHookFixtureTarget(
     std::int32_t left,
     std::int32_t right);
+
 extern "C" KEELS2_PLUGIN_EXPORT std::int32_t KeelHookPauseFixtureTarget(
     std::int32_t value);
+
 extern "C" KEELS2_PLUGIN_EXPORT std::int32_t KeelHookControlFixtureTarget(
     std::int32_t left,
     std::int32_t right);
+
 KEELS2_PLUGIN_EXPORT KeelHookFixtureObject KeelHookObjectFixtureTarget(
     KeelHookFixtureObject value);
+
 extern "C" KEELS2_PLUGIN_EXPORT std::int32_t& KeelHookReferenceFixtureTarget(bool alternate);
 extern "C" KEELS2_PLUGIN_EXPORT bool KeelHookBoolFixtureTarget(bool value);
 extern "C" KEELS2_PLUGIN_EXPORT std::int32_t KeelHookVafmtFixtureTarget(
@@ -184,6 +188,7 @@ void Record(std::uint32_t value)
     {
         return;
     }
+
     std::scoped_lock lock(g_order_mutex);
     g_order.push_back(value);
 }
@@ -209,6 +214,7 @@ bool FuzzInputContracts(const KeelHostApi* api, KeelPluginHandle plugin)
     std::array<KeelHookValueType, KEELHOOK_MAX_ARGUMENTS> types{};
     std::array<const KeelHookAggregate*, KEELHOOK_MAX_ARGUMENTS> aggregates{};
     std::array<KeelHookAggregateField, 4> fields{};
+
     for (std::size_t iteration{}; iteration < 256; ++iteration)
     {
         std::snprintf(
@@ -217,20 +223,24 @@ bool FuzzInputContracts(const KeelHostApi* api, KeelPluginHandle plugin)
             "fuzz.%016llx.%zu",
             static_cast<unsigned long long>(next()),
             iteration);
+
         const void* service = reinterpret_cast<const void*>(1);
         const KeelResult query = api->query_service(
             plugin,
             name.data(),
             static_cast<std::uint32_t>(next()),
             &service);
+
         if (query == KEEL_RESULT_OK || service)
         {
             return false;
         }
+
         for (auto& type : types)
         {
             type = static_cast<KeelHookValueType>(next() % 16u);
         }
+
         for (auto& field : fields)
         {
             field = {
@@ -241,6 +251,7 @@ bool FuzzInputContracts(const KeelHostApi* api, KeelPluginHandle plugin)
                 nullptr
             };
         }
+
         const KeelHookAggregate aggregate{
             (next() & 1u) != 0 ? static_cast<std::uint32_t>(sizeof(aggregate)) : 0u,
             static_cast<std::uint32_t>(next() % 65u),
@@ -277,6 +288,7 @@ bool FuzzInputContracts(const KeelHostApi* api, KeelPluginHandle plugin)
             static_cast<std::uint32_t>(next() & 1u)
         };
         KeelHookTargetHandle target{std::numeric_limits<KeelHookTargetHandle>::max()};
+
         if (g_hook->resolve_target(
                 plugin,
                 &fuzz_target,
@@ -286,6 +298,7 @@ bool FuzzInputContracts(const KeelHostApi* api, KeelPluginHandle plugin)
             return false;
         }
     }
+
     return true;
 }
 
@@ -319,10 +332,12 @@ bool AddCallback(
 KeelHookAction HighCallback(KeelHookFrame* frame, void*)
 {
     Record(2);
+
     if (!frame || frame->phase != KH_PHASE_PRE || frame->argument_count != 2)
     {
         return KH_ACTION_CONTINUE;
     }
+
     const auto value = keels2::kh::Read<std::int32_t>(frame->arguments[0]);
     keels2::kh::Write(frame->arguments[0], value + 1);
     return KH_ACTION_CONTINUE;
@@ -334,23 +349,29 @@ KeelHookAction OverrideCallback(KeelHookFrame* frame, void*)
     {
         return KH_ACTION_CONTINUE;
     }
+
     if (frame->phase == KH_PHASE_PRE)
     {
         Record(3);
         const auto left = keels2::kh::Read<std::int32_t>(frame->arguments[0]);
+
         if (left == 9001 || left == 12001)
         {
             return KH_ACTION_CONTINUE;
         }
+
         keels2::kh::Write(frame->result, std::int32_t{500});
         return KH_ACTION_OVERRIDE;
     }
+
     Record(6);
     const auto left = keels2::kh::Read<std::int32_t>(frame->arguments[0]);
+
     if (left == 7001 || left == 9001 || left == 10001 || left == 12001)
     {
         return KH_ACTION_CONTINUE;
     }
+
     keels2::kh::Write(frame->result, std::int32_t{700});
     return KH_ACTION_OVERRIDE;
 }
@@ -365,10 +386,12 @@ KeelHookAction SelfRemovingCallback(KeelHookFrame*, void*)
 {
     Record(1);
     g_self_calls.fetch_add(1, std::memory_order_relaxed);
+
     if (g_hook->remove_callback(g_plugin, g_self) != KEEL_RESULT_OK)
     {
         Log(KEEL_LOG_ERROR, "self-removing callback failed");
     }
+
     return KH_ACTION_CONTINUE;
 }
 
@@ -380,6 +403,7 @@ KeelHookAction RecursiveCallback(KeelHookFrame* frame, void*)
     {
         return KH_ACTION_CONTINUE;
     }
+
     g_recursive_result.store(KeelHookFixtureTarget(1, 1), std::memory_order_release);
     g_recursive_entry.store(false, std::memory_order_release);
     return KH_ACTION_CONTINUE;
@@ -391,20 +415,25 @@ KeelHookAction ActionMatrixCallback(KeelHookFrame* frame, void*)
     {
         return KH_ACTION_CONTINUE;
     }
+
     const auto left = keels2::kh::Read<std::int32_t>(frame->arguments[0]);
+
     if (frame->phase == KH_PHASE_PRE && (left == 7000 || left == 11000))
     {
         keels2::kh::Write(frame->result, std::int32_t{1234});
         return KH_ACTION_SUPERSEDE;
     }
+
     if (frame->phase == KH_PHASE_PRE && left == 9000)
     {
         keels2::kh::Write(frame->result, std::int32_t{4444});
     }
+
     if (frame->phase == KH_PHASE_POST && left == 12001)
     {
         keels2::kh::Write(frame->result, std::int32_t{8888});
     }
+
     return KH_ACTION_CONTINUE;
 }
 
@@ -416,6 +445,7 @@ KeelHookAction CleanupCallback(KeelHookFrame* frame, void* user_data)
         std::this_thread::sleep_for(std::chrono::milliseconds(75));
         Log(KEEL_LOG_INFO, "concurrent callback retained host API access during unload");
     }
+
     return HighCallback(frame, user_data);
 }
 
@@ -432,12 +462,15 @@ KeelHookAction ControlCallback(KeelHookFrame* frame, void*)
         g_control_errors.fetch_add(1, std::memory_order_relaxed);
         return KH_ACTION_CONTINUE;
     }
+
     g_control_calls.fetch_add(1, std::memory_order_relaxed);
     const auto left = keels2::kh::Read<std::int32_t>(frame->arguments[0]);
+
     if (left == 100)
     {
         keels2::kh::Write(frame->arguments[0], std::int32_t{2});
         keels2::kh::Write(frame->arguments[1], std::int32_t{3});
+
         if (g_hook->call_original(g_plugin, frame) != KEEL_RESULT_OK ||
             (frame->flags & KH_FRAME_ORIGINAL_CALLED) == 0 ||
             keels2::kh::Read<std::int32_t>(frame->result) != 23 ||
@@ -450,6 +483,7 @@ KeelHookAction ControlCallback(KeelHookFrame* frame, void*)
     {
         keels2::kh::Write(frame->arguments[0], std::int32_t{4});
         keels2::kh::Write(frame->arguments[1], std::int32_t{5});
+
         if (g_hook->recall(g_plugin, frame) != KEEL_RESULT_OK ||
             (frame->flags & (KH_FRAME_ORIGINAL_CALLED | KH_FRAME_RECALLED)) !=
                 (KH_FRAME_ORIGINAL_CALLED | KH_FRAME_RECALLED) ||
@@ -463,11 +497,13 @@ KeelHookAction ControlCallback(KeelHookFrame* frame, void*)
     {
         keels2::kh::Write(frame->arguments[0], std::int32_t{6});
         keels2::kh::Write(frame->arguments[1], std::int32_t{7});
+
         if (g_hook->call_original(g_plugin, frame) != KEEL_RESULT_OK ||
             keels2::kh::Read<std::int32_t>(frame->result) != 67)
         {
             g_control_errors.fetch_add(1, std::memory_order_relaxed);
         }
+
         keels2::kh::Write(frame->result, std::int32_t{777});
         return KH_ACTION_SUPERSEDE;
     }
@@ -476,6 +512,7 @@ KeelHookAction ControlCallback(KeelHookFrame* frame, void*)
         keels2::kh::Write(frame->result, std::int32_t{888});
         return KH_ACTION_SUPERSEDE;
     }
+
     return KH_ACTION_CONTINUE;
 }
 
@@ -486,12 +523,15 @@ KeelHookAction ControlLeaderCallback(KeelHookFrame* frame, void*)
         g_control_errors.fetch_add(1, std::memory_order_relaxed);
         return KH_ACTION_CONTINUE;
     }
+
     g_control_leader_calls.fetch_add(1, std::memory_order_relaxed);
+
     if (keels2::kh::Read<std::int32_t>(frame->arguments[0]) == 201)
     {
         keels2::kh::Write(frame->result, std::int32_t{999});
         return KH_ACTION_OVERRIDE;
     }
+
     return KH_ACTION_CONTINUE;
 }
 
@@ -502,9 +542,11 @@ KeelHookAction ControlFollowerCallback(KeelHookFrame* frame, void*)
         g_control_errors.fetch_add(1, std::memory_order_relaxed);
         return KH_ACTION_CONTINUE;
     }
+
     if (frame->phase == KH_PHASE_PRE)
     {
         g_control_follower_pre_calls.fetch_add(1, std::memory_order_relaxed);
+
         if ((frame->flags & KH_FRAME_RECALLED) != 0)
         {
             g_control_recalled_pre_calls.fetch_add(1, std::memory_order_relaxed);
@@ -513,6 +555,7 @@ KeelHookAction ControlFollowerCallback(KeelHookFrame* frame, void*)
     else if (frame->phase == KH_PHASE_POST)
     {
         g_control_follower_post_calls.fetch_add(1, std::memory_order_relaxed);
+
         if ((frame->flags & KH_FRAME_RECALLED) != 0)
         {
             g_control_recalled_post_calls.fetch_add(1, std::memory_order_relaxed);
@@ -522,6 +565,7 @@ KeelHookAction ControlFollowerCallback(KeelHookFrame* frame, void*)
     {
         g_control_errors.fetch_add(1, std::memory_order_relaxed);
     }
+
     return KH_ACTION_CONTINUE;
 }
 
@@ -531,12 +575,14 @@ KeelHookAction VirtualCallback(KeelHookFrame* frame, void*)
     {
         return KH_ACTION_CONTINUE;
     }
+
     if (frame->phase == KH_PHASE_PRE)
     {
         const auto value = keels2::kh::Read<std::int32_t>(frame->arguments[1]);
         keels2::kh::Write(frame->arguments[1], value + 5);
         return KH_ACTION_CONTINUE;
     }
+
     const auto result = keels2::kh::Read<std::int32_t>(frame->result);
     keels2::kh::Write(frame->result, result + 1000);
     return KH_ACTION_OVERRIDE;
@@ -548,6 +594,7 @@ KeelHookAction AggregateVirtualCallback(KeelHookFrame* frame, void*)
     {
         return KH_ACTION_CONTINUE;
     }
+
     if (frame->phase == KH_PHASE_PRE)
     {
         auto value = keels2::kh::Read<KeelHookFixtureAggregate>(frame->arguments[1]);
@@ -555,11 +602,11 @@ KeelHookAction AggregateVirtualCallback(KeelHookFrame* frame, void*)
         value.coordinates.fractional += 1.0F;
         value.marker += 10;
         keels2::kh::Write(frame->arguments[1], value);
-        keels2::kh::Write(
-            frame->result,
-            KeelHookFixtureAggregate{{9000, 9000.0F}, 9000});
+        keels2::kh::Write(frame->result, KeelHookFixtureAggregate{{9000, 9000.0F}, 9000});
+
         return KH_ACTION_CONTINUE;
     }
+
     auto result = keels2::kh::Read<KeelHookFixtureAggregate>(frame->result);
     result.coordinates.integer += 1000;
     result.coordinates.fractional += 10.0F;
@@ -575,6 +622,7 @@ KeelHookAction ObjectCallback(KeelHookFrame* frame, void*)
         g_parity_errors.fetch_add(1, std::memory_order_relaxed);
         return KH_ACTION_CONTINUE;
     }
+
     if (frame->phase == KH_PHASE_PRE)
     {
         if (!keels2::kh::ValidValue<KeelHookFixtureObject>(frame->arguments[0]))
@@ -582,14 +630,17 @@ KeelHookAction ObjectCallback(KeelHookFrame* frame, void*)
             g_parity_errors.fetch_add(1, std::memory_order_relaxed);
             return KH_ACTION_CONTINUE;
         }
+
         auto value = keels2::kh::Read<KeelHookFixtureObject>(frame->arguments[0]);
         const std::int32_t original = value.value;
         value.value += 5;
+
         if (!keels2::kh::Write(frame->arguments[0], value))
         {
             g_parity_errors.fetch_add(1, std::memory_order_relaxed);
             return KH_ACTION_CONTINUE;
         }
+
         if (original == 20)
         {
             if (g_hook->call_original(g_plugin, frame) != KEEL_RESULT_OK ||
@@ -599,33 +650,43 @@ KeelHookAction ObjectCallback(KeelHookFrame* frame, void*)
                 g_parity_errors.fetch_add(1, std::memory_order_relaxed);
                 return KH_ACTION_CONTINUE;
             }
+
             auto result = keels2::kh::Read<KeelHookFixtureObject>(frame->result);
+
             if (result.value != 35)
             {
                 g_parity_errors.fetch_add(1, std::memory_order_relaxed);
             }
+
             result.value += 200;
+
             if (!keels2::kh::Write(frame->result, result))
             {
                 g_parity_errors.fetch_add(1, std::memory_order_relaxed);
                 return KH_ACTION_CONTINUE;
             }
+
             return KH_ACTION_OVERRIDE;
         }
+
         return KH_ACTION_CONTINUE;
     }
+
     if (!keels2::kh::ValidValue<KeelHookFixtureObject>(frame->result))
     {
         g_parity_errors.fetch_add(1, std::memory_order_relaxed);
         return KH_ACTION_CONTINUE;
     }
+
     auto result = keels2::kh::Read<KeelHookFixtureObject>(frame->result);
     result.value += 100;
+
     if (!keels2::kh::Write(frame->result, result))
     {
         g_parity_errors.fetch_add(1, std::memory_order_relaxed);
         return KH_ACTION_CONTINUE;
     }
+
     return KH_ACTION_OVERRIDE;
 }
 
@@ -636,7 +697,9 @@ KeelHookAction ReferenceCallback(KeelHookFrame* frame, void*)
         g_parity_errors.fetch_add(1, std::memory_order_relaxed);
         return KH_ACTION_CONTINUE;
     }
+
     const bool alternate = keels2::kh::Read<bool>(frame->arguments[0]);
+
     if (frame->phase == KH_PHASE_PRE && alternate)
     {
         if (!keels2::kh::WriteReference<std::int32_t&>(
@@ -646,8 +709,10 @@ KeelHookAction ReferenceCallback(KeelHookFrame* frame, void*)
             g_parity_errors.fetch_add(1, std::memory_order_relaxed);
             return KH_ACTION_CONTINUE;
         }
+
         return KH_ACTION_SUPERSEDE;
     }
+
     if (frame->phase == KH_PHASE_POST && !alternate)
     {
         if (keels2::kh::ReadReference<std::int32_t&>(frame->result) !=
@@ -659,8 +724,10 @@ KeelHookAction ReferenceCallback(KeelHookFrame* frame, void*)
             g_parity_errors.fetch_add(1, std::memory_order_relaxed);
             return KH_ACTION_CONTINUE;
         }
+
         return KH_ACTION_OVERRIDE;
     }
+
     return KH_ACTION_CONTINUE;
 }
 
@@ -671,10 +738,13 @@ KeelHookAction VafmtCallback(KeelHookFrame* frame, void*)
         g_parity_errors.fetch_add(1, std::memory_order_relaxed);
         return KH_ACTION_CONTINUE;
     }
+
     const char* text = keels2::kh::Read<const char*>(frame->arguments[1]);
+
     if (frame->phase == KH_PHASE_PRE)
     {
         const char* replacement = g_vafmt_replacement;
+
         if (!text || std::strcmp(text, g_vafmt_expected) != 0)
         {
             char message[256]{};
@@ -683,20 +753,26 @@ KeelHookAction VafmtCallback(KeelHookFrame* frame, void*)
                 sizeof(message),
                 "vafmt callback received '%s'",
                 text ? text : "<null>");
+
             Log(KEEL_LOG_ERROR, message);
             g_parity_errors.fetch_add(1, std::memory_order_relaxed);
         }
+
         if (
             !keels2::kh::Write(frame->arguments[0], std::int32_t{11}) ||
             !keels2::kh::Write(frame->arguments[1], replacement))
         {
             g_parity_errors.fetch_add(1, std::memory_order_relaxed);
         }
+
         return KH_ACTION_CONTINUE;
     }
+
     const std::int32_t expected = 11 + static_cast<std::int32_t>(
         std::strlen(g_vafmt_replacement));
+
     const std::int32_t result = keels2::kh::Read<std::int32_t>(frame->result);
+
     if (!text || std::strcmp(text, g_vafmt_replacement) != 0 || result != expected ||
         std::strcmp(g_vafmt_seen.data(), g_vafmt_replacement) != 0 ||
         !keels2::kh::Write(frame->result, result + 1000))
@@ -704,6 +780,7 @@ KeelHookAction VafmtCallback(KeelHookFrame* frame, void*)
         g_parity_errors.fetch_add(1, std::memory_order_relaxed);
         return KH_ACTION_CONTINUE;
     }
+
     return KH_ACTION_OVERRIDE;
 }
 
@@ -715,27 +792,35 @@ KeelHookAction MethodVafmtCallback(KeelHookFrame* frame, void*)
         g_parity_errors.fetch_add(1, std::memory_order_relaxed);
         return KH_ACTION_CONTINUE;
     }
+
     const char* text = keels2::kh::Read<const char*>(frame->arguments[2]);
+
     if (frame->phase == KH_PHASE_PRE)
     {
         const char* replacement = g_vafmt_replacement;
+
         if (!text || std::strcmp(text, g_method_vafmt_expected) != 0 ||
             !keels2::kh::Write(frame->arguments[1], std::int32_t{11}) ||
             !keels2::kh::Write(frame->arguments[2], replacement))
         {
             g_parity_errors.fetch_add(1, std::memory_order_relaxed);
         }
+
         return KH_ACTION_CONTINUE;
     }
+
     const std::int32_t expected = 11 + static_cast<std::int32_t>(
         std::strlen(g_vafmt_replacement));
+
     const std::int32_t result = keels2::kh::Read<std::int32_t>(frame->result);
+
     if (!text || std::strcmp(text, g_vafmt_replacement) != 0 || result != expected ||
         !keels2::kh::Write(frame->result, result + 2000))
     {
         g_parity_errors.fetch_add(1, std::memory_order_relaxed);
         return KH_ACTION_CONTINUE;
     }
+
     return KH_ACTION_OVERRIDE;
 }
 
@@ -761,12 +846,14 @@ bool RunObjectTests()
 {
     const auto& prototype =
         keels2::kh::Prototype<KeelHookFixtureObject(KeelHookFixtureObject)>::value;
+
     const KeelHookTargetSpec spec = DirectSpec(FunctionAddress(&KeelHookObjectFixtureTarget));
     KeelHookObject invalid_object = *prototype.return_object;
     invalid_object.identity = nullptr;
     KeelHookPrototype invalid_prototype = prototype;
     invalid_prototype.return_object = &invalid_object;
     KeelHookTargetHandle rejected{97};
+
     if (g_hook->resolve_target(
             g_plugin,
             &spec,
@@ -777,15 +864,18 @@ bool RunObjectTests()
     }
 
     KeelHookTargetHandle target{};
+
     if (g_hook->resolve_target(g_plugin, &spec, &prototype, &target) != KEEL_RESULT_OK ||
         !target)
     {
         return false;
     }
+
     KeelHookObject incompatible_object = *prototype.return_object;
     incompatible_object.identity = "incompatible.fixture.object";
     KeelHookPrototype incompatible_prototype = prototype;
     incompatible_prototype.return_object = &incompatible_object;
+
     if (g_hook->resolve_target(
             g_plugin,
             &spec,
@@ -797,18 +887,23 @@ bool RunObjectTests()
     }
 
     KeelHookCallbackHandle callback{};
+
     if (!AddCallback(target, &ObjectCallback, KH_PHASE_BOTH, 0, callback))
     {
         static_cast<void>(g_hook->release_target(g_plugin, target));
         return false;
     }
+
     const std::int32_t live_before = KeelHookFixtureObject::live.load(std::memory_order_acquire);
     const std::uint32_t copies_before =
         KeelHookFixtureObject::copies.load(std::memory_order_acquire);
+
     const std::uint32_t assignments_before =
         KeelHookFixtureObject::assignments.load(std::memory_order_acquire);
+
     const std::uint32_t originals_before =
         g_object_original_calls.load(std::memory_order_acquire);
+
     bool passed{};
     {
         KeelHookFixtureObject first{7};
@@ -817,12 +912,14 @@ bool RunObjectTests()
         const KeelHookFixtureObject second_result = KeelHookObjectFixtureTarget(second);
         passed = first_result.value == 122 && second_result.value == 335;
     }
+
     passed = passed &&
         KeelHookFixtureObject::live.load(std::memory_order_acquire) == live_before &&
         KeelHookFixtureObject::copies.load(std::memory_order_acquire) > copies_before &&
         KeelHookFixtureObject::assignments.load(std::memory_order_acquire) > assignments_before &&
         g_object_original_calls.load(std::memory_order_acquire) == originals_before + 2 &&
         g_parity_errors.load(std::memory_order_acquire) == 0;
+
     const KeelResult remove = g_hook->remove_callback(g_plugin, callback);
     const KeelResult release = g_hook->release_target(g_plugin, target);
     return passed && remove == KEEL_RESULT_OK && release == KEEL_RESULT_OK &&
@@ -835,18 +932,22 @@ bool RunReferenceTests()
     const KeelHookTargetSpec spec = DirectSpec(FunctionAddress(&KeelHookReferenceFixtureTarget));
     KeelHookTargetHandle target{};
     KeelHookCallbackHandle callback{};
+
     if (g_hook->resolve_target(g_plugin, &spec, &prototype, &target) != KEEL_RESULT_OK ||
         !target || !AddCallback(target, &ReferenceCallback, KH_PHASE_BOTH, 0, callback))
     {
         return false;
     }
+
     const std::uint32_t originals_before =
         g_reference_original_calls.load(std::memory_order_acquire);
+
     std::int32_t* first = &KeelHookReferenceFixtureTarget(false);
     std::int32_t* second = &KeelHookReferenceFixtureTarget(true);
     const bool passed = first == &g_reference_alternate && second == &g_reference_alternate &&
         g_reference_original_calls.load(std::memory_order_acquire) == originals_before + 1 &&
         g_parity_errors.load(std::memory_order_acquire) == 0;
+
     const KeelResult remove = g_hook->remove_callback(g_plugin, callback);
     const KeelResult release = g_hook->release_target(g_plugin, target);
     return passed && remove == KEEL_RESULT_OK && release == KEEL_RESULT_OK;
@@ -858,14 +959,17 @@ bool RunVafmtTests()
     const KeelHookTargetSpec spec = DirectSpec(FunctionAddress(&KeelHookVafmtFixtureTarget));
     KeelHookTargetHandle target{};
     KeelHookCallbackHandle callback{};
+
     if (g_hook->resolve_target(g_plugin, &spec, &prototype, &target) != KEEL_RESULT_OK ||
         !target || !AddCallback(target, &VafmtCallback, KH_PHASE_BOTH, 0, callback))
     {
         return false;
     }
+
     g_vafmt_seen.fill('\0');
     const std::int32_t expected = 1011 + static_cast<std::int32_t>(
         std::strlen(g_vafmt_replacement));
+
     const std::int32_t result = KeelHookVafmtFixtureTarget(
         10,
         "i=%d d=%.1f s=%s u=%llu x=%d y=%.2f z=%s",
@@ -876,9 +980,11 @@ bool RunVafmtTests()
         -3,
         4.25,
         "tail");
+
     const bool passed = result == expected &&
         std::strcmp(g_vafmt_seen.data(), g_vafmt_replacement) == 0 &&
         g_parity_errors.load(std::memory_order_acquire) == 0;
+
     const KeelResult remove = g_hook->remove_callback(g_plugin, callback);
     const KeelResult release = g_hook->release_target(g_plugin, target);
     return passed && remove == KEEL_RESULT_OK && release == KEEL_RESULT_OK;
@@ -886,18 +992,27 @@ bool RunVafmtTests()
 
 bool RunBooleanTests()
 {
-    struct State { bool manual{}; unsigned posts{}; unsigned errors{}; } state;
+    struct State
+    {
+        bool manual{};
+        unsigned posts{};
+        unsigned errors{};
+    } state;
     const auto callback = [](KeelHookFrame* frame, void* data) -> KeelHookAction {
         auto& state = *static_cast<State*>(data);
+
         if (frame->phase == KH_PHASE_PRE && state.manual &&
             g_hook->call_original(g_plugin, frame) != KEEL_RESULT_OK)
             ++state.errors;
+
         if (frame->phase == KH_PHASE_POST) {
             ++state.posts;
+
             if (!(frame->flags & KH_FRAME_ORIGINAL_CALLED) ||
                 keels2::kh::Read<bool>(frame->result) != keels2::kh::Read<bool>(frame->arguments[0]))
                 ++state.errors;
         }
+
         return KH_ACTION_CONTINUE;
     };
     const auto& prototype = keels2::kh::Prototype<bool(bool)>::value;
@@ -906,16 +1021,22 @@ bool RunBooleanTests()
     KeelHookCallbackHandle handle{};
     const KeelHookCallbackSpec callbacks{
         sizeof(KeelHookCallbackSpec), KH_PHASE_BOTH, 0, 0, callback, &state};
+
     if (KeelHookBoolFixtureTarget(false) || !KeelHookBoolFixtureTarget(true) ||
         g_hook->resolve_target(g_plugin, &spec, &prototype, &target) != KEEL_RESULT_OK ||
         g_hook->add_callback(g_plugin, target, &callbacks, &handle) != KEEL_RESULT_OK)
         return false;
+
     bool passed = true;
+
     for (bool manual : {false, true}) {
         state.manual = manual;
+
         for (bool value : {false, true})
-            if (KeelHookBoolFixtureTarget(value) != value) passed = false;
+            if (KeelHookBoolFixtureTarget(value) != value)
+                passed = false;
     }
+
     const auto remove = g_hook->remove_callback(g_plugin, handle);
     const auto release = g_hook->release_target(g_plugin, target);
     return passed && state.posts == 4 && state.errors == 0 &&
@@ -945,6 +1066,7 @@ bool RunVirtualTests()
     void* second = KeelHookVirtualFixtureSecond();
     const auto& active_prototype =
         keels2::kh::Prototype<std::int32_t(void*, std::int32_t)>::value;
+
     const KeelHookVirtualTargetSpec active_shared{
         sizeof(KeelHookVirtualTargetSpec),
         KH_MECHANISM_VIRTUAL,
@@ -958,6 +1080,7 @@ bool RunVirtualTests()
         0
     };
     KeelHookTargetHandle active_alias{};
+
     if (g_hook->resolve_virtual_target(
             g_plugin,
             &active_shared,
@@ -967,26 +1090,32 @@ bool RunVirtualTests()
     {
         return false;
     }
+
     if (KeelHookVirtualFixtureCallFirst(first, 5) != 1110 ||
         KeelHookVirtualFixtureCallFirst(second, 5) != 1210 ||
         KeelHookVirtualFixtureCallSecond(first, 5) != 205)
     {
         return false;
     }
+
     if (g_hook->remove_callback(g_plugin, g_virtual_shared_callback) != KEEL_RESULT_OK)
     {
         return false;
     }
+
     g_virtual_shared_callback = 0;
+
     if (KeelHookVirtualFixtureCallFirst(first, 5) != 105 ||
         KeelHookVirtualFixtureCallFirst(second, 5) != 205 ||
         g_hook->release_target(g_plugin, g_virtual_shared_target) != KEEL_RESULT_OK)
     {
         return false;
     }
+
     g_virtual_shared_target = 0;
 
     const KeelHookFixtureAggregate aggregate_input{{5, 1.0F}, 10};
+
     if (!EqualAggregate(
             KeelHookVirtualFixtureCallAggregate(first, aggregate_input),
             105,
@@ -1000,8 +1129,10 @@ bool RunVirtualTests()
     {
         return false;
     }
+
     const auto& aggregate_prototype =
         keels2::kh::MethodPrototype<KeelHookFixtureAggregate(KeelHookFixtureAggregate)>::value;
+
     KeelHookVirtualTargetSpec aggregate_shared{
         sizeof(KeelHookVirtualTargetSpec),
         KH_MECHANISM_VIRTUAL,
@@ -1017,6 +1148,7 @@ bool RunVirtualTests()
     KeelHookTargetHandle aggregate_rejected{};
     KeelHookPrototype missing_aggregate = aggregate_prototype;
     missing_aggregate.return_aggregate = nullptr;
+
     if (g_hook->resolve_virtual_target(
             g_plugin,
             &aggregate_shared,
@@ -1026,10 +1158,12 @@ bool RunVirtualTests()
     {
         return false;
     }
+
     KeelHookAggregate invalid_aggregate = *aggregate_prototype.return_aggregate;
     invalid_aggregate.byte_size = 0;
     KeelHookPrototype malformed_aggregate = aggregate_prototype;
     malformed_aggregate.return_aggregate = &invalid_aggregate;
+
     if (g_hook->resolve_virtual_target(
             g_plugin,
             &aggregate_shared,
@@ -1039,8 +1173,10 @@ bool RunVirtualTests()
     {
         return false;
     }
+
     KeelHookTargetHandle aggregate_target{};
     KeelHookCallbackHandle aggregate_callback{};
+
     if (g_hook->resolve_virtual_target(
             g_plugin,
             &aggregate_shared,
@@ -1076,12 +1212,15 @@ bool RunVirtualTests()
 
     const std::int32_t method_vafmt_original = 10 + static_cast<std::int32_t>(
         std::strlen(g_method_vafmt_expected));
+
     if (KeelHookVirtualFixtureCallVafmt(first, 10) != method_vafmt_original)
     {
         return false;
     }
+
     const auto& method_vafmt_prototype =
         keels2::kh::MethodVafmtPrototype<std::int32_t(std::int32_t)>::value;
+
     KeelHookVirtualTargetSpec method_vafmt_shared{
         sizeof(KeelHookVirtualTargetSpec),
         KH_MECHANISM_VIRTUAL,
@@ -1098,6 +1237,7 @@ bool RunVirtualTests()
     KeelHookCallbackHandle method_vafmt_callback{};
     const std::int32_t method_vafmt_hooked = 2011 + static_cast<std::int32_t>(
         std::strlen(g_vafmt_replacement));
+
     if (g_hook->resolve_virtual_target(
             g_plugin,
             &method_vafmt_shared,
@@ -1124,6 +1264,7 @@ bool RunVirtualTests()
     const char* profile = KEELHOOK_FIXTURE_PROFILE;
     const auto& prototype =
         keels2::kh::Prototype<std::int32_t(void*, std::int32_t)>::value;
+
     KeelHookVirtualTargetSpec instance{
         sizeof(KeelHookVirtualTargetSpec),
         KH_MECHANISM_VIRTUAL_INSTANCE,
@@ -1137,22 +1278,26 @@ bool RunVirtualTests()
         0
     };
     KeelHookTargetHandle first_target{};
+
     if (g_hook->resolve_virtual_target(g_plugin, &instance, &prototype, &first_target) !=
             KEEL_RESULT_OK ||
         !first_target)
     {
         return false;
     }
+
     KeelHookVirtualTargetSpec incompatible = instance;
     incompatible.index = 1;
     incompatible.table_size = 4;
     KeelHookTargetHandle rejected{};
+
     if (g_hook->resolve_virtual_target(g_plugin, &incompatible, &prototype, &rejected) !=
             KEEL_RESULT_INCOMPATIBLE ||
         rejected)
     {
         return false;
     }
+
     KeelHookVirtualTargetSpec shared{
         sizeof(KeelHookVirtualTargetSpec),
         KH_MECHANISM_VIRTUAL,
@@ -1165,6 +1310,7 @@ bool RunVirtualTests()
         0,
         0
     };
+
     if (g_hook->resolve_virtual_target(g_plugin, &shared, &prototype, &rejected) !=
             KEEL_RESULT_BUSY ||
         rejected)
@@ -1173,6 +1319,7 @@ bool RunVirtualTests()
     }
 
     KeelHookCallbackHandle first_callback{};
+
     if (!AddCallback(
             first_target,
             &VirtualCallback,
@@ -1182,15 +1329,19 @@ bool RunVirtualTests()
     {
         return false;
     }
+
     instance.index = 1;
     KeelHookTargetHandle second_target{};
+
     if (g_hook->resolve_virtual_target(g_plugin, &instance, &prototype, &second_target) !=
             KEEL_RESULT_OK ||
         !second_target || second_target == first_target)
     {
         return false;
     }
+
     KeelHookCallbackHandle second_callback{};
+
     if (!AddCallback(
             second_target,
             &VirtualCallback,
@@ -1200,18 +1351,21 @@ bool RunVirtualTests()
     {
         return false;
     }
+
     if (KeelHookVirtualFixtureCallFirst(first, 5) != 1110 ||
         KeelHookVirtualFixtureCallFirst(second, 5) != 205 ||
         KeelHookVirtualFixtureCallSecond(first, 5) != 1210)
     {
         return false;
     }
+
     if (g_hook->remove_callback(g_plugin, first_callback) != KEEL_RESULT_OK ||
         KeelHookVirtualFixtureCallFirst(first, 5) != 105 ||
         KeelHookVirtualFixtureCallSecond(first, 5) != 1210)
     {
         return false;
     }
+
     if (g_hook->remove_callback(g_plugin, second_callback) != KEEL_RESULT_OK ||
         KeelHookVirtualFixtureCallFirst(first, 5) != 105 ||
         KeelHookVirtualFixtureCallSecond(first, 5) != 205 ||
@@ -1226,7 +1380,9 @@ bool RunVirtualTests()
     using AdjustedMethod = std::int32_t (KeelHookVirtualFixtureMultiple::*)(std::int32_t);
     const AdjustedMethod adjusted_method = static_cast<AdjustedMethod>(
         &KeelHookVirtualFixtureSecondary::Adjusted);
+
     const auto adjusted_info = keels2::kh::VirtualInfo(adjusted_method);
+
     if (!multiple || secondary_offset <= 0 || !adjusted_info || adjusted_info->index != 0 ||
         adjusted_info->this_adjustment != secondary_offset ||
         KeelHookVirtualFixtureCallPrimary(multiple, 5) != 305 ||
@@ -1234,6 +1390,7 @@ bool RunVirtualTests()
     {
         return false;
     }
+
     KeelHookVirtualTargetSpec offset_shared{
         sizeof(KeelHookVirtualTargetSpec),
         KH_MECHANISM_VIRTUAL,
@@ -1247,6 +1404,7 @@ bool RunVirtualTests()
         secondary_offset
     };
     KeelHookTargetHandle adjusted_target{};
+
     if (g_hook->resolve_virtual_target(
             g_plugin,
             &offset_shared,
@@ -1255,11 +1413,13 @@ bool RunVirtualTests()
     {
         return false;
     }
+
     KeelHookVirtualTargetSpec adjusted_shared = offset_shared;
     adjusted_shared.this_adjustment = adjusted_info->this_adjustment;
     adjusted_shared.vtable_offset = 0;
     KeelHookTargetHandle adjusted_alias{};
     KeelHookCallbackHandle adjusted_callback{};
+
     if (g_hook->resolve_virtual_target(
             g_plugin,
             &adjusted_shared,
@@ -1285,6 +1445,7 @@ bool RunVirtualTests()
     offset_instance.table_size = 1;
     KeelHookTargetHandle adjusted_instance_target{};
     KeelHookCallbackHandle adjusted_instance_callback{};
+
     if (g_hook->resolve_virtual_target(
             g_plugin,
             &offset_instance,
@@ -1304,6 +1465,7 @@ bool RunVirtualTests()
     {
         return false;
     }
+
     return true;
 }
 
@@ -1320,16 +1482,20 @@ std::uint64_t BenchmarkTarget(std::int32_t expected)
     constexpr std::int32_t iterations = 20000;
     std::int64_t sum{};
     const auto begin = std::chrono::steady_clock::now();
+
     for (std::int32_t iteration{}; iteration < iterations; ++iteration)
     {
         sum += KeelHookFixtureTarget(7, 3);
     }
+
     const auto end = std::chrono::steady_clock::now();
     g_benchmark_sink = sum;
+
     if (sum != static_cast<std::int64_t>(expected) * iterations)
     {
         return 0;
     }
+
     return static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count());
 }
@@ -1341,6 +1507,7 @@ void RunCommand(const KeelCommandInvocation*, void*)
         Log(KEEL_LOG_ERROR, "scalar direct-call service contract failed");
         return;
     }
+
     Log(KEEL_LOG_INFO, "scalar direct-call service contract passed");
 #if defined(KEELHOOK_FIXTURE_PROFILE_TARGET)
     if (!native_authoring_fixture::Check(*g_hook, g_plugin))
@@ -1348,6 +1515,7 @@ void RunCommand(const KeelCommandInvocation*, void*)
         Log(KEEL_LOG_ERROR, "native authoring command-reference and action contract failed");
         return;
     }
+
     Log(KEEL_LOG_INFO, "native authoring command-reference and action contract passed");
 #endif
     if (g_run.exchange(true, std::memory_order_acq_rel))
@@ -1355,14 +1523,17 @@ void RunCommand(const KeelCommandInvocation*, void*)
         Log(KEEL_LOG_ERROR, "KeelHook integration command ran twice");
         return;
     }
+
     {
         std::scoped_lock lock(g_order_mutex);
         g_order.clear();
     }
+
     g_capture.store(true, std::memory_order_release);
     const std::uint64_t first_before = g_original_calls.load(std::memory_order_acquire);
     const std::int32_t first_result = KeelHookFixtureTarget(3, 4);
     g_capture.store(false, std::memory_order_release);
+
     if (first_result != 900 || g_original_calls.load(std::memory_order_acquire) != first_before + 1 ||
         g_last_left.load(std::memory_order_acquire) != 4 ||
         g_last_right.load(std::memory_order_acquire) != 6 ||
@@ -1371,34 +1542,43 @@ void RunCommand(const KeelCommandInvocation*, void*)
         Log(KEEL_LOG_ERROR, "KeelHook shared callback ordering failed");
         return;
     }
+
     if (KeelHookFixtureTarget(5, 6) != 900 || g_self_calls.load(std::memory_order_acquire) != 1)
     {
         Log(KEEL_LOG_ERROR, "KeelHook self-removal failed");
         return;
     }
+
     g_benchmark_multi_plugin = BenchmarkTarget(900);
+
     if (!g_benchmark_multi_plugin)
     {
         Log(KEEL_LOG_ERROR, "KeelHook multi-plugin benchmark failed");
         return;
     }
+
     if (!RunVirtualTests())
     {
         Log(KEEL_LOG_ERROR, "KeelHook virtual target integration failed");
         return;
     }
+
     if (!RunBooleanTests())
     {
         Log(KEEL_LOG_ERROR, "KeelHook boolean return integration failed");
         return;
     }
+
     Log(KEEL_LOG_INFO, "boolean returns ignore unused register bits");
+
     if (!RunParityTests())
     {
         Log(KEEL_LOG_ERROR, "KeelHook object, reference-return, or vafmt integration failed");
         return;
     }
+
     Log(KEEL_LOG_INFO, "object lifetimes, reference returns, and vafmt forwarding passed");
+
     if (KeelHookPauseFixtureTarget(5) != 15 ||
         g_pause_calls.load(std::memory_order_acquire) != 1)
     {
@@ -1408,23 +1588,28 @@ void RunCommand(const KeelCommandInvocation*, void*)
 
     std::atomic<bool> thread_failure{};
     std::array<std::thread, 4> workers;
+
     for (std::size_t thread{}; thread < workers.size(); ++thread)
     {
-        workers[thread] = std::thread([&, thread] {
-            for (std::int32_t call{}; call < 500; ++call)
+        workers[thread] = std::thread(
+            [&, thread]
             {
-                if (KeelHookFixtureTarget(static_cast<std::int32_t>(thread) + call, call) != 900)
+                for (std::int32_t call{}; call < 500; ++call)
                 {
-                    thread_failure.store(true, std::memory_order_release);
-                    return;
+                    if (KeelHookFixtureTarget(static_cast<std::int32_t>(thread) + call, call) != 900)
+                    {
+                        thread_failure.store(true, std::memory_order_release);
+                        return;
+                    }
                 }
-            }
-        });
+            });
     }
+
     for (auto& worker : workers)
     {
         worker.join();
     }
+
     if (thread_failure.load(std::memory_order_acquire))
     {
         Log(KEEL_LOG_ERROR, "KeelHook concurrent dispatch failed");
@@ -1432,15 +1617,18 @@ void RunCommand(const KeelCommandInvocation*, void*)
     }
 
     KeelHookCallbackHandle recursive{};
+
     if (!AddCallback(&RecursiveCallback, KH_PHASE_PRE, 150, recursive))
     {
         Log(KEEL_LOG_ERROR, "KeelHook recursive callback registration failed");
         return;
     }
+
     const std::uint64_t recursive_before = g_original_calls.load(std::memory_order_acquire);
     const bool recursion_passed = KeelHookFixtureTarget(50, 1) == 900 &&
         g_recursive_result.load(std::memory_order_acquire) == 900 &&
         g_original_calls.load(std::memory_order_acquire) == recursive_before + 2;
+
     if (g_hook->remove_callback(g_plugin, recursive) != KEEL_RESULT_OK || !recursion_passed)
     {
         Log(KEEL_LOG_ERROR, "KeelHook recursive dispatch failed");
@@ -1448,11 +1636,13 @@ void RunCommand(const KeelCommandInvocation*, void*)
     }
 
     KeelHookCallbackHandle action_matrix{};
+
     if (!AddCallback(&ActionMatrixCallback, KH_PHASE_BOTH, 300, action_matrix))
     {
         Log(KEEL_LOG_ERROR, "KeelHook action-matrix callback registration failed");
         return;
     }
+
     struct ActionCase
     {
         std::int32_t left;
@@ -1466,11 +1656,13 @@ void RunCommand(const KeelCommandInvocation*, void*)
         {11000, 900, 0},
         {12000, 120013, 1}
     }};
+
     for (const auto& action_case : action_cases)
     {
         const auto before = g_original_calls.load(std::memory_order_acquire);
         const auto actual_result = KeelHookFixtureTarget(action_case.left, 1);
         const auto actual_calls = g_original_calls.load(std::memory_order_acquire) - before;
+
         if (actual_result != action_case.result || actual_calls != action_case.original_calls)
         {
             char message[192]{};
@@ -1483,35 +1675,44 @@ void RunCommand(const KeelCommandInvocation*, void*)
                 action_case.result,
                 static_cast<unsigned long long>(actual_calls),
                 static_cast<unsigned long long>(action_case.original_calls));
+
             Log(KEEL_LOG_ERROR, message);
             return;
         }
     }
+
     if (g_hook->remove_callback(g_plugin, action_matrix) != KEEL_RESULT_OK)
     {
         Log(KEEL_LOG_ERROR, "KeelHook action-matrix callback removal failed");
         return;
     }
+
     KeelHookFrame detached{};
     const std::uint64_t control_before = g_original_calls.load(std::memory_order_acquire);
     const std::uint32_t callbacks_before = g_control_calls.load(std::memory_order_acquire);
     const std::uint32_t leaders_before = g_control_leader_calls.load(std::memory_order_acquire);
     const std::uint32_t follower_pre_before =
         g_control_follower_pre_calls.load(std::memory_order_acquire);
+
     const std::uint32_t follower_post_before =
         g_control_follower_post_calls.load(std::memory_order_acquire);
+
     const std::uint32_t recalled_pre_before =
         g_control_recalled_pre_calls.load(std::memory_order_acquire);
+
     const std::uint32_t recalled_post_before =
         g_control_recalled_post_calls.load(std::memory_order_acquire);
+
     const KeelResult detached_original = g_hook->call_original(g_plugin, &detached);
     const KeelResult detached_recall = g_hook->recall(g_plugin, &detached);
     const KeelResult disable =
         g_hook->set_callback_enabled(g_plugin, g_control_callback, KEEL_FALSE);
+
     const std::int32_t disabled_result = KeelHookControlFixtureTarget(10, 2);
     const std::uint32_t disabled_calls = g_control_calls.load(std::memory_order_acquire);
     const KeelResult enable =
         g_hook->set_callback_enabled(g_plugin, g_control_callback, KEEL_TRUE);
+
     const std::array<std::int32_t, 5> control_results{
         KeelHookControlFixtureTarget(100, 1),
         KeelHookControlFixtureTarget(200, 1),
@@ -1521,24 +1722,32 @@ void RunCommand(const KeelCommandInvocation*, void*)
     };
     const std::uint64_t original_delta =
         g_original_calls.load(std::memory_order_acquire) - control_before;
+
     const std::uint32_t callback_delta =
         g_control_calls.load(std::memory_order_acquire) - callbacks_before;
+
     const std::uint32_t leader_delta =
         g_control_leader_calls.load(std::memory_order_acquire) - leaders_before;
+
     const std::uint32_t follower_pre_delta =
         g_control_follower_pre_calls.load(std::memory_order_acquire) - follower_pre_before;
+
     const std::uint32_t follower_post_delta =
         g_control_follower_post_calls.load(std::memory_order_acquire) - follower_post_before;
+
     const std::uint32_t recalled_pre_delta =
         g_control_recalled_pre_calls.load(std::memory_order_acquire) - recalled_pre_before;
+
     const std::uint32_t recalled_post_delta =
         g_control_recalled_post_calls.load(std::memory_order_acquire) - recalled_post_before;
+
     const std::uint32_t control_errors = g_control_errors.load(std::memory_order_acquire);
     const KeelResult remove_leader = g_hook->remove_callback(g_plugin, g_control_leader);
     const KeelResult remove_control = g_hook->remove_callback(g_plugin, g_control_callback);
     const KeelResult remove_follower = g_hook->remove_callback(g_plugin, g_control_follower);
     const KeelResult release_control = g_hook->release_target(g_plugin, g_control_target);
     const std::int32_t restored_result = KeelHookControlFixtureTarget(8, 9);
+
     if (detached_original != KEEL_RESULT_NOT_READY || detached_recall != KEEL_RESULT_NOT_READY ||
         disable != KEEL_RESULT_OK || disabled_result != 102 || disabled_calls != callbacks_before ||
         enable != KEEL_RESULT_OK ||
@@ -1567,14 +1776,17 @@ void RunCommand(const KeelCommandInvocation*, void*)
             recalled_pre_delta,
             recalled_post_delta,
             control_errors);
+
         Log(KEEL_LOG_ERROR, message);
         return;
     }
+
     g_control_leader = 0;
     g_control_callback = 0;
     g_control_follower = 0;
     g_control_target = 0;
-    Log(KEEL_LOG_INFO, "detour, virtual scopes, aggregate calls, ordering, recursion, action semantics, explicit control, and concurrency passed");
+    Log(KEEL_LOG_INFO,
+        "detour, virtual scopes, aggregate calls, ordering, recursion, action semantics, explicit control, and concurrency passed");
 }
 
 void AfterPeerCommand(const KeelCommandInvocation*, void*)
@@ -1585,23 +1797,28 @@ void AfterPeerCommand(const KeelCommandInvocation*, void*)
         Log(KEEL_LOG_ERROR, "KeelHook peer cleanup command was out of order");
         return;
     }
+
     if (KeelHookFixtureTarget(2, 3) != 700)
     {
         Log(KEEL_LOG_ERROR, "peer callback survived peer unload");
         return;
     }
+
     if (g_hook->set_callback_enabled(g_plugin, g_override, KEEL_FALSE) != KEEL_RESULT_OK ||
         g_hook->set_callback_enabled(g_plugin, g_low, KEEL_FALSE) != KEEL_RESULT_OK)
     {
         Log(KEEL_LOG_ERROR, "KeelHook one-callback benchmark setup failed");
         return;
     }
+
     const std::uint64_t one_hook = BenchmarkTarget(83);
+
     if (!g_benchmark_no_hook || !one_hook || !g_benchmark_multi_plugin)
     {
         Log(KEEL_LOG_ERROR, "KeelHook dispatch benchmark failed");
         return;
     }
+
     char benchmark[256]{};
     std::snprintf(
         benchmark,
@@ -1610,7 +1827,9 @@ void AfterPeerCommand(const KeelCommandInvocation*, void*)
         static_cast<unsigned long long>(g_benchmark_no_hook / 20000u),
         static_cast<unsigned long long>(one_hook / 20000u),
         static_cast<unsigned long long>(g_benchmark_multi_plugin / 20000u));
+
     Log(KEEL_LOG_INFO, benchmark);
+
     if (g_hook->remove_callback(g_plugin, g_high) != KEEL_RESULT_OK ||
         g_hook->remove_callback(g_plugin, g_override) != KEEL_RESULT_OK ||
         g_hook->remove_callback(g_plugin, g_low) != KEEL_RESULT_OK)
@@ -1618,16 +1837,19 @@ void AfterPeerCommand(const KeelCommandInvocation*, void*)
         Log(KEEL_LOG_ERROR, "target callback cleanup failed");
         return;
     }
+
     if (KeelHookFixtureTarget(2, 3) != 23)
     {
         Log(KEEL_LOG_ERROR, "last callback removal did not restore the target");
         return;
     }
+
     if (!AddCallback(&CleanupCallback, KH_PHASE_PRE, 100, g_cleanup))
     {
         Log(KEEL_LOG_ERROR, "automatic cleanup probe registration failed");
         return;
     }
+
     Log(KEEL_LOG_INFO, "peer cleanup and last-callback restoration passed");
 }
 
@@ -1638,15 +1860,23 @@ void PrepareUnloadCommand(const KeelCommandInvocation*, void*)
         Log(KEEL_LOG_ERROR, "concurrent unload probe was already active");
         return;
     }
+
     g_cleanup_entered.store(false, std::memory_order_release);
     g_cleanup_delay.store(true, std::memory_order_release);
-    g_unload_worker = std::thread([] { static_cast<void>(KeelHookFixtureTarget(8, 9)); });
+    g_unload_worker = std::thread(
+        []
+        {
+            static_cast<void>(KeelHookFixtureTarget(8, 9));
+        });
+
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+
     while (!g_cleanup_entered.load(std::memory_order_acquire) &&
         std::chrono::steady_clock::now() < deadline)
     {
         std::this_thread::yield();
     }
+
     if (!g_cleanup_entered.load(std::memory_order_acquire))
     {
         g_cleanup_delay.store(false, std::memory_order_release);
@@ -1654,6 +1884,7 @@ void PrepareUnloadCommand(const KeelCommandInvocation*, void*)
         Log(KEEL_LOG_ERROR, "concurrent unload probe did not enter its callback");
         return;
     }
+
     Log(KEEL_LOG_INFO, "concurrent unload probe armed");
 }
 
@@ -1666,31 +1897,39 @@ void RestoreRetryCommand(const KeelCommandInvocation*, void*)
     std::thread blocker([&] {
         sigset_t signals;
         sigemptyset(&signals);
+
         for (int signal = SIGRTMIN; signal <= SIGRTMAX; ++signal)
         {
             sigaddset(&signals, signal);
         }
+
         blocked.store(pthread_sigmask(SIG_BLOCK, &signals, nullptr) == 0, std::memory_order_release);
         ready.store(true, std::memory_order_release);
+
         while (!release.load(std::memory_order_acquire))
         {
             std::this_thread::yield();
         }
+
         if (blocked.load(std::memory_order_acquire))
         {
             pthread_sigmask(SIG_UNBLOCK, &signals, nullptr);
         }
     });
+
     while (!ready.load(std::memory_order_acquire))
     {
         std::this_thread::yield();
     }
+
     const KeelResult first = blocked.load(std::memory_order_acquire)
         ? g_hook->remove_callback(g_plugin, g_cleanup)
         : KEEL_RESULT_ENGINE_FAILURE;
+
     const bool retained = first == KEEL_RESULT_ENGINE_FAILURE && KeelHookFixtureTarget(2, 3) == 33;
     release.store(true, std::memory_order_release);
     blocker.join();
+
     if (!retained)
     {
         Log(KEEL_LOG_ERROR, "failed physical restoration did not retain the callback");
@@ -1704,6 +1943,7 @@ void RestoreRetryCommand(const KeelCommandInvocation*, void*)
         Log(KEEL_LOG_ERROR, "callback restoration retry failed");
         return;
     }
+
     Log(KEEL_LOG_INFO, "callback restoration retry semantics passed");
 }
 
@@ -1715,27 +1955,33 @@ void PrepareShutdownRetryCommand(const KeelCommandInvocation*, void*)
         Log(KEEL_LOG_ERROR, "shutdown retry probe was already active");
         return;
     }
+
     std::atomic<bool> ready{};
     g_shutdown_worker = std::thread([&ready] {
         sigset_t signals;
         sigemptyset(&signals);
+
         for (int signal = SIGRTMIN; signal <= SIGRTMAX; ++signal)
         {
             sigaddset(&signals, signal);
         }
+
         if (pthread_sigmask(SIG_BLOCK, &signals, nullptr) != 0)
         {
             ready.store(true, std::memory_order_release);
             return;
         }
+
         ready.store(true, std::memory_order_release);
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         pthread_sigmask(SIG_UNBLOCK, &signals, nullptr);
     });
+
     while (!ready.load(std::memory_order_acquire))
     {
         std::this_thread::yield();
     }
+
     g_shutdown_retry_armed.store(true, std::memory_order_release);
     Log(KEEL_LOG_INFO, "shutdown restoration retry probe armed");
 #else
@@ -1762,16 +2008,20 @@ std::string TargetPattern(void* address)
     const auto* bytes = static_cast<const std::uint8_t*>(address);
     std::string result;
     result.reserve(24 * 3);
+
     for (std::size_t index{}; index < 24; ++index)
     {
         char token[4]{};
         std::snprintf(token, sizeof(token), "%02X", bytes[index]);
+
         if (!result.empty())
         {
             result.push_back(' ');
         }
+
         result += token;
     }
+
     return result;
 }
 
@@ -1828,6 +2078,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KEELHOOK_NOINLINE std::int32_t KeelHookVafmtFixt
         g_vafmt_seen.size(),
         format,
         arguments);
+
     va_end(arguments);
     g_vafmt_seen.back() = '\0';
     return written < 0 ? -1 : prefix + written;
@@ -1888,11 +2139,13 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelTest_KeelHookPauseCleanup()
             &rejected_callback) == KEEL_RESULT_NOT_READY && rejected_callback == 0 &&
         g_hook->remove_callback(g_plugin, g_pause_callback) == KEEL_RESULT_OK &&
         g_hook->release_target(g_plugin, g_pause_target) == KEEL_RESULT_OK;
+
     if (passed)
     {
         g_pause_callback = 0;
         g_pause_target = 0;
     }
+
     return passed ? KEEL_TRUE : KEEL_FALSE;
 }
 
@@ -1906,6 +2159,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Query(
     {
         return KEEL_FALSE;
     }
+
     *info = {
         sizeof(KeelPluginInfo),
         KEELS2_PLUGIN_ABI_VERSION,
@@ -1927,11 +2181,13 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     g_host = api;
     g_plugin = plugin;
     const void* service = reinterpret_cast<const void*>(1);
     const void* service_v3 = reinterpret_cast<const void*>(1);
     const void* service_v4 = reinterpret_cast<const void*>(1);
+
     if (api->query_service(plugin, "missing.service", 1, &service) != KEEL_RESULT_NOT_FOUND || service ||
         api->query_service(plugin, KEELHOOK_SERVICE_NAME, KEELHOOK_API_VERSION + 1, &service) !=
             KEEL_RESULT_INCOMPATIBLE || service ||
@@ -1944,8 +2200,10 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     const auto* hook_v3 = static_cast<const KeelHookApiV3*>(service_v3);
     const auto* hook_v4 = static_cast<const KeelHookApiV4*>(service_v4);
+
     if (hook_v3->size != sizeof(KeelHookApiV3) ||
         hook_v3->api_version != KEELHOOK_API_VERSION_3 || !hook_v3->resolve_target ||
         !hook_v3->resolve_virtual_target || hook_v4->size != sizeof(KeelHookApiV4) ||
@@ -1954,21 +2212,27 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     g_hook = static_cast<const KeelHookApi*>(service);
+
     if (g_hook->size != sizeof(KeelHookApi) || g_hook->api_version != KEELHOOK_API_VERSION ||
         !g_hook->resolve_virtual_target)
     {
         return KEEL_FALSE;
     }
+
     g_benchmark_no_hook = BenchmarkTarget(73);
+
     if (!g_benchmark_no_hook)
     {
         return KEEL_FALSE;
     }
+
     if (!FuzzInputContracts(api, plugin))
     {
         return KEEL_FALSE;
     }
+
     Log(KEEL_LOG_INFO, "descriptor and service-query fuzz passed");
 
     auto target_function = &KeelHookFixtureTarget;
@@ -2000,6 +2264,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
         prototype.flags
     };
     KeelHookTargetHandle current_alias{};
+
     if (hook_v4->resolve_target(plugin, &direct, &legacy_prototype, &g_target) != KEEL_RESULT_OK ||
         !g_target ||
         g_hook->resolve_target(plugin, &direct, &prototype, &current_alias) != KEEL_RESULT_OK ||
@@ -2007,10 +2272,13 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     const auto& pause_prototype =
         keels2::kh::Prototype<std::int32_t(std::int32_t)>::value;
+
     KeelHookTargetSpec pause_direct = direct;
     pause_direct.address = FunctionAddress(&KeelHookPauseFixtureTarget);
+
     if (g_hook->resolve_target(
             plugin,
             &pause_direct,
@@ -2025,8 +2293,10 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     KeelHookTargetSpec control_direct = direct;
     control_direct.address = FunctionAddress(&KeelHookControlFixtureTarget);
+
     if (g_hook->resolve_target(
             plugin,
             &control_direct,
@@ -2053,17 +2323,21 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     KeelHookTargetSpec malformed = direct;
     malformed.symbol = "KeelHookFixtureTarget";
     KeelHookTargetHandle rejected{};
+
     if (g_hook->resolve_target(plugin, &malformed, &prototype, &rejected) != KEEL_RESULT_INVALID_ARGUMENT || rejected)
     {
         return KEEL_FALSE;
     }
+
     KeelHookTargetSpec profile_target = direct;
     profile_target.source = KH_TARGET_PROFILE;
     profile_target.symbol = "fixture.missing.target";
     profile_target.address = nullptr;
+
     if (g_hook->resolve_target(
             plugin,
             &profile_target,
@@ -2075,6 +2349,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
 #if defined(KEELHOOK_FIXTURE_PROFILE_TARGET)
     profile_target.symbol = "fixture.absent.target";
     rejected = {};
+
     if (g_hook->resolve_target(
             plugin,
             &profile_target,
@@ -2085,6 +2360,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     }
 #endif
     profile_target.module = "invalid";
+
     if (g_hook->resolve_target(
             plugin,
             &profile_target,
@@ -2093,7 +2369,9 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     KeelHookTargetHandle alias{};
+
     if (g_hook->resolve_target(plugin, &direct, &prototype, &alias) != KEEL_RESULT_OK || alias != g_target)
     {
         return KEEL_FALSE;
@@ -2113,10 +2391,12 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     symbol.module = module_name;
     symbol.symbol = "KeelHookFixtureTarget";
     symbol.address = nullptr;
+
     if (g_hook->resolve_target(plugin, &symbol, &prototype, &alias) != KEEL_RESULT_OK || alias != g_target)
     {
         return KEEL_FALSE;
     }
+
     const std::string pattern_text = TargetPattern(target_address);
     KeelHookTargetSpec pattern = direct;
     pattern.source = KH_TARGET_PATTERN;
@@ -2124,12 +2404,15 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     pattern.pattern = pattern_text.c_str();
     pattern.profile = profile;
     pattern.address = nullptr;
+
     if (g_hook->resolve_target(plugin, &pattern, &prototype, &alias) != KEEL_RESULT_OK || alias != g_target)
     {
         return KEEL_FALSE;
     }
+
     KeelHookPrototype incompatible = prototype;
     incompatible.return_type = KH_VALUE_INT64;
+
     if (g_hook->resolve_target(plugin, &direct, &incompatible, &alias) != KEEL_RESULT_INCOMPATIBLE)
     {
         return KEEL_FALSE;
@@ -2139,6 +2422,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     void* second_virtual = KeelHookVirtualFixtureSecond();
     const auto& virtual_prototype =
         keels2::kh::Prototype<std::int32_t(void*, std::int32_t)>::value;
+
     KeelHookVirtualTargetSpec shared_virtual{
         sizeof(KeelHookVirtualTargetSpec),
         KH_MECHANISM_VIRTUAL,
@@ -2151,6 +2435,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
         0,
         0
     };
+
     if (g_hook->resolve_virtual_target(
             plugin,
             &shared_virtual,
@@ -2160,8 +2445,10 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     KeelHookTargetHandle virtual_alias{};
     shared_virtual.instance = second_virtual;
+
     if (g_hook->resolve_virtual_target(
             plugin,
             &shared_virtual,
@@ -2171,9 +2458,11 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     shared_virtual.instance = first_virtual;
     shared_virtual.profile = "wrong-profile";
     KeelHookTargetHandle virtual_rejected{};
+
     if (g_hook->resolve_virtual_target(
             plugin,
             &shared_virtual,
@@ -2183,8 +2472,10 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     shared_virtual.profile = profile;
     shared_virtual.table_size = 2;
+
     if (g_hook->resolve_virtual_target(
             plugin,
             &shared_virtual,
@@ -2194,10 +2485,12 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     shared_virtual.table_size = 0;
     KeelHookVirtualTargetSpec instance_conflict = shared_virtual;
     instance_conflict.mechanism = KH_MECHANISM_VIRTUAL_INSTANCE;
     instance_conflict.table_size = 3;
+
     if (g_hook->resolve_virtual_target(
             plugin,
             &instance_conflict,
@@ -2207,6 +2500,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     if (!AddCallback(
             g_virtual_shared_target,
             &VirtualCallback,
@@ -2226,11 +2520,14 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     if (KeelHookFixtureTarget(2, 3) != 23 || g_self_calls.load(std::memory_order_acquire) != 0)
     {
         return KEEL_FALSE;
     }
+
     Log(KEEL_LOG_INFO, "callbacks remained staged until plugin activation");
+
     if (!RegisterCommand("kh_prepare_unload", &PrepareUnloadCommand) ||
         !RegisterCommand("kh_prepare_shutdown_retry", &PrepareShutdownRetryCommand) ||
         !RegisterCommand("kh_restore_retry", &RestoreRetryCommand) ||
@@ -2239,6 +2536,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     Log(KEEL_LOG_INFO, "resolver and incompatible-prototype checks passed");
     g_load_complete.store(true, std::memory_order_release);
     return KEEL_TRUE;
@@ -2250,10 +2548,12 @@ extern "C" KEELS2_PLUGIN_EXPORT void KeelPlugin_Unload(KeelPluginHandle)
     {
         g_unload_worker.join();
     }
+
     if (g_shutdown_worker.joinable())
     {
         g_shutdown_worker.join();
     }
+
     if (g_after_peer.load(std::memory_order_acquire) && KeelHookFixtureTarget(2, 3) == 23)
     {
         Log(KEEL_LOG_INFO, "automatic target-owner cleanup passed before module unload");

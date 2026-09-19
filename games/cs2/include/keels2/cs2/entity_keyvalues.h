@@ -35,6 +35,7 @@ typedef KeelEntityKeyValue KeelCs2EntityKeyValue;
  * engine-held references remain valid and may be released by the engine. */
 KEELS2_CS2_KEYVALUES_EXPORT KeelResult KeelCs2KeyValues_Build(const char* class_name,
     const KeelCs2EntityKeyValue* values, uint32_t count, void** output);
+
 KEELS2_CS2_KEYVALUES_EXPORT void KeelCs2KeyValues_Release(void* values);
 #ifdef __cplusplus
 }

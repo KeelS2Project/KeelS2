@@ -18,6 +18,7 @@ PublishedServiceRegistry::PublishedServiceRegistry(Host& host) : host_(host)
     {
         throw std::runtime_error("published service registry already exists");
     }
+
     active_ = this;
     api_ = {
         sizeof(KeelServicesApi),
@@ -52,10 +53,12 @@ KeelResult PublishedServiceRegistry::PublishEntry(
     KeelServiceHandle* publication)
 {
     PublishedServiceRegistry* registry = active_;
+
     if (!registry)
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     try
     {
         return registry->Publish(plugin, spec, publication);
@@ -72,10 +75,12 @@ KeelResult PublishedServiceRegistry::WithdrawEntry(
     KeelServiceHandle publication)
 {
     PublishedServiceRegistry* registry = active_;
+
     if (!registry)
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     try
     {
         return registry->Withdraw(plugin, publication);
@@ -93,10 +98,12 @@ KeelResult PublishedServiceRegistry::ReleaseEntry(
     std::uint32_t version)
 {
     PublishedServiceRegistry* registry = active_;
+
     if (!registry)
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     try
     {
         return registry->Release(plugin, name, version);
@@ -117,25 +124,32 @@ KeelResult PublishedServiceRegistry::Publish(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     *output = 0;
     std::string name;
+
     if (spec->size != sizeof(KeelServiceSpec) || spec->version == 0 || !spec->service ||
         !CanonicalServiceName(spec->name, name))
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     std::scoped_lock lock(host_.state_mutex_);
     PluginRecord* owner = host_.PluginByHandle(plugin);
+
     if (shutting_down_ || !host_.accepting_resources_ || !owner ||
         !owner->accepting_resources || next_publication_ == 0)
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     const Key key{name, spec->version};
+
     if (publications_by_key_.contains(key))
     {
         return KEEL_RESULT_ALREADY_EXISTS;
     }
+
     Publication publication{
         next_publication_++,
         plugin,
@@ -159,21 +173,27 @@ KeelResult PublishedServiceRegistry::Withdraw(
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     std::scoped_lock lock(host_.state_mutex_);
     const PluginRecord* owner = host_.PluginByHandle(plugin);
+
     if (!owner || (!owner->accepting_resources && !owner->prepare_unload_active && !owner->prepare_pause_active))
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     const auto position = publications_.find(publication);
+
     if (position == publications_.end() || position->second.provider != plugin)
     {
         return KEEL_RESULT_NOT_FOUND;
     }
+
     if (!position->second.consumers.empty())
     {
         return KEEL_RESULT_BUSY;
     }
+
     publications_by_key_.erase(Key{position->second.name, position->second.version});
     publications_.erase(position);
     return KEEL_RESULT_OK;
@@ -185,21 +205,27 @@ KeelResult PublishedServiceRegistry::Release(
     std::uint32_t version)
 {
     std::string name;
+
     if (!version || !CanonicalServiceName(requested, name))
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     std::scoped_lock lock(host_.state_mutex_);
     const PluginRecord* owner = host_.PluginByHandle(plugin);
+
     if (!owner || (!owner->accepting_resources && !owner->prepare_unload_active && !owner->prepare_pause_active))
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     const auto key = publications_by_key_.find(Key{name, version});
+
     if (key == publications_by_key_.end())
     {
         return KEEL_RESULT_NOT_FOUND;
     }
+
     Publication& publication = publications_.at(key->second);
     return publication.consumers.erase(plugin) != 0
         ? KEEL_RESULT_OK
@@ -213,31 +239,42 @@ KeelResult PublishedServiceRegistry::Query(
     const void** service)
 {
     std::string name;
+
     if (!service || !version || !CanonicalServiceName(requested, name))
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     *service = nullptr;
     const auto key = publications_by_key_.find(Key{name, version});
+
     if (key == publications_by_key_.end())
     {
-        const bool name_exists = std::any_of(
-            publications_.begin(),
-            publications_.end(),
-            [&](const auto& entry) { return entry.second.name == name; });
+        const bool name_exists = std::any_of(publications_.begin(),
+                                             publications_.end(),
+                                             [&](const auto& entry)
+                                             {
+                                                 return entry.second.name == name;
+                                             });
+
         return name_exists ? KEEL_RESULT_INCOMPATIBLE : KEEL_RESULT_NOT_FOUND;
     }
+
     Publication& publication = publications_.at(key->second);
+
     if (publication.provider == consumer)
     {
         *service = publication.service;
         return KEEL_RESULT_OK;
     }
+
     const PluginRecord* provider = host_.PluginByHandle(publication.provider);
+
     if (!provider || provider->state != PluginState::loaded || provider->transitioning)
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     publication.consumers.insert(consumer);
     *service = publication.service;
     return KEEL_RESULT_OK;
@@ -250,15 +287,18 @@ bool PublishedServiceRegistry::HasLeasedPublication(
     for (const auto& [handle, publication] : publications_)
     {
         static_cast<void>(handle);
+
         if (publication.provider != provider || publication.consumers.empty())
         {
             continue;
         }
+
         const KeelPluginHandle handle_consumer = *publication.consumers.begin();
         const PluginRecord* plugin = host_.PluginByHandle(handle_consumer);
         consumer = plugin ? plugin->name : std::to_string(handle_consumer);
         return true;
     }
+
     consumer.clear();
     return false;
 }
@@ -266,19 +306,23 @@ bool PublishedServiceRegistry::HasLeasedPublication(
 KeelResult PublishedServiceRegistry::ReleasePlugin(KeelPluginHandle plugin)
 {
     std::scoped_lock lock(host_.state_mutex_);
+
     for (const auto& [handle, publication] : publications_)
     {
         static_cast<void>(handle);
+
         if (publication.provider == plugin && !publication.consumers.empty())
         {
             return KEEL_RESULT_BUSY;
         }
     }
+
     for (auto& [handle, publication] : publications_)
     {
         static_cast<void>(handle);
         publication.consumers.erase(plugin);
     }
+
     for (auto position = publications_.begin(); position != publications_.end();)
     {
         if (position->second.provider == plugin)
@@ -291,6 +335,7 @@ KeelResult PublishedServiceRegistry::ReleasePlugin(KeelPluginHandle plugin)
             ++position;
         }
     }
+
     return KEEL_RESULT_OK;
 }
 
@@ -298,6 +343,7 @@ std::vector<PublishedServiceRegistry::Snapshot> PublishedServiceRegistry::Snapsh
 {
     std::vector<Snapshot> output;
     output.reserve(publications_.size());
+
     for (const auto& [handle, publication] : publications_)
     {
         output.push_back({
@@ -308,6 +354,7 @@ std::vector<PublishedServiceRegistry::Snapshot> PublishedServiceRegistry::Snapsh
             publication.consumers.size()
         });
     }
+
     std::sort(output.begin(), output.end(), [](const auto& left, const auto& right) {
         return left.handle < right.handle;
     });

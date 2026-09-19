@@ -26,15 +26,25 @@ namespace keels2::host
 {
 
 class FactoryService;
+
 class KeelHookService;
+
 class GameAdapterModule;
+
 class LifecycleService;
+
 class ConVarService;
+
 class PluginService;
+
 class SchemaEntityService;
+
 class Source2CallbacksService;
+
 class Source2RuntimeService;
+
 class PlayerService;
+
 class PublishedServiceRegistry;
 
 inline constexpr const char* kHostVersion = KEELS2_HOST_VERSION;
@@ -153,14 +163,18 @@ private:
 
     bool ReleaseResources(std::unique_lock<std::recursive_mutex>& state_lock);
     bool RegisterCoreCommand();
+
     void DispatchCoreCommand(
         const KeelCommandInvocation& invocation,
         std::unique_lock<std::recursive_mutex>& state_lock);
+
     bool DeferPluginCommand(std::string_view operation, std::string_view selector);
     void DispatchDeferredPluginCommands();
+
     void DispatchClientCommand(
         const KeelCommandInvocation& invocation,
         std::int32_t slot);
+
     std::vector<std::string> PluginListLines(bool active_only) const;
     void ShowMainMenu();
     void ShowPluginsMenu();
@@ -181,63 +195,82 @@ private:
     std::vector<PluginRecord*> KnownPlugins() const;
     void RefreshPluginsCommand(std::unique_lock<std::recursive_mutex>& state_lock);
     void UnloadAllPluginsCommand(std::unique_lock<std::recursive_mutex>& state_lock);
+
     void LoadPluginCommand(
         std::string_view filename,
         std::unique_lock<std::recursive_mutex>& state_lock);
+
     bool UnloadPluginCommand(
         std::string_view selector,
         std::unique_lock<std::recursive_mutex>& state_lock,
         bool disable = true);
+
     bool ReloadPluginCommand(
         std::string_view selector,
         std::unique_lock<std::recursive_mutex>& state_lock);
+
     void RetryPluginCommand(
         std::string_view selector,
         std::unique_lock<std::recursive_mutex>& state_lock);
+
     void PausePluginCommand(
         std::string_view selector,
         std::unique_lock<std::recursive_mutex>& state_lock);
+
     void ResumePluginCommand(
         std::string_view selector,
         std::unique_lock<std::recursive_mutex>& state_lock);
+
     KeelResult PausePlugin(
         KeelPluginHandle target,
         std::unique_lock<std::recursive_mutex>& state_lock,
         bool report);
+
     KeelResult ResumePlugin(
         KeelPluginHandle target,
         std::unique_lock<std::recursive_mutex>& state_lock,
         bool report);
+
     void RestorePluginDispatch(PluginRecord& plugin);
+
     void PublishPluginEvent(
         KeelPluginEventType event,
         const PluginRecord& plugin,
         std::unique_lock<std::recursive_mutex>& state_lock);
+
     void FillPluginSnapshot(const PluginRecord& plugin, KeelPluginSnapshot& snapshot) const noexcept;
 
     void LoadPlugins(
         const std::filesystem::path& directory,
         std::unique_lock<std::recursive_mutex>& state_lock);
+
     bool FindPluginFiles(const std::filesystem::path& directory,
         std::vector<std::filesystem::path>& paths);
+
     void StartDiscoveredPlugins(const std::vector<KeelPluginHandle>& discovered,
         std::unique_lock<std::recursive_mutex>& state_lock);
+
     static bool PluginImageChanged(const PluginRecord& plugin, bool& changed);
+
     PluginRecord* LoadPlugin(
         const std::filesystem::path& path,
         std::unique_lock<std::recursive_mutex>& state_lock,
         std::string_view expected_name = {},
         bool activate_dispatch = true);
+
     PluginRecord* DiscoverPlugin(
         const std::filesystem::path& path,
         std::unique_lock<std::recursive_mutex>& state_lock);
+
     PluginRecord* StartPlugin(
         PluginRecord& record,
         std::unique_lock<std::recursive_mutex>& state_lock,
         bool activate_dispatch = true);
+
     bool DependenciesReady(const PluginRecord& plugin, std::string& diagnostic) const;
     bool HasRunningDependent(const PluginRecord& plugin, std::string& dependent,
         bool include_retained = false) const;
+
     void RejectUnstartedPlugin(PluginRecord& plugin, std::string diagnostic);
     bool ResolvePluginPath(std::string_view filename, std::filesystem::path& path);
     void RemoveCommandsOwnedBy(KeelPluginHandle owner);
@@ -254,46 +287,58 @@ private:
     std::string ResourceOwnerLabel(KeelPluginHandle owner) const;
 
     void PluginLog(KeelPluginHandle plugin, KeelLogLevel level, const char* message);
+
     KeelResult RegisterCommand(
         KeelPluginHandle plugin,
         const KeelCommandSpec* spec,
         KeelCommandHandle* output);
+
     KeelResult RegisterSource2Command(
         KeelPluginHandle plugin,
         const KeelSource2CommandSpec* spec,
         KeelCommandHandle* output);
+
     KeelResult UnregisterCommand(KeelPluginHandle plugin, KeelCommandHandle command);
+
     KeelResult QueryService(
         KeelPluginHandle plugin,
         const char* name,
         std::uint32_t version,
         const void** service);
+
     KeelResult QuerySource2Interface(
         KeelPluginHandle plugin,
         KeelSource2Capability capability,
         KeelSource2InterfaceInfo* info);
+
     KeelResult QuerySource2NamedInterface(
         KeelPluginHandle plugin,
         KeelSource2Factory factory,
         const char* interface_name,
         KeelSource2InterfaceInfo* info);
+
     bool RegisterCommandRecord(std::unique_ptr<CommandRecord> resource, std::uint64_t flags);
 
     static void ApiLog(KeelPluginHandle plugin, KeelLogLevel level, const char* message);
+
     static KeelResult ApiRegisterCommand(
         KeelPluginHandle plugin,
         const KeelCommandSpec* spec,
         KeelCommandHandle* command);
+
     static KeelResult ApiUnregisterCommand(
         KeelPluginHandle plugin,
         KeelCommandHandle command);
+
     static KeelResult ApiRegisterSource2Command(
         KeelPluginHandle plugin,
         const KeelSource2CommandSpec* spec,
         KeelCommandHandle* command);
+
     static KeelResult ApiUnregisterSource2Command(
         KeelPluginHandle plugin,
         KeelCommandHandle command);
+
     static KeelResult ApiCreateSource2ConVar(
         KeelPluginHandle plugin,
         const KeelConVarSpec* spec,
@@ -301,34 +346,42 @@ private:
         void* user_data,
         KeelConVarHandle* convar,
         void** native_convar);
+
     static KeelResult ApiFindSource2ConVar(
         KeelPluginHandle plugin,
         const char* name,
         KeelConVarType expected_type,
         KeelConVarHandle* convar,
         void** native_convar);
+
     static KeelResult ApiReleaseSource2ConVar(
         KeelPluginHandle plugin,
         KeelConVarHandle convar);
+
     bool PreparePluginPause(PluginRecord& plugin, std::unique_lock<std::recursive_mutex>& state_lock);
     static KeelResult ApiSetPreparePause(KeelPluginHandle plugin, KeelPreparePauseCallback callback, void* user_data);
     bool PreparePluginUnload(PluginRecord& plugin, std::unique_lock<std::recursive_mutex>& state_lock);
+
     static KeelResult ApiSetPrepareUnload(
         KeelPluginHandle plugin, KeelPrepareUnloadCallback callback, void* user_data);
+
     static KeelResult ApiQueryService(
         KeelPluginHandle plugin,
         const char* name,
         std::uint32_t version,
         const void** service);
+
     static KeelResult ApiQuerySource2Interface(
         KeelPluginHandle plugin,
         KeelSource2Capability capability,
         KeelSource2InterfaceInfo* info);
+
     static KeelResult ApiQuerySource2NamedInterface(
         KeelPluginHandle plugin,
         KeelSource2Factory factory,
         const char* interface_name,
         KeelSource2InterfaceInfo* info);
+
     static void DispatchCommand(const GameCommandInvocation& invocation, void* user_data);
     static void CoreCommand(const KeelCommandInvocation* invocation, void* user_data);
 
@@ -341,9 +394,11 @@ private:
     static std::string FormatPluginIndex(std::size_t index);
     static const char* PluginStateLabel(PluginState state);
     static KeelPluginRuntimeState PublicPluginState(PluginState state) noexcept;
+
     static bool ParseSemanticVersion(
         std::string_view version,
         std::array<std::uint32_t, 3>& output) noexcept;
+
     static bool DependencyVersionMatches(
         std::string_view actual,
         const PluginDependencyRecord& dependency) noexcept;

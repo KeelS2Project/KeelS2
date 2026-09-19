@@ -15,6 +15,7 @@ namespace keels2::host
 {
 
 class Host;
+
 struct PluginRecord;
 
 class PluginService final
@@ -37,47 +38,59 @@ private:
     struct Subscription;
 
     static KeelResult CountEntry(KeelPluginHandle plugin, std::uint32_t* count);
+
     static KeelResult AtEntry(
         KeelPluginHandle plugin,
         std::uint32_t index,
         KeelPluginSnapshot* snapshot);
+
     static KeelResult GetEntry(
         KeelPluginHandle plugin,
         KeelPluginHandle target,
         KeelPluginSnapshot* snapshot);
+
     static KeelResult FindEntry(
         KeelPluginHandle plugin,
         const char* name,
         KeelPluginSnapshot* snapshot);
+
     static KeelResult PauseEntry(KeelPluginHandle plugin, KeelPluginHandle target);
     static KeelResult ResumeEntry(KeelPluginHandle plugin, KeelPluginHandle target);
+
     static KeelResult SubscribeEntry(
         KeelPluginHandle plugin,
         const KeelPluginSubscriptionSpec* spec,
         KeelPluginSubscriptionHandle* subscription);
+
     static KeelResult UnsubscribeEntry(
         KeelPluginHandle plugin,
         KeelPluginSubscriptionHandle subscription);
 
     KeelResult Count(KeelPluginHandle plugin, std::uint32_t* count);
+
     KeelResult At(
         KeelPluginHandle plugin,
         std::uint32_t index,
         KeelPluginSnapshot* snapshot);
+
     KeelResult Get(
         KeelPluginHandle plugin,
         KeelPluginHandle target,
         KeelPluginSnapshot* snapshot);
+
     KeelResult Find(
         KeelPluginHandle plugin,
         const char* name,
         KeelPluginSnapshot* snapshot);
+
     KeelResult Pause(KeelPluginHandle plugin, KeelPluginHandle target);
     KeelResult Resume(KeelPluginHandle plugin, KeelPluginHandle target);
+
     KeelResult Subscribe(
         KeelPluginHandle plugin,
         const KeelPluginSubscriptionSpec* spec,
         KeelPluginSubscriptionHandle* subscription);
+
     KeelResult Unsubscribe(
         KeelPluginHandle plugin,
         KeelPluginSubscriptionHandle subscription);

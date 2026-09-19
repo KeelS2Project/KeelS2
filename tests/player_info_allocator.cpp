@@ -12,14 +12,23 @@
 namespace
 {
 constexpr std::uint64_t kAllocation = UINT64_C(0x4b45454c504c4159);
-struct alignas(std::max_align_t) Header { std::uint64_t marker; };
+
+struct alignas(std::max_align_t) Header
+{
+    std::uint64_t marker;
+};
 std::atomic<std::uint64_t> outstanding{};
 
 void* Allocate(std::size_t size)
 {
-    if (size > SIZE_MAX - sizeof(Header)) throw std::bad_alloc();
+    if (size > SIZE_MAX - sizeof(Header))
+        throw std::bad_alloc();
+
     auto* header = static_cast<Header*>(std::malloc(sizeof(Header) + size));
-    if (!header) throw std::bad_alloc();
+
+    if (!header)
+        throw std::bad_alloc();
+
     header->marker = kAllocation;
     ++outstanding;
     return header + 1;
@@ -27,9 +36,14 @@ void* Allocate(std::size_t size)
 
 void Release(void* pointer) noexcept
 {
-    if (!pointer) return;
+    if (!pointer)
+        return;
+
     auto* header = static_cast<Header*>(pointer) - 1;
-    if (header->marker != kAllocation) std::_Exit(197);
+
+    if (header->marker != kAllocation)
+        std::_Exit(197);
+
     header->marker = 0;
     --outstanding;
     std::free(header);
@@ -57,6 +71,7 @@ struct TextMessage
         parameters->set_number(2);
         parameters->set_type(google::protobuf::FieldDescriptorProto::TYPE_STRING);
         parameters->set_label(google::protobuf::FieldDescriptorProto::LABEL_REPEATED);
+
         if (require_extra)
         {
             auto* extra = type->add_field();
@@ -65,8 +80,12 @@ struct TextMessage
             extra->set_type(google::protobuf::FieldDescriptorProto::TYPE_BOOL);
             extra->set_label(google::protobuf::FieldDescriptorProto::LABEL_REQUIRED);
         }
+
         const auto* schema = pool.BuildFile(file);
-        if (!schema) throw std::bad_alloc();
+
+        if (!schema)
+            throw std::bad_alloc();
+
         message.reset(factory.GetPrototype(schema->message_type(0))->New());
     }
 };
@@ -74,12 +93,35 @@ struct TextMessage
 
 // This fixture models CS2's separate allocator. Allocations made by its copy
 // of protobuf must return through this module, including long string buffers.
-void* operator new(std::size_t size) { return Allocate(size); }
-void* operator new[](std::size_t size) { return Allocate(size); }
-void operator delete(void* pointer) noexcept { Release(pointer); }
-void operator delete[](void* pointer) noexcept { Release(pointer); }
-void operator delete(void* pointer, std::size_t) noexcept { Release(pointer); }
-void operator delete[](void* pointer, std::size_t) noexcept { Release(pointer); }
+void* operator new(std::size_t size)
+{
+    return Allocate(size);
+}
+
+void* operator new[](std::size_t size)
+{
+    return Allocate(size);
+}
+
+void operator delete(void* pointer) noexcept
+{
+    Release(pointer);
+}
+
+void operator delete[](void* pointer) noexcept
+{
+    Release(pointer);
+}
+
+void operator delete(void* pointer, std::size_t) noexcept
+{
+    Release(pointer);
+}
+
+void operator delete[](void* pointer, std::size_t) noexcept
+{
+    Release(pointer);
+}
 
 #if defined(_WIN32)
 #define PLAYER_FIXTURE_EXPORT __declspec(dllexport)

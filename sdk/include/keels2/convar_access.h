@@ -16,6 +16,7 @@ typedef struct KeelConVarAccessApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*invoke)(KeelPluginHandle plugin, KeelConVarHandle convar,
         KeelConVarAccessCallback callback, void* user_data);
 } KeelConVarAccessApi;

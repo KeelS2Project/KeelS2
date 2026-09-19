@@ -48,49 +48,61 @@ class PackageFailure(RuntimeError):
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
+
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
+
     return digest.hexdigest()
 
 
 def platform_key() -> str:
     if os.name == "nt":
         return "windows-x86_64"
+
     if sys.platform.startswith("linux"):
         return "linux-x86_64"
+
     raise PackageFailure(f"unsupported platform: {sys.platform}")
 
 
 def git_output(repo: Path, *arguments: str) -> str:
     result = subprocess.run(
         ["git", *arguments], cwd=repo, text=True, capture_output=True, check=False)
+
     if result.returncode != 0:
         raise PackageFailure(result.stderr.strip() or "git command failed")
+
     return result.stdout.strip()
 
 
 def revision(repo: Path) -> str:
     head = git_output(repo, "rev-parse", "--short=7", "HEAD")
     status = git_output(repo, "status", "--porcelain", "--untracked-files=all")
+
     if not status:
         return head
+
     digest = hashlib.sha256()
     diff = subprocess.run(
         ["git", "diff", "--binary", "HEAD"], cwd=repo, capture_output=True, check=True).stdout
     digest.update(diff)
     untracked = git_output(repo, "ls-files", "--others", "--exclude-standard").splitlines()
+
     for name in sorted(untracked):
         digest.update(name.encode("utf-8"))
         digest.update(b"\0")
         path = repo / name
+
         if path.is_file():
             digest.update(path.read_bytes())
+
     return f"{head}-dirty-{digest.hexdigest()[:8]}"
 
 
 def commit_epoch(repo: Path) -> int:
     value = git_output(repo, "show", "-s", "--format=%ct", "HEAD")
+
     try:
         return int(value)
     except ValueError as error:
@@ -100,14 +112,17 @@ def commit_epoch(repo: Path) -> int:
 def artifact(build: Path, configuration: str, name: str) -> Path:
     candidates = (build / name, build / configuration / name)
     matches = [candidate for candidate in candidates if candidate.is_file()]
+
     if not matches:
         raise PackageFailure(f"build artifact was not found: {name}")
+
     return matches[0]
 
 
 def copy(source: Path, destination: Path) -> None:
     if not source.is_file():
         raise PackageFailure(f"source file was not found: {source}")
+
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
 
@@ -165,14 +180,17 @@ def create_archive(root: Path, output: Path, kind: str, epoch: int) -> Path:
     suffix = ".zip" if kind == "zip" else ".tar.gz"
     archive = output / (root.name + suffix)
     repeated = output / (root.name + ".repeat" + suffix)
+
     if kind == "zip":
         make_zip(root, archive, epoch)
         make_zip(root, repeated, epoch)
     else:
         make_tar(root, archive, epoch)
         make_tar(root, repeated, epoch)
+
     if sha256(archive) != sha256(repeated):
         raise PackageFailure(f"archive is not deterministic: {archive.name}")
+
     repeated.unlink()
     (output / (archive.name + ".sha256")).write_text(
         f"{sha256(archive)}  {archive.name}\n", encoding="utf-8", newline="\n")
@@ -191,9 +209,12 @@ def profile_bundle(
     profile = PROFILES[key]
     name = f"keels2-cs2-current-{profile['label']}-profile-capture-r1-{source_revision}"
     root = output / name
+
     if root.exists():
         shutil.rmtree(root)
+
     root.mkdir(parents=True)
+
     if key == "windows-x86_64":
         script_name = "capture-keels2-cs2-profile-windows.ps1"
         tool_name = "keels2_compatibility_review.exe"
@@ -207,6 +228,7 @@ def profile_bundle(
             "Extract the archive, enter this directory, and run:\n"
             "chmod +x capture-keels2-cs2-profile-linux.sh\n"
             "./capture-keels2-cs2-profile-linux.sh /path/to/cs2_dedi\n")
+
     copy(repo / "tools" / "live" / script_name, root / script_name)
     copy(build / "package" / "addons" / "keels2" / "tools" /
          str(profile["directory"]) / tool_name, root / tool_name)
@@ -228,11 +250,14 @@ def live_bundle(
     profile = PROFILES[key]
     name = f"keels2-10-{profile['label']}-live-gate-r1-{source_revision}"
     root = output / name
+
     if root.exists():
         shutil.rmtree(root)
+
     root.mkdir(parents=True)
     copy(repo / "tools" / "live" / "run-keels2-09-live-gate.py",
          root / "run-keels2-09-live-gate.py")
+
     if key == "windows-x86_64":
         wrapper = "run-keels2-09-live-gate-windows.ps1"
         run_text = (
@@ -244,11 +269,14 @@ def live_bundle(
             "Extract the archive, stop any running server, enter this directory, and run:\n"
             "chmod +x run-keels2-09-live-gate-linux.sh\n"
             "./run-keels2-09-live-gate-linux.sh /home/user/servers/cs2_dedi --connect-address 127.0.0.1 --port 27035\n")
+
     copy(repo / "tools" / "live" / wrapper, root / wrapper)
     package_root = build / "package" / "addons" / "keels2"
     payload = root / "payload" / "addons" / "keels2"
+
     for document in ("LICENSE", "THIRD_PARTY_NOTICES.md"):
         copy(package_root / document, payload / document)
+
     shutil.copytree(package_root / "bin" / str(profile["directory"]),
                     payload / "bin" / str(profile["directory"]))
     shutil.copytree(package_root / "compatibility", payload / "compatibility")
@@ -279,6 +307,7 @@ def live_bundle(
         "callback_decision_b" + extension: artifact(
             build, configuration, "keels2_05e_decision_b" + extension),
     }
+
     for destination, source in fixture_sources.items():
         copy(source, fixtures / destination)
 
@@ -317,13 +346,17 @@ def self_test() -> None:
         (root / "data.txt").write_text("data\n", encoding="utf-8")
         write_manifest(root)
         first = create_archive(root, temporary, "tar.gz", 1785900000)
+
         if not first.is_file() or len((root / "MANIFEST.txt").read_text().splitlines()) != 2:
             raise PackageFailure("live packaging self-test failed")
+
         first.unlink()
         (temporary / (first.name + ".sha256")).unlink()
         second = create_archive(root, temporary, "zip", 1785900000)
+
         if not second.is_file():
             raise PackageFailure("live ZIP packaging self-test failed")
+
     print("KeelS2 live packaging self-test: PASS")
 
 
@@ -336,22 +369,29 @@ def main() -> int:
     parser.add_argument("--revision")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
+
     try:
         if args.self_test:
             self_test()
             return 0
+
         if not args.build_dir or not args.output_dir:
             raise PackageFailure("--build-dir and --output-dir are required")
+
         repo = Path(args.repo).resolve() if args.repo else Path(__file__).resolve().parents[2]
         build = Path(args.build_dir).expanduser().resolve()
         output = Path(args.output_dir).expanduser().resolve()
+
         if not (repo / ".git").exists() or not build.is_dir():
             raise PackageFailure("repository or build directory was not found")
+
         output.mkdir(parents=True, exist_ok=True)
         key = platform_key()
         source_revision = args.revision or revision(repo)
+
         if not re.fullmatch(r"[0-9A-Za-z.-]+", source_revision):
             raise PackageFailure("revision contains unsupported characters")
+
         epoch = commit_epoch(repo)
         profile_archive = profile_bundle(
             repo, build, output, args.configuration, key, source_revision, epoch)

@@ -63,6 +63,7 @@ void Changed(const KeelConVarChange* change, void*)
         change->old_value.type == KEELS2_CONVAR_INT32 &&
         change->new_value.size == sizeof(KeelConVarValue) &&
         change->new_value.type == KEELS2_CONVAR_INT32;
+
     if (!valid)
     {
         g_invalid_count.fetch_add(1, std::memory_order_acq_rel);
@@ -70,15 +71,18 @@ void Changed(const KeelConVarChange* change, void*)
     }
 
     const std::uint32_t count = g_callback_count.fetch_add(1, std::memory_order_acq_rel) + 1;
+
     if (count == 1 && g_convars &&
         g_convars->release(g_plugin, g_integer) == KEEL_RESULT_BUSY)
     {
         g_busy_count.fetch_add(1, std::memory_order_acq_rel);
         Log(KEEL_LOG_INFO, "self release returned busy without disabling the ConVar");
     }
+
     if (count == 1 && change->new_value.value.int32_value == 9 && g_convars)
     {
         const KeelConVarValue deferred = IntValue(11);
+
         if (g_convars->queue_set(
                 g_plugin,
                 g_integer,
@@ -88,17 +92,20 @@ void Changed(const KeelConVarChange* change, void*)
             g_invalid_count.fetch_add(1, std::memory_order_acq_rel);
         }
     }
+
     if (g_block_armed.exchange(false, std::memory_order_acq_rel))
     {
         g_block_entered.store(true, std::memory_order_release);
         g_block_entered.notify_all();
         bool released = g_block_release.load(std::memory_order_acquire);
+
         while (!released)
         {
             g_block_release.wait(released, std::memory_order_acquire);
             released = g_block_release.load(std::memory_order_acquire);
         }
     }
+
     if (change->new_value.value.int32_value == 10)
     {
         throw std::runtime_error("intentional ConVar callback exception");
@@ -127,20 +134,24 @@ bool CreateFixtures()
     const bool incompatible = std::getenv("KEELS2_TEST_CONVAR_INCOMPATIBLE") != nullptr;
     KeelConVarSpec integer = IntegerSpec(incompatible ? 6 : 7);
     const KeelResult integer_result = g_convars->create(g_plugin, &integer, &g_integer);
+
     if (incompatible)
     {
         if (integer_result == KEEL_RESULT_INCOMPATIBLE && g_integer == 0)
         {
             Log(KEEL_LOG_INFO, "incompatible persistent ConVar definition was rejected");
         }
+
         return false;
     }
+
     if (integer_result != KEEL_RESULT_OK || g_integer == 0)
     {
         return false;
     }
 
     KeelConVarHandle duplicate = 999;
+
     if (g_convars->create(g_plugin, &integer, &duplicate) != KEEL_RESULT_ALREADY_EXISTS ||
         duplicate != 0)
     {
@@ -154,6 +165,7 @@ bool CreateFixtures()
     boolean.description = "KeelS2 ConVar integration boolean";
     boolean.default_value = BoolValue(KEEL_TRUE);
     KeelConVarHandle boolean_handle{};
+
     if (g_convars->create(g_plugin, &boolean, &boolean_handle) != KEEL_RESULT_OK)
     {
         return false;
@@ -170,6 +182,7 @@ bool CreateFixtures()
     floating.has_maximum = KEEL_TRUE;
     floating.maximum_value = FloatValue(2.5F);
     KeelConVarHandle float_handle{};
+
     if (g_convars->create(g_plugin, &floating, &float_handle) != KEEL_RESULT_OK)
     {
         return false;
@@ -182,6 +195,7 @@ bool CreateFixtures()
     string.description = "KeelS2 ConVar integration string";
     string.default_value = StringValue("keels2-default");
     KeelConVarHandle string_handle{};
+
     if (g_convars->create(g_plugin, &string, &string_handle) != KEEL_RESULT_OK)
     {
         return false;
@@ -196,6 +210,7 @@ bool CreateFixtures()
     boolean_read.size = sizeof(boolean_read);
     floating_read.size = sizeof(floating_read);
     string_read.size = sizeof(string_read);
+
     if (g_convars->queue_set(
             g_plugin,
             boolean_handle,
@@ -235,31 +250,39 @@ bool CreateFixtures()
     }
 
     const void* native_service{};
+
     if (g_host->query_service(g_plugin, KEELS2_SOURCE2_AUTHORING_SERVICE_NAME,
             KEELS2_SOURCE2_AUTHORING_API_VERSION, &native_service) != KEEL_RESULT_OK || !native_service)
     {
         return false;
     }
+
     const auto* native_api = static_cast<const KeelSource2AuthoringApi*>(native_service);
+
     if (native_api->size != sizeof(KeelSource2AuthoringApi) ||
         native_api->api_version != KEELS2_SOURCE2_AUTHORING_API_VERSION || !native_api->create_convar)
     {
         return false;
     }
+
     const char* invalid_names[]{nullptr, "", "invalid name", "Uppercase"};
+
     for (const char* name : invalid_names)
     {
         KeelConVarSpec unnamed = integer;
         unnamed.name = name;
         KeelConVarHandle handle = 999;
+
         if (g_convars->create(g_plugin, &unnamed, &handle) != KEEL_RESULT_INVALID_ARGUMENT || handle != 0)
         {
             return false;
         }
+
         unnamed.callback = nullptr;
         unnamed.user_data = nullptr;
         handle = 999;
         void* reference = &unnamed;
+
         if (native_api->create_convar(g_plugin, &unnamed, nullptr, nullptr, &handle, &reference) !=
                 KEEL_RESULT_INVALID_ARGUMENT || handle != 0 || reference != nullptr)
         {
@@ -270,31 +293,39 @@ bool CreateFixtures()
     KeelConVarSpec invalid = integer;
     invalid.size = 0;
     KeelConVarHandle invalid_handle = 999;
+
     if (g_convars->create(g_plugin, &invalid, &invalid_handle) != KEEL_RESULT_INVALID_ARGUMENT ||
         invalid_handle != 0)
     {
         return false;
     }
+
     invalid = integer;
     invalid.flags = 1ull << 63;
+
     if (g_convars->create(g_plugin, &invalid, &invalid_handle) != KEEL_RESULT_INVALID_ARGUMENT)
     {
         return false;
     }
+
     invalid = integer;
     invalid.minimum_value = IntValue(12);
+
     if (g_convars->create(g_plugin, &invalid, &invalid_handle) != KEEL_RESULT_INVALID_ARGUMENT)
     {
         return false;
     }
+
     invalid = floating;
     invalid.default_value = FloatValue(std::numeric_limits<float>::quiet_NaN());
+
     if (g_convars->create(g_plugin, &invalid, &invalid_handle) != KEEL_RESULT_INVALID_ARGUMENT)
     {
         return false;
     }
 
     KeelConVarHandle existing{};
+
     if (g_convars->find(
             g_plugin,
             "sv_keels2_existing",
@@ -308,10 +339,12 @@ bool CreateFixtures()
     {
         return false;
     }
+
     KeelConVarValue existing_value{};
     existing_value.size = sizeof(existing_value);
     KeelConVarInfo existing_info{};
     existing_info.size = sizeof(existing_info);
+
     if (g_convars->read(
             g_plugin,
             existing,
@@ -328,6 +361,7 @@ bool CreateFixtures()
 
     KeelConVarInfo integer_info{};
     integer_info.size = sizeof(integer_info);
+
     if (g_convars->describe(g_plugin, g_integer, &integer_info) != KEEL_RESULT_OK ||
         integer_info.type != KEELS2_CONVAR_INT32 ||
         !integer_info.name || std::strcmp(integer_info.name, "keels2_test_int") != 0 ||
@@ -345,6 +379,7 @@ bool CreateFixtures()
     const KeelConVarValue staged = IntValue(8);
     KeelConVarValue staged_read{};
     staged_read.size = sizeof(staged_read);
+
     if (g_convars->queue_set(
             g_plugin,
             g_integer,
@@ -360,6 +395,7 @@ bool CreateFixtures()
     {
         return false;
     }
+
     return true;
 }
 
@@ -375,6 +411,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Query(
     {
         return KEEL_FALSE;
     }
+
     *info = {
         sizeof(KeelPluginInfo),
         KEELS2_PLUGIN_ABI_VERSION,
@@ -400,12 +437,15 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     g_block_entered.store(false, std::memory_order_release);
     g_block_release.store(false, std::memory_order_release);
     g_loaded = false;
+
     if (!host || host->size != sizeof(KeelHostApi) ||
         host->abi_version != KEELS2_PLUGIN_ABI_VERSION || !host->query_service || !host->log)
     {
         return KEEL_FALSE;
     }
+
     const void* service = reinterpret_cast<const void*>(1);
+
     if (host->query_service(
             plugin,
             KEELS2_CONVAR_SERVICE_NAME,
@@ -414,6 +454,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     if (host->query_service(
             plugin,
             KEELS2_CONVAR_SERVICE_NAME,
@@ -422,20 +463,25 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     g_convars = static_cast<const KeelConVarApi*>(service);
     const bool service_invalid = g_convars->size != sizeof(KeelConVarApi) ||
         g_convars->api_version != KEELS2_CONVAR_API_VERSION ||
         !g_convars->create || !g_convars->find || !g_convars->release ||
         !g_convars->read || !g_convars->queue_set || !g_convars->describe;
+
     if (service_invalid || !CreateFixtures())
     {
         if (!std::getenv("KEELS2_TEST_CONVAR_INCOMPATIBLE"))
         {
             Log(KEEL_LOG_ERROR, "ConVar broker load validation failed");
         }
+
         return KEEL_FALSE;
     }
+
     service = reinterpret_cast<const void*>(1);
+
     if (host->query_service(plugin, KEELS2_CONVAR_ACCESS_SERVICE_NAME,
             KEELS2_CONVAR_ACCESS_API_VERSION + 1, &service) != KEEL_RESULT_INCOMPATIBLE || service ||
         host->query_service(plugin, KEELS2_CONVAR_ACCESS_SERVICE_NAME,
@@ -443,6 +489,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     const auto* access = static_cast<const KeelConVarAccessApi*>(service);
     std::uint32_t access_count{};
     const auto inspect = [](const void* reference, void* context) -> KeelResult {
@@ -450,23 +497,32 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         ++*static_cast<std::uint32_t*>(context);
         return KEEL_RESULT_OK;
     };
-    if (access->size != sizeof(*access) || access->api_version != KEELS2_CONVAR_ACCESS_API_VERSION ||
-        !access->invoke ||
+
+    if (access->size != sizeof(*access) || access->api_version != KEELS2_CONVAR_ACCESS_API_VERSION || !access->invoke ||
         access->invoke(plugin, 0, inspect, &access_count) != KEEL_RESULT_INVALID_ARGUMENT ||
         access->invoke(plugin, g_integer, nullptr, &access_count) != KEEL_RESULT_INVALID_ARGUMENT ||
         access->invoke(0, g_integer, inspect, &access_count) != KEEL_RESULT_NOT_READY ||
         access->invoke(plugin, UINT64_MAX, inspect, &access_count) != KEEL_RESULT_NOT_FOUND ||
         access->invoke(plugin, g_integer, inspect, &access_count) != KEEL_RESULT_OK || access_count != 1 ||
-        access->invoke(plugin, g_integer, [](const void*, void*) -> KeelResult { throw 42; }, nullptr) !=
-            KEEL_RESULT_ENGINE_FAILURE ||
+        access->invoke(
+            plugin,
+            g_integer,
+            [](const void*, void*) -> KeelResult
+            {
+                throw 42;
+            },
+            nullptr) != KEEL_RESULT_ENGINE_FAILURE ||
         access->invoke(plugin, g_integer, inspect, &access_count) != KEEL_RESULT_OK || access_count != 2)
     {
         return KEEL_FALSE;
     }
+
     service = reinterpret_cast<const void*>(1);
+
     if (host->query_service(plugin, KEELS2_CONVAR_OBSERVE_SERVICE_NAME,
             KEELS2_CONVAR_OBSERVE_API_VERSION + 1, &service) != KEEL_RESULT_INCOMPATIBLE || service ||
         host->query_service(plugin, KEELS2_CONVAR_OBSERVE_SERVICE_NAME,
@@ -474,9 +530,14 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     const auto* observers = static_cast<const KeelConVarObserveApi*>(service);
-    const auto notification = [](const KeelConVarChange*, void*) {};
+
+    const auto notification = [](const KeelConVarChange*, void*)
+    {
+    };
     KeelConVarHandle observed{};
+
     if (observers->size != sizeof(*observers) || observers->api_version != KEELS2_CONVAR_OBSERVE_API_VERSION ||
         !observers->observe ||
         observers->observe(plugin, 0, notification, nullptr) != KEEL_RESULT_INVALID_ARGUMENT ||
@@ -490,11 +551,13 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     if (std::getenv("KEELS2_TEST_CONVAR_FAIL_LOAD"))
     {
         Log(KEEL_LOG_INFO, "rejecting load after staged ConVar creation");
         return KEEL_FALSE;
     }
+
     g_loaded = true;
     Log(KEEL_LOG_INFO, "staged ConVar contract passed without callback reentry");
     return KEEL_TRUE;
@@ -513,13 +576,16 @@ extern "C" KEELS2_PLUGIN_EXPORT void KeelPlugin_Unload(KeelPluginHandle)
                 KEELS2_CONVAR_GLOBAL_SLOT,
                 &value)
             : KEEL_RESULT_NOT_READY;
+
         if (unavailable != KEEL_RESULT_NOT_READY)
         {
             g_invalid_count.fetch_add(1, std::memory_order_acq_rel);
         }
+
         g_unload_count.fetch_add(1, std::memory_order_acq_rel);
         Log(KEEL_LOG_INFO, "unloaded after ConVar callback drain");
     }
+
     g_loaded = false;
     g_convars = nullptr;
     g_host = nullptr;

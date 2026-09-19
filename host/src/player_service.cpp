@@ -28,18 +28,25 @@ const KeelPlayerInputApi& PlayerService::InputApi() const noexcept
     return input_api_;
 }
 
-KeelResult PlayerService::InputEntry(KeelPluginHandle plugin, const KeelPlayerConnection* connection, KeelPlayerInput* input)
+KeelResult
+PlayerService::InputEntry(KeelPluginHandle plugin, const KeelPlayerConnection* connection, KeelPlayerInput* input)
 {
-    if (!input) return KEEL_RESULT_INVALID_ARGUMENT;
+    if (!input)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+
     const bool size = input->size == sizeof(*input);
     *input = {sizeof(*input), 0, 0, 0};
-    if (!size || !connection || connection->reserved || !connection->generation) return KEEL_RESULT_INVALID_ARGUMENT;
+
+    if (!size || !connection || connection->reserved || !connection->generation)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+
     try
     {
         Host& host = Host::Instance();
         std::unique_lock lock(host.state_mutex_);
         KeelPlayerInfo player{};
-        return host.players_ ? host.players_->Get(plugin, connection->slot, false, connection, player, lock, input) : KEEL_RESULT_NOT_READY;
+        return host.players_ ? host.players_->Get(plugin, connection->slot, false, connection, player, lock, input)
+                             : KEEL_RESULT_NOT_READY;
     }
     catch (...)
     {
@@ -71,12 +78,15 @@ KeelResult PlayerService::Request(KeelPluginHandle plugin, std::int32_t slot, bo
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     const bool valid_size = player->size == sizeof(*player);
     PlayerRegistry::Clear(*player);
+
     if (!valid_size || (connection && (connection->reserved || !connection->generation)))
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     try
     {
         Host& host = Host::Instance();
@@ -99,73 +109,101 @@ KeelResult PlayerService::Get(KeelPluginHandle plugin, std::int32_t slot, bool n
     {
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
+
     PluginRecord* owner = host_.PluginByHandle(plugin);
     const bool cleanup = owner && owner->cleanup_callback_active;
+
     if (!cleanup && (!host_.accepting_resources_ || !owner || !owner->accepting_resources || owner->cleanup_pending ||
         (owner->state != PluginState::loading && owner->state != PluginState::loaded) ||
         (owner->transitioning && !owner->loading)))
     {
         return KEEL_RESULT_NOT_READY;
     }
+
     if (!host_.adapter_->IsGameThread())
     {
         return KEEL_RESULT_WRONG_THREAD;
     }
+
     if (owner->active_native_operations == UINT32_MAX)
     {
         return KEEL_RESULT_BUSY;
     }
+
     ++owner->active_native_operations;
+
     struct ActiveOperation
     {
         std::uint32_t& count;
         std::unique_lock<std::recursive_mutex>& lock;
+
         ~ActiveOperation()
         {
             if (!lock.owns_lock())
             {
                 lock.lock();
             }
+
             --count;
         }
     } operation{owner->active_native_operations, state_lock};
     const KeelResult tracking = cleanup ? KEEL_RESULT_OK : host_.lifecycle_->EnsurePlayerTracking();
+
     if (tracking != KEEL_RESULT_OK)
     {
         return tracking;
     }
+
     state_lock.unlock();
+
     if (!next)
     {
         const KeelResult result = Read(slot, player);
+
         if (result == KEEL_RESULT_OK && connection && player.connection != connection->generation)
         {
             PlayerRegistry::Clear(player);
             return KEEL_RESULT_NOT_FOUND;
         }
-        if (result != KEEL_RESULT_OK || !input) return result;
+
+        if (result != KEEL_RESULT_OK || !input)
+            return result;
+
         if (player.controller_handle == UINT32_MAX || (player.flags & (KEELS2_PLAYER_CONNECTING | KEELS2_PLAYER_SOURCE_TV)))
             return KEEL_RESULT_NOT_READY;
+
         std::uint64_t buttons{}, context{};
         const auto read = adapter_.ReadPlayerInput(slot, player.controller_handle, buttons, context);
-        if (read != KEEL_RESULT_OK) return read;
-        if (!context || (buttons & ~KEELS2_BUTTON_ALL)) return KEEL_RESULT_INCOMPATIBLE;
+
+        if (read != KEEL_RESULT_OK)
+            return read;
+
+        if (!context || (buttons & ~KEELS2_BUTTON_ALL))
+            return KEEL_RESULT_INCOMPATIBLE;
+
         KeelPlayerInfo current{};
         const auto refreshed = Read(slot, current);
-        if (refreshed != KEEL_RESULT_OK) return refreshed;
+
+        if (refreshed != KEEL_RESULT_OK)
+            return refreshed;
+
         if (current.connection != player.connection || current.pawn_handle != player.pawn_handle ||
             current.controller_handle != player.controller_handle) return KEEL_RESULT_NOT_FOUND;
+
         *input = {sizeof(*input), 0, buttons, context};
         return KEEL_RESULT_OK;
     }
+
     for (++slot; slot < static_cast<std::int32_t>(registry_.Capacity()); ++slot)
     {
         const KeelResult result = Read(slot, player);
+
         if (result != KEEL_RESULT_NOT_FOUND)
         {
             return result;
         }
     }
+
     return KEEL_RESULT_NOT_FOUND;
 }
 
@@ -173,42 +211,52 @@ KeelResult PlayerService::Read(std::int32_t slot, KeelPlayerInfo& player)
 {
     KeelPlayerInfo facts{};
     const KeelResult result = adapter_.ReadPlayer(slot, facts);
+
     if (result == KEEL_RESULT_OK)
     {
         return registry_.Update(facts, player);
     }
+
     PlayerRegistry::Clear(player);
+
     if (result == KEEL_RESULT_NOT_FOUND)
     {
         registry_.Missing(slot);
+
         if (registry_.Pending(slot, player))
         {
             return KEEL_RESULT_OK;
         }
     }
+
     return result;
 }
 
 void PlayerService::OnLifecycle(const KeelLifecycleEvent& event)
 {
     std::scoped_lock lock(host_.state_mutex_);
+
     if (!host_.adapter_->IsGameThread())
     {
         return;
     }
+
     if (event.type == KEELS2_LIFECYCLE_CLIENT_CONNECTED && event.payload_size == sizeof(KeelLifecycleClientConnected))
     {
         const auto& data = *static_cast<const KeelLifecycleClientConnected*>(event.payload);
+
         if (data.size == sizeof(data) && !data.reserved && data.name &&
             (data.fake_player == KEEL_FALSE || data.fake_player == KEEL_TRUE))
         {
             registry_.Connected(data.slot, data.name, data.fake_player == KEEL_TRUE);
         }
     }
+
     if (event.type == KEELS2_LIFECYCLE_CLIENT_DISCONNECTING &&
         event.payload_size == sizeof(KeelLifecycleClientDisconnecting))
     {
         const auto& data = *static_cast<const KeelLifecycleClientDisconnecting*>(event.payload);
+
         if (data.size == sizeof(data) && !data.reserved)
         {
             registry_.Disconnected(data.slot);

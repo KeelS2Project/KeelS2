@@ -7,6 +7,7 @@ class NativeConVarPlugin;
 NativeConVarPlugin* g_nativePlugin{};
 keels2::ConVar<int32> g_nativeValue;
 uint32 unload_count{};
+
 void (*observer_action)(void*){};
 void* observer_context{};
 bool observer_valid{true};
@@ -48,6 +49,7 @@ public:
     {
         ++observer_count;
         observer_valid = observer_valid && current != previous && convar.Get() == current;
+
         if (current == 23 && observer_action)
         {
             observer_action(observer_context);
@@ -65,6 +67,7 @@ public:
         {
             return false;
         }
+
         g_nativeValue = FindConVar<int32>("keels2_native_access", &NativeConVarPlugin::Changed);
         return static_cast<bool>(g_nativeValue);
     }
@@ -80,10 +83,12 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelResult KeelTest_NativeConVarAccess(
     return g_nativeValue.WithNative([&](CConVarRef<int32>& native) {
         const int32 original = native.Get();
         native.Set(23);
+
         if (during)
         {
             during(context);
         }
+
         *observed = native.Get();
         native.Set(original);
     });
@@ -99,7 +104,11 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelResult KeelTest_NativeConVarAbstract(int32* 
 
 extern "C" KEELS2_PLUGIN_EXPORT KeelResult KeelTest_NativeConVarThrow()
 {
-    return g_nativeValue.WithNative([](CConVarRef<int32>&) { throw 42; });
+    return g_nativeValue.WithNative(
+        [](CConVarRef<int32>&)
+        {
+            throw 42;
+        });
 }
 
 extern "C" KEELS2_PLUGIN_EXPORT bool KeelTest_NativeConVarRemove()

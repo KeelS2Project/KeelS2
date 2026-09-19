@@ -26,8 +26,17 @@ public:
             &PlayerAbi::Command, FCVAR_GAMEDLL | FCVAR_CLIENT_CAN_EXECUTE);
     }
 
-    bool PreparePause() override { remembered = {}; return true; }
-    void OnLevelShutdown() override { remembered = {}; }
+    bool PreparePause() override
+    {
+        remembered = {};
+        return true;
+    }
+
+    void OnLevelShutdown() override
+    {
+        remembered = {};
+    }
+
     void Unload() override
     {
         remembered = {};
@@ -41,16 +50,24 @@ private:
     bool Connect(const char* name, uint32_t version, const Api*& api)
     {
         const void* service{};
-        if (!Check(HostContext().QueryService(name, version, &service), name)) return false;
+
+        if (!Check(HostContext().QueryService(name, version, &service), name))
+            return false;
+
         api = static_cast<const Api*>(service);
         return api && api->size == sizeof(Api) && api->api_version == version;
     }
 
-    KeelPluginHandle Owner() const { return HostContext().PluginHandle(); }
+    KeelPluginHandle Owner() const
+    {
+        return HostContext().PluginHandle();
+    }
 
     bool Check(KeelResult result, const char* operation)
     {
-        if (result != KEEL_RESULT_OK) LogWarning("{}: result {}", operation, result);
+        if (result != KEEL_RESULT_OK)
+            LogWarning("{}: result {}", operation, result);
+
         return result == KEEL_RESULT_OK;
     }
 
@@ -64,15 +81,22 @@ private:
     void List()
     {
         int32_t after = -1;
+
         for (;;)
         {
             auto player = EmptyPlayer();
             const auto result = players->get_next_player(Owner(), after, &player);
-            if (result == KEEL_RESULT_NOT_FOUND) return;
-            if (!Check(result, "List player")) return;
+
+            if (result == KEEL_RESULT_NOT_FOUND)
+                return;
+
+            if (!Check(result, "List player"))
+                return;
+
             LogMessage("slot={} user={} generation={} name={} flags={} steam={} team={} controller={} pawn={}",
                 player.slot, player.user_id, player.connection, player.name, player.flags,
                 player.steam_id, player.team, player.controller_handle, player.pawn_handle);
+
             after = player.slot;
         }
     }
@@ -80,30 +104,42 @@ private:
     void Remember(CPlayerSlot slot)
     {
         auto player = EmptyPlayer();
-        if (!Check(players->get_player(Owner(), slot.Get(), &player), "Remember player")) return;
+
+        if (!Check(players->get_player(Owner(), slot.Get(), &player), "Remember player"))
+            return;
+
         remembered = {player.slot, 0, player.connection};
         LogMessage("Remembered slot={} generation={}.", remembered.slot, remembered.generation);
     }
 
     bool HasRemembered()
     {
-        if (remembered.generation) return true;
+        if (remembered.generation)
+            return true;
+
         LogMessage("Run keel_docs_player_api remember from a connected client's console first.");
         return false;
     }
 
     bool Current(KeelPlayerInfo& player)
     {
-        if (!HasRemembered()) return false;
+        if (!HasRemembered())
+            return false;
+
         player = EmptyPlayer();
         return Check(players->validate_connection(Owner(), &remembered, &player), "Validate remembered player");
     }
 
     void Input()
     {
-        if (!HasRemembered()) return;
+        if (!HasRemembered())
+            return;
+
         KeelPlayerInput state{sizeof(state), 0, 0, 0};
-        if (!Check(input->read(Owner(), &remembered, &state), "Read input")) return;
+
+        if (!Check(input->read(Owner(), &remembered, &state), "Read input"))
+            return;
+
         LogMessage("Input slot={} held={} context={} use={}.", remembered.slot, state.buttons, state.context,
             (state.buttons & KEELS2_BUTTON_USE) != 0);
     }
@@ -111,10 +147,14 @@ private:
     void Output(bool chat)
     {
         KeelPlayerInfo player{};
-        if (!Current(player)) return;
+
+        if (!Current(player))
+            return;
+
         constexpr const char* text = "100% {literal}; this is text.\n";
         const auto result = chat ? runtime->client_chat_print(Owner(), player.slot, text)
                                  : runtime->client_console_print(Owner(), player.slot, text);
+
         Check(result, chat ? "Print chat" : "Print console");
     }
 
@@ -125,17 +165,24 @@ private:
             LogMessage("Usage: keel_docs_player_api list|remember|check|input|console|chat|broadcast|thread");
             return;
         }
+
         const std::string_view action(command.Arg(1));
-        if (action == "list") List();
+
+        if (action == "list")
+            List();
         else if (action == "remember") Remember(context.GetPlayerSlot());
+
         else if (action == "check")
         {
             KeelPlayerInfo player{};
-            if (Current(player)) LogMessage("Current player: {} (user {}).", player.name, player.user_id);
+
+            if (Current(player))
+                LogMessage("Current player: {} (user {}).", player.name, player.user_id);
         }
         else if (action == "input") Input();
         else if (action == "console") Output(false);
         else if (action == "chat") Output(true);
+
         else if (action == "broadcast")
         {
             if (context.GetPlayerSlot().Get() >= 0)

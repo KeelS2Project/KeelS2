@@ -8,6 +8,7 @@ bool SamplePlugin::Load()
     auto* cvars = GetCVarSystem<ICvar>();
     auto* network = GetEngineInterface<INetworkServerService>(
         NETWORKSERVERSERVICE_INTERFACE_VERSION);
+
     if (!engine || !server || !clients || !cvars || !network)
     {
         LogError("required Source 2 interfaces are unavailable");
@@ -53,6 +54,7 @@ bool SamplePlugin::Load()
         const ConVarRefAbstract& untyped = typed;
         LogMessage("mp_limitteams typed={} untyped={}", typed.Get(), untyped.GetInt());
     });
+
     if (nativeAccess != KEEL_RESULT_OK)
     {
         LogError("native ConVar access service version 1 is required: {}", nativeAccess);
@@ -214,6 +216,7 @@ void SamplePlugin::Command(
         DescribePlayer(context.GetPlayerSlot());
         return;
     }
+
     if (command.ArgC() > 2 ||
         (command.ArgC() == 2 && V_strcmp(command[1], "bump") != 0))
     {
@@ -230,6 +233,7 @@ void SamplePlugin::Command(
         const KeelResult floatingSet = floating.WithNative([](CConVarRef<float>& native) {
             native.Set(native.Get() + 0.25f);
         });
+
         if (integerSet != KEEL_RESULT_OK || floatingSet != KEEL_RESULT_OK)
         {
             LogError("sample ConVar update was rejected");
@@ -247,19 +251,24 @@ void SamplePlugin::Command(
 void SamplePlugin::DescribePlayer(CPlayerSlot slot)
 {
     PlayerInfo player;
+
     if (!GetPlayer(slot, player))
     {
         LogError("keel_sample player requires a current connected client");
         return;
     }
+
     CUtlString text;
     text.Format("#%d %s | team=%d authenticated=%d\n", player.user_id,
         player.name.Get(), player.team, player.authenticated ? 1 : 0);
+
     const KeelResult console = PrintToConsole(player.slot, text.Get());
+
     if (console != KEEL_RESULT_OK)
     {
         LogError("player console output is unavailable: {}", console);
     }
+
     if (PrintToChat(player.slot, "Player details printed to your console.") != KEEL_RESULT_OK)
     {
         LogError("player chat output is unavailable");

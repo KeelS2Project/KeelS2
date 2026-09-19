@@ -8,7 +8,9 @@ _Static_assert((KEELS2_BUTTON_FORWARD | KEELS2_BUTTON_USE) == 17, "normalized ac
 
 static uint64_t NewlyHeld(const KeelPlayerInput* previous, const KeelPlayerInput* current)
 {
-    if (!previous || previous->context != current->context) return 0;
+    if (!previous || previous->context != current->context)
+        return 0;
+
     return current->buttons & ~previous->buttons;
 }
 
@@ -21,19 +23,29 @@ int main(void)
         KEELS2_BUTTON_ZOOM, KEELS2_BUTTON_INSPECT, KEELS2_BUTTON_USE_OR_RELOAD
     };
     uint64_t combined = 0;
+
     for (size_t index = 0; index < sizeof(actions) / sizeof(actions[0]); ++index)
     {
-        if (!actions[index] || (actions[index] & (actions[index] - 1)) || (combined & actions[index])) return 1;
+        if (!actions[index] || (actions[index] & (actions[index] - 1)) || (combined & actions[index]))
+            return 1;
+
         combined |= actions[index];
     }
-    if (combined != KEELS2_BUTTON_ALL) return 2;
+
+    if (combined != KEELS2_BUTTON_ALL)
+        return 2;
 
     const KeelPlayerInput previous = {sizeof(previous), 0, KEELS2_BUTTON_FORWARD, 7};
     KeelPlayerInput current = {sizeof(current), 0, KEELS2_BUTTON_FORWARD | KEELS2_BUTTON_USE, 7};
+
     if (NewlyHeld(NULL, &current) || NewlyHeld(&previous, &current) != KEELS2_BUTTON_USE ||
         NewlyHeld(&current, &current)) return 3;
+
     current.context = 8;
-    if (NewlyHeld(&previous, &current)) return 4;
+
+    if (NewlyHeld(&previous, &current))
+        return 4;
+
     current.buttons = 0;
     return NewlyHeld(&previous, &current) != 0;
 }

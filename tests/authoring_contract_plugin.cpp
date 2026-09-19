@@ -65,6 +65,7 @@ public:
         void* missing_named = GetEngineInterface<void>("MissingFixture001");
         g_source2_ready = server && game_clients && cvar && engine_named && server_named &&
             !invalid_named && !missing_named;
+
         if (CreateCommand(
                 "authoring_wrong_owner",
                 "Must reject a member callback from another plugin type",
@@ -81,14 +82,17 @@ public:
         {
             return false;
         }
+
         if (g_mode == 1)
         {
             return false;
         }
+
         if (g_mode == 2)
         {
             throw std::runtime_error("authoring load test");
         }
+
         return true;
     }
 
@@ -99,6 +103,7 @@ public:
             !GetSource2GameClients<void>() && !GetCVarSystem<void>() &&
             !GetEngineInterface<void>("FixtureEngine001") &&
             !GetServerInterface<void>("FixtureServer001");
+
         if (g_mode == 5)
         {
             throw std::runtime_error("authoring unload test");
@@ -114,6 +119,7 @@ public:
         ++g_active_count;
         g_active_arguments_valid = slot.Get() == 4 && !load_game && name &&
             std::strcmp(name, "Keel") == 0 && xuid == 76561198000000004ull;
+
         if (name && std::strcmp(name, "throw") == 0)
         {
             throw std::runtime_error("authoring lifecycle test");
@@ -226,7 +232,9 @@ extern "C" KEELS2_PLUGIN_EXPORT void* KeelTest_AuthoringCreateCommand(const char
     {
         return nullptr;
     }
+
     const char* arguments[]{name};
+
     try
     {
         return new CCommand(1, arguments);

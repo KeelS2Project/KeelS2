@@ -17,6 +17,7 @@ extern "C" KeelBool KeelPlugin_Query(const KeelHostQuery* query, KeelPluginInfo*
     {
         return KEEL_FALSE;
     }
+
     info->size = sizeof(KeelPluginInfo);
     info->abi_version = KEELS2_PLUGIN_ABI_VERSION;
     info->name = "Reserved Command Test";
@@ -32,6 +33,7 @@ extern "C" KeelBool KeelPlugin_Load(const KeelHostApi* api, KeelPluginHandle plu
     {
         return KEEL_FALSE;
     }
+
     const KeelCommandSpec command{
         sizeof(KeelCommandSpec),
         "keel",
@@ -41,10 +43,12 @@ extern "C" KeelBool KeelPlugin_Load(const KeelHostApi* api, KeelPluginHandle plu
         nullptr
     };
     KeelCommandHandle handle{};
+
     if (api->register_command(plugin, &command, &handle) != KEEL_RESULT_RESERVED_NAME)
     {
         return KEEL_FALSE;
     }
+
     const KeelCommandSpec mixed_case_command{
         sizeof(KeelCommandSpec),
         "KeEl",
@@ -53,10 +57,12 @@ extern "C" KeelBool KeelPlugin_Load(const KeelHostApi* api, KeelPluginHandle plu
         &TestCommand,
         nullptr
     };
+
     if (api->register_command(plugin, &mixed_case_command, &handle) != KEEL_RESULT_RESERVED_NAME)
     {
         return KEEL_FALSE;
     }
+
     api->log(plugin, KEEL_LOG_INFO, "reserved command rejection passed");
     return KEEL_TRUE;
 }

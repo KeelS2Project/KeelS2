@@ -30,9 +30,19 @@ private:
 
     void Withdraw(const CCommandContext&, const CCommand&)
     {
-        if (!publication) { LogMessage("Publication is already withdrawn."); return; }
+        if (!publication)
+        {
+            LogMessage("Publication is already withdrawn.");
+            return;
+        }
+
         const auto result = services.Withdraw(publication);
-        if (result == KEEL_RESULT_OK) { publication = 0; LogMessage("Publication withdrawn."); }
+
+        if (result == KEEL_RESULT_OK)
+        {
+            publication = 0;
+            LogMessage("Publication withdrawn.");
+        }
         else if (result == KEEL_RESULT_BUSY) LogMessage("Release consumer leases before withdrawal.");
         else LogWarning("Withdrawal failed: {}", result);
     }

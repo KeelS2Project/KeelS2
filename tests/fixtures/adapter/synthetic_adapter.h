@@ -33,6 +33,7 @@ public:
             error = "synthetic adapter is not started";
             return false;
         }
+
         error.clear();
         return true;
     }
@@ -121,10 +122,12 @@ public:
         std::string&) override
     {
         convar = 0;
+
         if (native_convar)
         {
             *native_convar = nullptr;
         }
+
         return KEEL_RESULT_UNSUPPORTED;
     }
 
@@ -136,10 +139,12 @@ public:
         std::string&) override
     {
         convar = 0;
+
         if (native_convar)
         {
             *native_convar = nullptr;
         }
+
         return KEEL_RESULT_UNSUPPORTED;
     }
 

@@ -7,6 +7,7 @@ bool EntitiesPlugin::Load()
         LogError("Could not resolve CBaseEntity::m_iHealth.");
         return false;
     }
+
     return CreateCommand(
         "keel_entity_health",
         "Reads the world entity health through a validated handle",
@@ -19,22 +20,26 @@ void EntitiesPlugin::OnLevelShutdown()
     {
         LogError("The world entity handle remained valid during level shutdown.");
     }
+
     world_.Reset();
 }
 
 void EntitiesPlugin::ReadWorldHealth(const CCommandContext&, const CCommand&)
 {
     int32 health;
+
     if (!FindEntity(0, world_))
     {
         LogError("The world entity is not available.");
         return;
     }
+
     if (!world_.Read(health_, health))
     {
         LogError("Could not read CBaseEntity::m_iHealth.");
         return;
     }
+
     LogMessage("Read CBaseEntity::m_iHealth through a validated entity handle.");
 }
 

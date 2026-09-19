@@ -11,6 +11,7 @@ namespace keels2::host
 {
 
 class GameAdapter;
+
 class Host;
 
 class Source2RuntimeService final
@@ -31,24 +32,29 @@ private:
     static KeelResult BroadcastEntry(KeelPluginHandle plugin, const char* text);
     static KeelResult NativeRequest(KeelPluginHandle plugin, std::int32_t slot, const char* text, unsigned operation);
     static KeelResult ServerCommandEntry(KeelPluginHandle plugin, const char* command);
+
     static KeelResult ClientConsolePrintEntry(
         KeelPluginHandle plugin,
         std::int32_t slot,
         const char* message);
+
     static KeelResult FindUserMessageEntry(
         KeelPluginHandle plugin,
         const char* name,
         std::uint32_t* message_id);
 
     KeelResult ServerCommand(KeelPluginHandle plugin, const char* command);
+
     KeelResult ClientConsolePrint(
         KeelPluginHandle plugin,
         std::int32_t slot,
         const char* message);
+
     KeelResult FindUserMessage(
         KeelPluginHandle plugin,
         const char* name,
         std::uint32_t* message_id);
+
     static bool ValidText(const char* text, std::size_t maximum, bool name) noexcept;
     bool Ready(KeelPluginHandle plugin) const noexcept;
 

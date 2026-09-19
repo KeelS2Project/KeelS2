@@ -19,6 +19,7 @@ keels2::ConVar<int> g_previousCopy;
 keels2::ConVar<int> g_foundCopy;
 keels2::ConVar<int> g_previousFoundCopy;
 keels2::ConVar<int> g_unboundedCopy;
+
 class ConVarAuthoringPlugin;
 ConVarAuthoringPlugin* g_plugin{};
 
@@ -46,6 +47,7 @@ public:
             1,
             11,
             &ConVarAuthoringPlugin::IntegerChanged);
+
         floating = CreateConVar<float>(
             "keels2_authoring_float",
             1.5f,
@@ -53,18 +55,22 @@ public:
             FCVAR_NONE,
             0.5f,
             2.5f);
+
         boolean = CreateConVar<bool>(
             "keels2_authoring_bool",
             true,
             "C++ authoring boolean");
+
         string = CreateConVar<CUtlString>(
             "keels2_authoring_string",
             CUtlString("keels2"),
             "C++ authoring string");
+
         unbounded = CreateConVar<int>(
             "keels2_authoring_unbounded",
             5,
             "C++ authoring unbounded integer");
+
         limitTeams = FindConVar<int>("MP_LIMITTEAMS");
         observedTeams = FindConVar<int>("mp_limitteams", &ConVarAuthoringPlugin::TeamsChanged);
 
@@ -82,6 +88,7 @@ public:
             g_callbackCount == 0 && integer.Set(100) &&
             integer.Get() == 11 && floating.Set(9.0f) &&
             floating.Get() == 2.5f && g_callbackCount == 0;
+
         if (!valid)
         {
             ++g_invalidCount;
@@ -96,6 +103,7 @@ public:
             boolean.Get(),
             string.Get().Get(),
             limitTeams.Get());
+
         return true;
     }
 
@@ -106,10 +114,12 @@ public:
             !unbounded && !limitTeams && !g_integerCopy && !g_foundCopy &&
             !g_previousCopy && !g_previousFoundCopy && !g_unboundedCopy &&
             integer.Get() == 0 && !integer.Set(5) && !g_integerCopy.Set(5);
+
         if (!g_unloadInvalid)
         {
             ++g_invalidCount;
         }
+
         LogMessage("unload invalidation={}", g_unloadInvalid);
         g_plugin = nullptr;
     }
@@ -123,13 +133,16 @@ public:
             const int current = observedTeams.Get();
             const bool valid = initially_valid && changed && current == 4 &&
                 g_observerCount == 2 && g_observerValid;
+
             if (!valid)
             {
                 LogError("observer initial={} set={} current={} callbacks={} valid={}",
                     initially_valid, changed, current, g_observerCount, g_observerValid);
             }
+
             return valid;
         }
+
         if (stage == 1)
         {
             if (observedTeams.Get() != 4 || g_observerCount != 2 || !g_observerValid ||
@@ -137,19 +150,24 @@ public:
             {
                 return false;
             }
+
             auto plain = FindConVar<int>("mp_limitteams");
             return plain.Set(5) && g_observerCount == 3 && plain.Set(2) && g_observerCount == 3;
         }
+
         if (stage == 3)
         {
             auto rejected = FindConVar<int>("mp_limitteams", &ConVarAuthoringPlugin::TeamsChanged);
+
             if (rejected || LastResult() != KEEL_RESULT_WRONG_THREAD)
             {
                 return false;
             }
+
             auto created = CreateConVar<int>("keels2_worker_rejected", 1, "wrong thread");
             return !created && LastResult() == KEEL_RESULT_WRONG_THREAD;
         }
+
         if (stage == 2)
         {
             observedFloat = FindConVar<float>("keels2_authoring_float", &ConVarAuthoringPlugin::FloatChanged);
@@ -157,6 +175,7 @@ public:
             observedString = FindConVar<CUtlString>("keels2_authoring_string", &ConVarAuthoringPlugin::StringChanged);
             firstPeer = FindConVar<int>("keels2_authoring_unbounded", &ConVarAuthoringPlugin::FirstChanged);
             secondPeer = FindConVar<int>("keels2_authoring_unbounded", &ConVarAuthoringPlugin::SecondChanged);
+
             if (!observedFloat || !observedBool || !observedString || !firstPeer || !secondPeer ||
                 !floating.Set(1.234567f) || !floating.Set(2.345678f) || floatCount != 2 ||
                 !boolean.Set(false) || !boolean.Set(true) || boolCount != 2 ||
@@ -167,10 +186,13 @@ public:
             {
                 LogError("typed observers: float={} bool={} string={} first={} second={} valid={}",
                     floatCount, boolCount, stringCount, firstCount, secondCount, observerValuesValid);
+
                 return false;
             }
+
             return true;
         }
+
         return false;
     }
 
@@ -195,6 +217,7 @@ public:
         {
             return false;
         }
+
         const CUtlString current = string.Get();
         const char* text = current.Get();
         return text && std::strcmp(text, value) == 0;
@@ -231,6 +254,7 @@ private:
         ++firstCount;
         observerValuesValid = observerValuesValid && previous == (firstCount == 1 ? 5 : 17) &&
             current == (firstCount == 1 ? 17 : 18) && !RemoveConVar(unbounded) && unbounded;
+
         if (firstCount == 1)
         {
             observerValuesValid = observerValuesValid && RemoveConVar(secondPeer) && !secondPeer;
@@ -245,10 +269,12 @@ private:
     void TeamsChanged(ConVar<int>& convar, CSplitScreenSlot slot, int newValue, int oldValue)
     {
         ++g_observerCount;
+
         if (!convar || slot.Get() != 0 || newValue == oldValue || convar.Get() != newValue)
         {
             g_observerValid = false;
         }
+
         if (newValue == 3)
         {
             if (RemoveConVar(observedTeams) || !observedTeams || !observedTeams.Set(4) ||
@@ -266,6 +292,7 @@ private:
         int oldValue)
     {
         ++g_callbackCount;
+
         if (!convar || std::strcmp(convar.GetName(), "keels2_authoring_int") != 0 ||
             slot.Get() != 0 || !convar.HasMin() || !convar.HasMax() ||
             convar.Min() != 1 || convar.Max() != 11 ||
@@ -273,9 +300,11 @@ private:
         {
             ++g_invalidCount;
         }
+
         if (newValue == 1 && g_busyCount == 0)
         {
             const bool removed = RemoveConVar(g_integerCopy);
+
             if (removed || !integer || !g_integerCopy || integer.Get() != newValue ||
                 g_integerCopy.Get() != newValue)
             {
@@ -319,35 +348,49 @@ extern "C" KEELS2_PLUGIN_EXPORT std::uint32_t KeelTest_ConVarAuthoringValue(
     {
         case 0:
             return g_loadCount;
+
         case 1:
             return g_unloadCount;
+
         case 2:
             return g_callbackCount;
+
         case 3:
             return g_invalidCount;
+
         case 4:
             return g_unloadInvalid ? 1u : 0u;
+
         case 5:
             return g_integerCopy ? 1u : 0u;
+
         case 6:
             return static_cast<std::uint32_t>(g_integerCopy.Get());
+
         case 7:
             return g_previousCopy ? 1u : 0u;
+
         case 8:
             return g_foundCopy ? 1u : 0u;
+
         case 9:
             return g_unboundedCopy.HasMin() || g_unboundedCopy.HasMax() ? 1u : 0u;
+
         case 10:
             return g_foundCopy &&
                     std::strcmp(g_foundCopy.GetName(), "mp_limitteams") == 0
                 ? 1u
                 : 0u;
+
         case 11:
             return g_previousFoundCopy ? 1u : 0u;
+
         case 12:
             return g_unboundedCopy ? 1u : 0u;
+
         case 13:
             return g_busyCount;
+
         default:
             return 0;
     }
@@ -365,14 +408,17 @@ extern "C" KEELS2_PLUGIN_EXPORT std::uint32_t KeelTest_ConVarAuthoringRemove(
     {
         return 0;
     }
+
     if (value == 0)
     {
         return g_plugin->RemoveIntegerCopy() ? 1u : 0u;
     }
+
     if (value == 1)
     {
         return g_plugin->RemoveFoundCopy() ? 1u : 0u;
     }
+
     return 0;
 }
 

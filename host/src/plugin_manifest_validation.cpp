@@ -31,19 +31,24 @@ bool ValidMetadataText(const char* text, std::size_t maximum, bool allow_empty) 
     {
         return allow_empty;
     }
+
     std::size_t length{};
+
     while (length <= maximum && text[length])
     {
         if (std::iscntrl(static_cast<unsigned char>(text[length])) != 0)
         {
             return false;
         }
+
         ++length;
     }
+
     if (length == 0)
     {
         return allow_empty;
     }
+
     return length <= maximum &&
         std::isspace(static_cast<unsigned char>(text[0])) == 0 &&
         std::isspace(static_cast<unsigned char>(text[length - 1])) == 0;
@@ -55,6 +60,7 @@ bool ValidPluginName(const char* name) noexcept
     {
         return false;
     }
+
     const std::string_view value(name);
     return !std::all_of(value.begin(), value.end(), [](unsigned char character) {
         return std::isdigit(character) != 0;
@@ -67,27 +73,33 @@ bool ParseSemanticVersion(
 {
     output = {};
     std::size_t begin{};
+
     for (std::size_t component{}; component < output.size(); ++component)
     {
         const std::size_t end = component + 1 == output.size()
             ? version.size()
             : version.find('.', begin);
+
         if (end == std::string_view::npos || end == begin)
         {
             return false;
         }
+
         const char* first = version.data() + begin;
         const char* last = version.data() + end;
         const auto result = std::from_chars(first, last, output[component]);
+
         if (result.ec != std::errc{} || result.ptr != last)
         {
             return false;
         }
+
         if (component + 1 != output.size())
         {
             begin = end + 1;
         }
     }
+
     return begin <= version.size() &&
         version.find('.', begin) == std::string_view::npos;
 }
@@ -97,6 +109,7 @@ bool ValidatePluginManifest(
     std::vector<ValidatedPluginDependency>& dependencies) noexcept
 {
     dependencies.clear();
+
     if (manifest.size != sizeof(KeelPluginManifest) ||
         manifest.manifest_version != KEELS2_PLUGIN_MANIFEST_VERSION ||
         manifest.reserved != 0 || manifest.dependency_count > 64 ||
@@ -104,13 +117,16 @@ bool ValidatePluginManifest(
     {
         return false;
     }
+
     try
     {
         dependencies.reserve(manifest.dependency_count);
+
         for (std::uint32_t index{}; index < manifest.dependency_count; ++index)
         {
             const KeelPluginDependency& dependency = manifest.dependencies[index];
             std::array<std::uint32_t, 3> parsed{};
+
             if (dependency.size != sizeof(KeelPluginDependency) ||
                 (dependency.requirement != KEELS2_PLUGIN_DEPENDENCY_EXACT &&
                     dependency.requirement != KEELS2_PLUGIN_DEPENDENCY_AT_LEAST) ||
@@ -127,6 +143,7 @@ bool ValidatePluginManifest(
                 dependencies.clear();
                 return false;
             }
+
             dependencies.push_back({
                 dependency.name,
                 dependency.version,
@@ -139,6 +156,7 @@ bool ValidatePluginManifest(
         dependencies.clear();
         return false;
     }
+
     return true;
 }
 

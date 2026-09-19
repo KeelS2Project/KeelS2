@@ -13,6 +13,7 @@ KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Query(
     {
         return KEEL_FALSE;
     }
+
     info->size = sizeof(KeelPluginInfo);
     info->abi_version = KEELS2_PLUGIN_ABI_VERSION;
     info->name = "KeelS2 ABI 4 Fixture";
@@ -33,6 +34,7 @@ KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     host_api = api;
     plugin_handle = plugin;
     api->log(plugin, KEEL_LOG_INFO, "frozen ABI 4 fixture loaded");
@@ -45,6 +47,7 @@ KEELS2_PLUGIN_EXPORT void KeelPlugin_Unload(KeelPluginHandle plugin)
     {
         host_api->log(plugin, KEEL_LOG_INFO, "frozen ABI 4 fixture unloaded");
     }
+
     host_api = 0;
     plugin_handle = 0;
 }

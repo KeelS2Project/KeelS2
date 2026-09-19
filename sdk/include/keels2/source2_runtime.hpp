@@ -21,11 +21,14 @@ public:
             KEELS2_SOURCE2_RUNTIME_SERVICE_NAME,
             KEELS2_SOURCE2_RUNTIME_API_VERSION,
             &service);
+
         if (result != KEEL_RESULT_OK)
         {
             return result;
         }
+
         const auto* api = static_cast<const KeelSource2RuntimeApi*>(service);
+
         if (!api || api->size != sizeof(KeelSource2RuntimeApi) ||
             api->api_version != KEELS2_SOURCE2_RUNTIME_API_VERSION ||
             !api->server_command || !api->client_console_print ||
@@ -33,6 +36,7 @@ public:
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         context_ = context.State();
         api_ = api;
         return KEEL_RESULT_OK;

@@ -36,6 +36,7 @@ public:
     bool Load(keels2::Context& context) override
     {
         context_ = &context;
+
         if (!ValidateRawService(context) ||
             service_.Connect(context) != KEEL_RESULT_OK ||
             runtime_.Connect(context) != KEEL_RESULT_OK ||
@@ -48,17 +49,20 @@ public:
             context_ = nullptr;
             return false;
         }
+
         const KeelResult command_result = context.RegisterCommand<&Source2ServicePlugin::CheckCommand>(
             command_,
             "s2_check",
             "Validates the Source 2 interface gateway while the host is running",
             *this);
+
         if (command_result != KEEL_RESULT_OK)
         {
             context.Log(KEEL_LOG_ERROR, "Source 2 interface gateway command registration failed");
             context_ = nullptr;
             return false;
         }
+
         if (factories_.Connect(context) != KEEL_RESULT_OK ||
             factories_.Subscribe(keels2::source2::Factory::engine, "NetworkServerService_001",
                 &FactoryCallback, this, 0, factory_engine_) != KEEL_RESULT_OK ||
@@ -69,6 +73,7 @@ public:
         {
             return false;
         }
+
         context.Log(KEEL_LOG_INFO, "Source 2 interface gateway load validation passed");
         return true;
     }
@@ -84,11 +89,13 @@ public:
         const bool invalidated = !service_ && !server_ && !game_clients_ && !cvar_ && !game_events_ &&
             !named_engine_ && !named_server_ && !named_filesystem_ && !named_physics_ &&
             !named_network_ && !named_server_service_ && !runtime_ && !command_ && !factories_;
+
         context.Log(
             invalidated ? KEEL_LOG_INFO : KEEL_LOG_ERROR,
             invalidated
                 ? "Source 2 interface views invalidated before unload"
                 : "Source 2 interface view remained active during unload");
+
         context_ = nullptr;
     }
 
@@ -97,6 +104,7 @@ private:
         KeelFactoryResult* result, void* data)
     {
         auto& self = *static_cast<Source2ServicePlugin*>(data);
+
         if (std::strcmp(request->interface_name, "KeelS2FactoryNullProbe001") == 0)
         {
             self.factory_null_calls_.fetch_add(1);
@@ -104,9 +112,11 @@ private:
             result->return_code = 37;
             return KEELS2_FACTORY_REPLACE;
         }
+
         if (request->factory == KEELS2_SOURCE2_FACTORY_ENGINE)
         {
             self.factory_engine_calls_.fetch_add(1);
+
             if (self.factory_thread_check_.exchange(false))
             {
                 std::thread query([&self] {
@@ -122,6 +132,7 @@ private:
         {
             self.factory_server_calls_.fetch_add(1);
         }
+
         return KEELS2_FACTORY_OBSERVE;
     }
 
@@ -132,24 +143,30 @@ private:
         const auto engine_before = factory_engine_calls_.load();
         const auto server_before = factory_server_calls_.load();
         keels2::source2::Interface engine;
+
         if (service_.Query(keels2::source2::Factory::filesystem,
                 "NetworkServerService_001", engine) != KEEL_RESULT_OK ||
             factory_engine_calls_.load() <= engine_before || !factory_thread_ok_.load())
         {
             return false;
         }
+
         std::string error;
         auto** table = *static_cast<void***>(server_.Raw());
         const auto factory = reinterpret_cast<KeelCreateInterfaceFn>(
             keels2::platform::ModuleSymbolFromAddress(table[0], "CreateInterface", error));
+
         int code = 1;
+
         if (!factory || factory("Source2Server001", &code) != server_.Raw() || code != 0 ||
             factory_server_calls_.load() <= server_before)
         {
             return false;
         }
+
         KeelFactoryResult original{};
         const auto null_before = factory_null_calls_.load();
+
         if (factories_.Original(keels2::source2::Factory::server,
                 "KeelS2FactoryNullProbe001", original) != KEEL_RESULT_OK ||
             original.instance || original.return_code != 1 ||
@@ -162,12 +179,17 @@ private:
         {
             return false;
         }
+
         if (factories_.Subscribe(keels2::source2::Factory::server, "KeelS2FactoryNullProbe001",
                 &FactoryCallback, this, 0, factory_null_, KEELS2_FACTORY_PROCESS_LIFETIME) != KEEL_RESULT_OK)
         {
             return false;
         }
-        context_->Log(KEEL_LOG_INFO, "managed factory live probes passed engine=observed server=export null=replaced original=forwarded removal=restored");
+
+        context_->Log(
+            KEEL_LOG_INFO,
+            "managed factory live probes passed engine=observed server=export null=replaced original=forwarded removal=restored");
+
         return true;
     }
 
@@ -183,6 +205,7 @@ private:
     bool ValidateRawService(keels2::Context& context)
     {
         const void* raw = &context;
+
         if (context.QueryService(
                 KEELS2_SOURCE2_SERVICE_NAME,
                 KEELS2_SOURCE2_API_VERSION + 1,
@@ -190,7 +213,9 @@ private:
         {
             return false;
         }
+
         const void* runtime = &context;
+
         if (context.QueryService(
                 KEELS2_SOURCE2_RUNTIME_SERVICE_NAME,
                 KEELS2_SOURCE2_RUNTIME_API_VERSION + 1,
@@ -202,7 +227,9 @@ private:
         {
             return false;
         }
+
         const auto* runtime_api = static_cast<const KeelSource2RuntimeApi*>(runtime);
+
         if (runtime_api->size != sizeof(KeelSource2RuntimeApi) ||
             runtime_api->api_version != KEELS2_SOURCE2_RUNTIME_API_VERSION ||
             !runtime_api->server_command || !runtime_api->client_console_print ||
@@ -210,6 +237,7 @@ private:
         {
             return false;
         }
+
         if (context.QueryService(
                 KEELS2_SOURCE2_SERVICE_NAME,
                 KEELS2_SOURCE2_API_VERSION,
@@ -217,7 +245,9 @@ private:
         {
             return false;
         }
+
         const auto* api = static_cast<const KeelSource2Api*>(raw);
+
         if (api->size != sizeof(KeelSource2Api) ||
             api->api_version != KEELS2_SOURCE2_API_VERSION || !api->query_interface ||
             !api->query_named_interface)
@@ -226,6 +256,7 @@ private:
         }
 
         const void* legacy_raw{};
+
         if (context.QueryService(
                 KEELS2_SOURCE2_SERVICE_NAME,
                 KEELS2_SOURCE2_API_VERSION_1,
@@ -233,9 +264,11 @@ private:
         {
             return false;
         }
+
         const auto* legacy = static_cast<const KeelSource2ApiV1*>(legacy_raw);
         KeelSource2InterfaceInfo legacy_info{};
         legacy_info.size = sizeof(legacy_info);
+
         if (legacy->size != sizeof(KeelSource2ApiV1) ||
             legacy->api_version != KEELS2_SOURCE2_API_VERSION_1 ||
             !legacy->query_interface ||
@@ -253,6 +286,7 @@ private:
         }
 
         KeelSource2InterfaceInfo info{};
+
         if (api->query_interface(
                 context.PluginHandle(),
                 KEELS2_SOURCE2_CAPABILITY_SERVER,
@@ -264,7 +298,9 @@ private:
         {
             return false;
         }
+
         info.size = sizeof(info);
+
         if (api->query_interface(
                 context.PluginHandle(),
                 0,
@@ -273,7 +309,9 @@ private:
         {
             return false;
         }
+
         info.size = sizeof(info);
+
         if (api->query_interface(
                 context.PluginHandle() + 1000,
                 KEELS2_SOURCE2_CAPABILITY_SERVER,
@@ -282,7 +320,9 @@ private:
         {
             return false;
         }
+
         info = {};
+
         if (api->query_named_interface(
                 context.PluginHandle(),
                 KEELS2_SOURCE2_FACTORY_ENGINE,
@@ -296,7 +336,9 @@ private:
         {
             return false;
         }
+
         info.size = sizeof(info);
+
         if (api->query_named_interface(
                 context.PluginHandle(),
                 0,
@@ -306,7 +348,9 @@ private:
         {
             return false;
         }
+
         info.size = sizeof(info);
+
         if (api->query_named_interface(
                 context.PluginHandle(),
                 KEELS2_SOURCE2_FACTORY_ENGINE,
@@ -315,7 +359,9 @@ private:
         {
             return false;
         }
+
         info.size = sizeof(info);
+
         if (api->query_named_interface(
                 context.PluginHandle(),
                 KEELS2_SOURCE2_FACTORY_ENGINE,
@@ -324,7 +370,9 @@ private:
         {
             return false;
         }
+
         info.size = sizeof(info);
+
         if (api->query_named_interface(
                 context.PluginHandle(),
                 KEELS2_SOURCE2_FACTORY_ENGINE,
@@ -333,7 +381,9 @@ private:
         {
             return false;
         }
+
         info.size = sizeof(info);
+
         if (api->query_named_interface(
                 context.PluginHandle() + 1000,
                 KEELS2_SOURCE2_FACTORY_ENGINE,
@@ -342,7 +392,9 @@ private:
         {
             return false;
         }
+
         info.size = sizeof(info);
+
         if (api->query_named_interface(
                 context.PluginHandle(),
                 KEELS2_SOURCE2_FACTORY_ENGINE,
@@ -356,6 +408,7 @@ private:
         {
             return false;
         }
+
         if (std::strncmp(
                 KEELS2_SOURCE2_EXPECTED_PROFILE,
                 "test-fixture-",
@@ -364,6 +417,7 @@ private:
         {
             return false;
         }
+
         return true;
     }
 
@@ -394,6 +448,7 @@ private:
                 KEELS2_SOURCE2_EXPECTED_CVAR_MODULE,
                 &cvar_}
         };
+
         for (const Expected& item : expected)
         {
             if (service_.Query(item.capability, *item.interface) != KEEL_RESULT_OK ||
@@ -402,15 +457,18 @@ private:
                 return false;
             }
         }
+
         const std::array<void*, 3> instances{
             server_.Raw(),
             game_clients_.Raw(),
             cvar_.Raw()
         };
+
         for (std::size_t iteration = 0; iteration < 2048; ++iteration)
         {
             const Expected& item = expected[iteration % expected.size()];
             keels2::source2::Interface interface;
+
             if (service_.Query(item.capability, interface) != KEEL_RESULT_OK ||
                 !ValidateInterface(interface, item) ||
                 interface.Raw() != instances[iteration % instances.size()])
@@ -418,6 +476,7 @@ private:
                 return false;
             }
         }
+
         return server_.Raw() != game_clients_.Raw() &&
             server_.Raw() != cvar_.Raw() && game_clients_.Raw() != cvar_.Raw();
     }
@@ -426,10 +485,12 @@ private:
     {
         const auto result = service_.Query(
             keels2::source2::Capability::game_event_manager, game_events_);
+
         if (result == KEEL_RESULT_NOT_READY)
         {
             return !required && !game_events_;
         }
+
         return result == KEEL_RESULT_OK && game_events_ &&
             game_events_.Type() == keels2::source2::Capability::game_event_manager &&
             game_events_.Origin() == keels2::source2::Factory::none &&
@@ -500,9 +561,11 @@ private:
         const char* const module = named_engine_.Module();
         const char* const module_path = named_engine_.ModulePath();
         const char* const profile = named_engine_.CompatibilityProfile();
+
         for (std::size_t iteration{}; iteration < 2048; ++iteration)
         {
             keels2::source2::Interface interface;
+
             if (service_.Query(
                     keels2::source2::Factory::engine,
                     "NetworkServerService_001",
@@ -520,6 +583,7 @@ private:
         }
 
         keels2::source2::Interface invalid = named_engine_;
+
         if (service_.Query(keels2::source2::Factory::engine, "", invalid) !=
                 KEEL_RESULT_INVALID_ARGUMENT || invalid ||
             service_.Query(
@@ -529,6 +593,7 @@ private:
         {
             return false;
         }
+
         return true;
     }
 
@@ -584,6 +649,7 @@ private:
     {
         KeelSource2InterfaceInfo info{};
         info.size = sizeof(info);
+
         if (api.query_named_interface(
                 context_->PluginHandle(),
                 KEELS2_SOURCE2_FACTORY_ENGINE,
@@ -592,7 +658,9 @@ private:
         {
             return false;
         }
+
         info.size = sizeof(info);
+
         if (api.query_named_interface(
                 context_->PluginHandle(),
                 KEELS2_SOURCE2_FACTORY_ENGINE,
@@ -606,7 +674,9 @@ private:
         {
             return false;
         }
+
         info.size = sizeof(info);
+
         if (api.query_named_interface(
                 context_->PluginHandle(),
                 KEELS2_SOURCE2_FACTORY_ENGINE,
@@ -615,6 +685,7 @@ private:
         {
             return false;
         }
+
         info.size = sizeof(info);
         return api.query_named_interface(
                    context_->PluginHandle(),
@@ -635,6 +706,7 @@ private:
             const bool passed = players_.Check(*context_, invocation[1]);
             context_->Log(passed ? KEEL_LOG_INFO : KEEL_LOG_ERROR,
                 passed ? "player service contract passed {}" : "player service contract failed {}", invocation[1]);
+
             return;
         }
 #endif
@@ -644,8 +716,10 @@ private:
             {
                 context_->Log(KEEL_LOG_ERROR, "managed factory live probes failed");
             }
+
             return;
         }
+
         std::int32_t slot{};
         const char* slot_argument = invocation.Size() == 1 ? invocation[0] : nullptr;
         const std::string_view slot_text = slot_argument ? slot_argument : "";
@@ -653,12 +727,14 @@ private:
             slot_text.data(),
             slot_text.data() + slot_text.size(),
             slot);
+
         if (parsed.ec != std::errc{} || parsed.ptr != slot_text.data() + slot_text.size() ||
             slot < 0)
         {
             context_->Log(KEEL_LOG_ERROR, "usage: s2_check <connected-client-slot>");
             return;
         }
+
         if (!ValidateGameEvents(true))
         {
             context_->Log(KEEL_LOG_ERROR, "Source 2 game-event manager query failed after startup");
@@ -668,15 +744,19 @@ private:
         std::uint32_t message_id{};
         const KeelResult server_command = runtime_.ServerCommand(
             "echo [KeelS2 Live] server command passed\n");
+
         const KeelResult client_print = runtime_.ClientConsolePrint(
             slot,
             "[KeelS2 Live] client console print passed\n");
+
         const KeelResult user_message = runtime_.FindUserMessage(
             "SayText2",
             message_id);
+
         const bool valid = ValidateFactories() && ValidateInterfaces() && ValidateNamedInterfaces() &&
             server_command == KEEL_RESULT_OK && client_print == KEEL_RESULT_OK &&
             user_message == KEEL_RESULT_OK && message_id == 118;
+
         const std::string result = valid
             ? "Source 2 live runtime validation passed message_id=118"
             : "Source 2 live runtime validation failed server=" +
@@ -684,6 +764,7 @@ private:
                 std::to_string(client_print) + " user_message=" +
                 std::to_string(user_message) + " message_id=" +
                 std::to_string(message_id);
+
         context_->Log(valid ? KEEL_LOG_INFO : KEEL_LOG_ERROR, result.c_str());
 #else
         std::uint32_t message_id{99};
@@ -697,6 +778,7 @@ private:
             runtime_.FindUserMessage("missing", message_id) == KEEL_RESULT_NOT_FOUND &&
             message_id == 0 && runtime_.FindUserMessage("SayText2", message_id) ==
                 KEEL_RESULT_OK && message_id == 118;
+
         context_->Log(
             valid ? KEEL_LOG_INFO : KEEL_LOG_ERROR,
             valid

@@ -37,7 +37,11 @@ enum class PlayerButton : uint64
 struct PlayerInput
 {
     uint64 buttons{}, context{};
-    bool Down(PlayerButton button) const noexcept { return (buttons & static_cast<uint64>(button)) != 0; }
+
+    bool Down(PlayerButton button) const noexcept
+    {
+        return (buttons & static_cast<uint64>(button)) != 0;
+    }
 };
 
 struct PlayerInfo
@@ -79,16 +83,20 @@ public:
         const void* service{};
         const KeelResult result = context.QueryService(
             KEELS2_PLAYERS_SERVICE_NAME, KEELS2_PLAYERS_API_VERSION, &service);
+
         if (result != KEEL_RESULT_OK)
         {
             return result;
         }
+
         const auto* api = static_cast<const KeelPlayersApi*>(service);
+
         if (!api || api->size != sizeof(*api) || api->api_version != KEELS2_PLAYERS_API_VERSION ||
             !api->get_player || !api->get_next_player || !api->validate_connection)
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         context_ = context.State();
         api_ = api;
         return KEEL_RESULT_OK;
@@ -118,28 +126,35 @@ public:
     KeelResult GetByUserId(int user_id, PlayerInfo& player) const
     {
         player = {};
+
         if (user_id < 0)
         {
             return KEEL_RESULT_INVALID_ARGUMENT;
         }
+
         CPlayerSlot after(-1);
         PlayerInfo candidate;
+
         for (;;)
         {
             const KeelResult result = Next(after, candidate);
+
             if (result != KEEL_RESULT_OK)
             {
                 return result;
             }
+
             if (candidate.slot.Get() <= after.Get())
             {
                 return KEEL_RESULT_INCOMPATIBLE;
             }
+
             if (candidate.user_id == user_id)
             {
                 player = std::move(candidate);
                 return KEEL_RESULT_OK;
             }
+
             after = candidate.slot;
         }
     }
@@ -159,15 +174,18 @@ private:
     static KeelResult Copy(KeelResult result, const KeelPlayerInfo& info, PlayerInfo& player)
     {
         player = {};
+
         if (result != KEEL_RESULT_OK)
         {
             return result;
         }
+
         if (info.size != sizeof(info) || info.reserved || info.slot < 0 || !info.connection ||
             !std::memchr(info.name, '\0', sizeof(info.name)))
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         player.slot = CPlayerSlot(info.slot);
         player.user_id = info.user_id;
         player.connection = info.connection;

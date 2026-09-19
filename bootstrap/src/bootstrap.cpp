@@ -65,13 +65,16 @@ static VtableWriteResult WriteVtablePointer(void** slot, void* value, std::strin
 {
 #if defined(_WIN32)
     DWORD previous_protection{};
+
     if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &previous_protection))
     {
         error = "VirtualProtect failed with error " + std::to_string(GetLastError());
         return {};
     }
+
     *slot = value;
     DWORD ignored{};
+
     if (!VirtualProtect(slot, sizeof(void*), previous_protection, &ignored))
     {
         error = "VirtualProtect could not restore page protection";
@@ -79,19 +82,24 @@ static VtableWriteResult WriteVtablePointer(void** slot, void* value, std::strin
     }
 #else
     const long page_size = sysconf(_SC_PAGESIZE);
+
     if (page_size <= 0)
     {
         error = "sysconf could not determine the page size";
         return {};
     }
+
     const auto address = reinterpret_cast<std::uintptr_t>(slot);
     const auto page = address & ~(static_cast<std::uintptr_t>(page_size) - 1u);
+
     if (mprotect(reinterpret_cast<void*>(page), static_cast<std::size_t>(page_size), PROT_READ | PROT_WRITE) != 0)
     {
         error = "mprotect failed: " + std::string(std::strerror(errno));
         return {};
     }
+
     *slot = value;
+
     if (mprotect(reinterpret_cast<void*>(page), static_cast<std::size_t>(page_size), PROT_READ) != 0)
     {
         error = "mprotect could not restore page protection: " + std::string(std::strerror(errno));
@@ -121,6 +129,7 @@ public:
 
         auto** vtable = *static_cast<void***>(object);
         void** requested_slot = &vtable[index];
+
         if (installed_)
         {
             if (slot_ == requested_slot)
@@ -128,12 +137,14 @@ public:
                 error.clear();
                 return true;
             }
+
             error = "vtable patch is already installed on a different object";
             return false;
         }
 
         slot_ = requested_slot;
         original_ = *slot_;
+
         if (!original_)
         {
             error = "vtable entry is null";
@@ -142,32 +153,39 @@ public:
         }
 
         std::filesystem::path original_module;
+
         if (!platform::ModulePathFromAddress(original_, original_module, error))
         {
             slot_ = nullptr;
             original_ = nullptr;
             return false;
         }
+
         std::error_code filesystem_error;
+
         if (!std::filesystem::equivalent(original_module, expected_module, filesystem_error) || filesystem_error)
         {
             error = "vtable entry resolves outside the genuine server module: " + original_module.string();
+
             if (filesystem_error)
             {
                 error += ": " + filesystem_error.message();
             }
+
             slot_ = nullptr;
             original_ = nullptr;
             return false;
         }
 
         const VtableWriteResult result = WriteVtablePointer(slot_, replacement, error);
+
         if (!result.written)
         {
             slot_ = nullptr;
             original_ = nullptr;
             return false;
         }
+
         installed_ = true;
         return result.protection_restored;
     }
@@ -178,11 +196,14 @@ public:
         {
             return true;
         }
+
         const VtableWriteResult result = WriteVtablePointer(slot_, original_, error);
+
         if (!result.written)
         {
             return false;
         }
+
         installed_ = false;
         slot_ = nullptr;
         return result.protection_restored;
@@ -229,16 +250,19 @@ public:
             {
                 *return_code = 1;
             }
+
             return nullptr;
         }
 
         std::unique_lock lock(mutex_);
+
         if (!EnsureRealServer())
         {
             if (return_code)
             {
                 *return_code = 1;
             }
+
             return nullptr;
         }
 
@@ -246,6 +270,7 @@ public:
         lock.unlock();
         void* interface_pointer = factory(name, return_code);
         lock.lock();
+
         if (!interface_pointer)
         {
             return nullptr;
@@ -261,6 +286,7 @@ public:
         {
             PatchServer(interface_pointer);
         }
+
         return interface_pointer;
     }
 
@@ -274,6 +300,7 @@ public:
             original = connect_patch_.Original<ConnectFn>();
             RestorePatch(connect_patch_, "Source2ServerConfig::Connect");
         }
+
         return original ? original(self, factory) : false;
     }
 
@@ -289,7 +316,9 @@ public:
             RestorePatch(disconnect_patch_, "Source2ServerConfig::Disconnect");
             platform::AppendShutdownTrace("bootstrap disconnect patch restoration complete");
         }
+
         platform::AppendShutdownTrace("bootstrap host stop begin");
+
         StopHost();
         {
             std::scoped_lock lock(mutex_);
@@ -297,6 +326,7 @@ public:
             lifecycle_complete_ = true;
             platform::AppendShutdownTrace("bootstrap lifecycle marked complete");
         }
+
         if (original)
         {
             platform::AppendShutdownTrace("bootstrap genuine disconnect begin");
@@ -307,6 +337,7 @@ public:
         {
             platform::AppendShutdownTrace("bootstrap genuine disconnect unavailable");
         }
+
         platform::AppendShutdownTrace("bootstrap disconnect complete");
     }
 
@@ -319,14 +350,17 @@ public:
             original = init_patch_.Original<InitFn>();
             RestorePatch(init_patch_, "Source2Server::Init");
         }
+
         StartHost();
 
         const int result = original ? original(self) : 0;
+
         if (result == 0)
         {
             StopHost();
             return 0;
         }
+
         if (host_state_ == HostState::running &&
             (!host_complete_startup_ || host_complete_startup_() == 0))
         {
@@ -334,6 +368,7 @@ public:
             StopHost();
             return 0;
         }
+
         return result;
     }
 
@@ -359,14 +394,17 @@ private:
         {
             return true;
         }
+
         if (real_server_attempted_)
         {
             return false;
         }
+
         real_server_attempted_ = true;
 
         std::filesystem::path module_path;
         std::string error;
+
         if (!platform::ModulePathFromAddress(FunctionAddress(&ConnectHook), module_path, error))
         {
             Log("could not locate bootstrap module: " + error);
@@ -375,6 +413,7 @@ private:
 
         std::error_code filesystem_error;
         module_path = std::filesystem::weakly_canonical(module_path, filesystem_error);
+
         if (filesystem_error)
         {
             Log("could not canonicalize bootstrap path: " + filesystem_error.message());
@@ -383,6 +422,7 @@ private:
 
         bootstrap_directory_ = module_path.parent_path();
         std::filesystem::path csgo_directory = bootstrap_directory_;
+
         for (int index = 0; index < 4; ++index)
         {
             csgo_directory = csgo_directory.parent_path();
@@ -394,11 +434,13 @@ private:
         const char* real_server_name = "libserver.so";
 #endif
         const auto real_server_path = csgo_directory / "bin" / bootstrap_directory_.filename() / real_server_name;
+
         if (!std::filesystem::is_regular_file(real_server_path, filesystem_error) || filesystem_error)
         {
             Log("genuine server module is unavailable: " + real_server_path.string());
             return false;
         }
+
         if (std::filesystem::equivalent(module_path, real_server_path, filesystem_error) && !filesystem_error)
         {
             Log("genuine server path resolves to the KeelS2 proxy");
@@ -410,7 +452,9 @@ private:
             Log("could not load genuine server module: " + error);
             return false;
         }
+
         server_factory_ = AddressFunction<KeelCreateInterfaceFn>(real_server_.Symbol("CreateInterface"));
+
         if (!server_factory_)
         {
             Log("genuine server module does not export CreateInterface");
@@ -419,6 +463,7 @@ private:
         }
 
         platform::FileFingerprint fingerprint;
+
         if (!platform::FingerprintFile(real_server_path, fingerprint, error))
         {
             Log("could not fingerprint genuine server module: " + error);
@@ -438,6 +483,7 @@ private:
         bootstrap_directory_text_ = bootstrap_directory_.string();
         real_server_path_ = real_server_path;
         Log("loaded genuine server module: " + real_server_path.string());
+
         if (profile_)
         {
             Log("selected compatibility profile: " + std::string(profile_->id));
@@ -447,15 +493,18 @@ private:
             const std::string identity = fingerprint.size == 0
                 ? "unavailable"
                 : platform::FormatFingerprint(fingerprint);
+
             Log("unsupported cs2 server module for " + std::string(kPlatformName) + ": " + identity);
             Log("lifecycle capture and plugin loading are disabled; genuine interfaces remain available");
         }
+
         return true;
     }
 
     void PatchConfig(void* interface_pointer)
     {
         std::string error;
+
         if (!connect_observed_ && !connect_patch_.Install(
                 interface_pointer,
                 profile_->connect_slot,
@@ -467,6 +516,7 @@ private:
             DisableLifecycleCapture();
             return;
         }
+
         if (!disconnect_patch_.Install(
                 interface_pointer,
                 profile_->disconnect_slot,
@@ -485,7 +535,9 @@ private:
         {
             return;
         }
+
         std::string error;
+
         if (!init_patch_.Install(
                 interface_pointer,
                 profile_->init_slot,
@@ -504,6 +556,7 @@ private:
         {
             return;
         }
+
         capture_disabled_ = true;
         RestorePatch(connect_patch_, "Source2ServerConfig::Connect");
         RestorePatch(disconnect_patch_, "Source2ServerConfig::Disconnect");
@@ -514,6 +567,7 @@ private:
     void RestorePatch(VtablePatch& patch, const char* name)
     {
         std::string error;
+
         if (!patch.Restore(error))
         {
             Log(std::string("could not restore ") + name + ": " + error);
@@ -523,30 +577,36 @@ private:
     void StartHost()
     {
         std::unique_lock lock(mutex_);
+
         if (host_state_ == HostState::running)
         {
             return;
         }
+
         if (host_state_ != HostState::stopped)
         {
             Log("host start requested during another lifecycle transition");
             return;
         }
+
         if (!engine_factory_)
         {
             Log("host was not started because Source2ServerConfig::Connect was not observed");
             return;
         }
+
         if (!profile_)
         {
             Log("host was not started because no compatibility profile is active");
             return;
         }
+
         if (capture_disabled_)
         {
             Log("host was not started because lifecycle compatibility validation failed");
             return;
         }
+
         if (lifecycle_complete_)
         {
             Log("host was not started because the captured lifecycle is complete");
@@ -562,6 +622,7 @@ private:
 #endif
         std::string error;
         const auto host_path = bootstrap_directory_ / host_name;
+
         if (!host_library_.Open(host_path, error))
         {
             Log("could not load host: " + error);
@@ -572,7 +633,9 @@ private:
         host_start_ = AddressFunction<KeelHostStartFn>(host_library_.Symbol("KeelHost_Start"));
         host_complete_startup_ = AddressFunction<KeelHostCompleteStartupFn>(
             host_library_.Symbol("KeelHost_CompleteStartup"));
+
         host_stop_ = AddressFunction<KeelHostStopFn>(host_library_.Symbol("KeelHost_Stop"));
+
         if (!host_start_ || !host_complete_startup_ || !host_stop_)
         {
             Log("host exports are incomplete");
@@ -582,6 +645,7 @@ private:
 
         std::vector<std::string> target_modules;
         target_modules.reserve(profile_->target_count);
+
         for (std::uint32_t index{}; index < profile_->target_count; ++index)
         {
             const auto& target = profile_->targets[index];
@@ -593,6 +657,7 @@ private:
 
         std::vector<KeelHostCompatibilityTargetInfo> targets;
         targets.reserve(profile_->target_count);
+
         for (std::uint32_t index{}; index < profile_->target_count; ++index)
         {
             const auto& target = profile_->targets[index];
@@ -605,6 +670,7 @@ private:
                 target.pattern
             });
         }
+
         const KeelHostCompatibilityInfo compatibility{
             sizeof(KeelHostCompatibilityInfo),
             profile_->id,
@@ -697,18 +763,21 @@ private:
         lock.unlock();
         const std::uint32_t start_result = host_start_(&info);
         lock.lock();
+
         if (start_result == KEELS2_HOST_START_FAILED)
         {
             Log("host rejected startup");
             CloseHostLibrary();
             return;
         }
+
         if (start_result == KEELS2_HOST_START_RETAINED)
         {
             Log("host startup failed and its module was retained because native resources remain active");
             host_state_ = HostState::stopping;
             return;
         }
+
         if (start_result != KEELS2_HOST_START_RUNNING)
         {
             Log("host returned an unsupported startup result; retaining its module");
@@ -723,17 +792,21 @@ private:
     {
         std::unique_lock lock(mutex_);
         platform::AppendShutdownTrace("bootstrap StopHost entered");
+
         if (host_state_ != HostState::running && host_state_ != HostState::stopping)
         {
             platform::AppendShutdownTrace("bootstrap StopHost skipped");
             return;
         }
+
         if (host_state_ == HostState::running)
         {
             host_state_ = HostState::stopping;
         }
+
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         bool waiting{};
+
         while (true)
         {
             platform::AppendShutdownTrace("bootstrap host stop export call begin");
@@ -745,23 +818,28 @@ private:
                 stopped
                     ? "bootstrap host stop export reported complete"
                     : "bootstrap host stop export requested retry");
+
             if (stopped)
             {
                 break;
             }
+
             if (!waiting)
             {
                 Log("host cleanup is waiting for native resources to become safe");
                 waiting = true;
             }
+
             if (std::chrono::steady_clock::now() >= deadline)
             {
                 Log("host module retained because native resources remain active");
                 platform::AppendShutdownTrace("bootstrap host module retained");
                 return;
             }
+
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
+
         platform::AppendShutdownTrace("bootstrap host library close begin");
         CloseHostLibrary();
         platform::AppendShutdownTrace("bootstrap host library close complete");
@@ -820,6 +898,7 @@ extern "C" KEELS2_BOOTSTRAP_EXPORT void* CreateInterface(const char* name, int* 
         {
             *return_code = 1;
         }
+
         return nullptr;
     }
 }

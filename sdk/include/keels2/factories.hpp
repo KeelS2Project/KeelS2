@@ -17,17 +17,21 @@ public:
         const void* value{};
         const auto result = context.QueryService(
             KEELS2_FACTORIES_SERVICE_NAME, KEELS2_FACTORIES_API_VERSION, &value);
+
         if (result != KEEL_RESULT_OK)
         {
             return result;
         }
+
         const auto* api = static_cast<const KeelFactoriesApi*>(value);
+
         if (!api || api->size != sizeof(*api) ||
             api->api_version != KEELS2_FACTORIES_API_VERSION ||
             !api->subscribe || !api->unsubscribe || !api->query_original)
         {
             return KEEL_RESULT_INCOMPATIBLE;
         }
+
         api_ = api;
         return KEEL_RESULT_OK;
     }
@@ -43,12 +47,15 @@ public:
         KeelFactorySubscriptionHandle& subscription, std::uint32_t flags = 0) const noexcept
     {
         subscription = 0;
+
         if (!*this)
         {
             return KEEL_RESULT_NOT_READY;
         }
+
         const KeelFactorySubscriptionSpec spec{sizeof(spec),
             static_cast<KeelSource2Factory>(factory), name, priority, flags, callback, data};
+
         return api_->subscribe(context_->plugin, &spec, &subscription);
     }
 

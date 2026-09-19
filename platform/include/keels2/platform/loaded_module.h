@@ -56,20 +56,24 @@ ModuleLookup FindLoadedModule(
     std::string_view selector,
     LoadedModule& module,
     std::string& error);
+
 ModuleLookup FindLoadedModuleForAddress(
     const void* address,
     LoadedModule& module,
     std::string& error);
+
 ModuleLookup FindPrimaryVtable(
     const LoadedModule& module,
     std::string_view class_name,
     std::size_t entry_count,
     void**& table,
     std::string& error);
+
 void* FindLoadedSymbol(
     const LoadedModule& module,
     std::string_view symbol,
     std::string& error);
+
 bool IsExecutableAddress(const LoadedModule& module, const void* address);
 
 }

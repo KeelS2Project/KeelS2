@@ -20,6 +20,7 @@ class NativeConstructionBackend final : public ConstructionBackend
 {
 public:
     explicit NativeConstructionBackend(ConstructionEnvironment& environment) : environment_(environment) {}
+
     KeelResult Ready() override;
     KeelResult Create(const char*, host::GameEntityIdentity&) override;
     KeelResult Validate(const host::GameEntityIdentity&) override;
@@ -27,6 +28,7 @@ public:
     KeelResult Cancel(const host::GameEntityIdentity&) override;
     KeelResult Teleport(const host::GameEntityIdentity&, const KeelEntityTeleport&) override;
     KeelResult Visit(const host::GameEntityIdentity&, const char*, KeelEntityAccessCallback, void*) override;
+
 private:
     KeelResult Current(const host::GameEntityIdentity&, void*&);
     ConstructionEnvironment& environment_;

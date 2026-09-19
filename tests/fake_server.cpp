@@ -35,6 +35,7 @@ public:
         {
             return false;
         }
+
         listener = candidate;
         events.insert(name);
         ++add_count;
@@ -103,15 +104,19 @@ public:
     virtual int Init()
     {
         const char* dispatch = std::getenv("KEELS2_TEST_GAME_FRAME_DURING_INIT");
+
         if (dispatch && std::strcmp(dispatch, "1") == 0 && !DispatchGameFrameDuringInit())
         {
             return 0;
         }
+
         const char* fail = std::getenv("KEELS2_TEST_SERVER_INIT_FAILURE");
+
         if (fail && std::strcmp(fail, "1") == 0)
         {
             return 0;
         }
+
         return LoadGameEventsDuringInit() ? 1 : 0;
     }
 
@@ -338,25 +343,30 @@ constexpr std::size_t kGameEventListenerFireSlot = 2;
 bool DispatchGameFrameDuringInit()
 {
     const auto game_frame = VtableFunction<void (*)(void*, bool, bool, bool)>(&g_server, 19);
+
     if (game_frame == g_original_game_frame)
     {
         return false;
     }
+
     if (!g_init_game_frame_dispatched)
     {
         g_init_game_frame_dispatched = true;
         game_frame(&g_server, true, false, true);
     }
+
     return true;
 }
 
 bool LoadGameEventsDuringInit()
 {
     const char* skip = std::getenv("KEELS2_TEST_SKIP_GAME_EVENT_LOAD");
+
     if (skip && std::strcmp(skip, "1") == 0)
     {
         return true;
     }
+
     return VtableFunction<int (*)(void*, const char*, bool)>(
         &g_game_event_manager,
         kGameEventLoadSlot)(&g_game_event_manager, "resource/gameevents.res", true) == 1;
@@ -367,6 +377,7 @@ bool LoadGameEventsDuringInit()
 extern "C" KEELS2_FAKE_EXPORT void* CreateInterface(const char* name, int* return_code)
 {
     void* result{};
+
     if (name && std::strcmp(name, "Source2ServerConfig001") == 0)
     {
         result = &g_config;
@@ -375,6 +386,7 @@ extern "C" KEELS2_FAKE_EXPORT void* CreateInterface(const char* name, int* retur
     {
         ++g_server_queries;
         const char* mode = std::getenv("KEELS2_TEST_MISSING_SOURCE2_INTERFACE");
+
         if (!mode || std::strcmp(mode, "server_after_bootstrap") != 0 || g_server_queries == 1)
         {
             result = &g_server;
@@ -383,6 +395,7 @@ extern "C" KEELS2_FAKE_EXPORT void* CreateInterface(const char* name, int* retur
     else if (name && std::strcmp(name, "Source2GameClients001") == 0)
     {
         const char* mode = std::getenv("KEELS2_TEST_MISSING_SOURCE2_INTERFACE");
+
         if (!mode || std::strcmp(mode, "game_clients") != 0)
         {
             result = &g_game_clients;
@@ -393,6 +406,7 @@ extern "C" KEELS2_FAKE_EXPORT void* CreateInterface(const char* name, int* retur
     {
         *return_code = result ? 0 : 1;
     }
+
     return result;
 }
 
@@ -407,9 +421,11 @@ extern "C" KEELS2_FAKE_EXPORT bool KeelTest_DispatchGameEvent(void* event)
     {
         return false;
     }
+
     VtableFunction<void (*)(void*, void*)>(
         g_game_event_manager.listener,
         kGameEventListenerFireSlot)(g_game_event_manager.listener, event);
+
     return true;
 }
 
@@ -440,6 +456,7 @@ extern "C" KEELS2_FAKE_EXPORT void KeelTest_DispatchLifecycle()
         true,
         false,
         true);
+
     VtableFunction<
         void (*)(void*, std::int32_t, const char*, std::uint64_t, const char*, const char*, bool)>(
             &g_game_clients,
@@ -451,12 +468,15 @@ extern "C" KEELS2_FAKE_EXPORT void KeelTest_DispatchLifecycle()
         "STEAM_1:0:2",
         "127.0.0.1:27005",
         false);
+
     VtableFunction<void (*)(void*, std::int32_t, const char*, std::int32_t, std::uint64_t)>(
         &g_game_clients,
         13)(&g_game_clients, 4, "Keel", 0, 76561198000000004ull);
+
     VtableFunction<void (*)(void*, std::int32_t, bool, const char*, std::uint64_t)>(
         &g_game_clients,
         14)(&g_game_clients, 4, false, "Keel", 76561198000000004ull);
+
     VtableFunction<void (*)(void*, std::int32_t)>(&g_game_clients, 15)(&g_game_clients, 4);
     VtableFunction<
         void (*)(void*, std::int32_t, std::int32_t, const char*, std::uint64_t, const char*)>(
@@ -468,6 +488,7 @@ extern "C" KEELS2_FAKE_EXPORT void KeelTest_DispatchLifecycle()
         "Keel",
         76561198000000004ull,
         "STEAM_1:0:2");
+
     VtableFunction<void (*)(void*, std::int32_t)>(&g_game_clients, 19)(&g_game_clients, 4);
 }
 
@@ -489,6 +510,7 @@ extern "C" KEELS2_FAKE_EXPORT std::uint32_t KeelTest_LifecycleCallCount(std::uin
     {
         return 0;
     }
+
     return event == 1
         ? g_server.lifecycle_calls[0]
         : g_game_clients.lifecycle_calls[event - 1];
@@ -516,11 +538,13 @@ extern "C" KEELS2_FAKE_EXPORT bool KeelTest_DispatchClientConnect()
         "STEAM_1:0:2",
         false,
         rejection.data());
+
     g_rejection_message.fill('\0');
     std::memcpy(
         g_rejection_message.data(),
         rejection.data() + 2 * sizeof(std::int32_t),
         264);
+
     g_rejection_message[264] = '\0';
     return accepted;
 }

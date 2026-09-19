@@ -19,19 +19,24 @@ public:
 
     bool PrepareUnload() override
     {
-        if (!ready) LogMessage("Unload refused. Run keel_docs_unload allow before retrying.");
+        if (!ready)
+            LogMessage("Unload refused. Run keel_docs_unload allow before retrying.");
+
         return ready;
     }
 
 private:
     void Command(const CCommandContext& context, const CCommand& command)
     {
-        if (context.GetPlayerSlot().Get() != -1) return;
+        if (context.GetPlayerSlot().Get() != -1)
+            return;
+
         if (command.ArgC() != 2 || (std::strcmp(command[1], "allow") != 0 && std::strcmp(command[1], "refuse") != 0))
         {
             LogMessage("Usage: keel_docs_unload <allow|refuse>");
             return;
         }
+
         ready = std::strcmp(command[1], "allow") == 0;
         LogMessage("Unload preparation is {}.", ready ? "allowed" : "refused");
     }

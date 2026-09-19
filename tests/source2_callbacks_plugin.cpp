@@ -55,6 +55,7 @@ public:
         const bool listening = ListenForGameEvent(
             "round_start",
             &Source2CallbacksPlugin::OnRoundStart);
+
         LogMessage(Marker(listening ? "loaded" : "listener registration failed").c_str());
         return listening;
     }
@@ -76,9 +77,11 @@ public:
     {
         LogMessage(Marker(
             key_values && prerequisite_registry ? "LevelInit" : "LevelInit invalid").c_str());
+
         if (g_block_armed.exchange(false, std::memory_order_acq_rel))
         {
             g_block_entered.store(true, std::memory_order_release);
+
             while (!g_block_released.load(std::memory_order_acquire))
             {
                 std::this_thread::yield();
@@ -102,7 +105,9 @@ public:
         const bool valid = slot.Get() == 4 && name && std::strcmp(name, "Keel") == 0 &&
             xuid == 76561198000000004ull && network_id &&
             std::strcmp(network_id, "STEAM_1:0:2") == 0 && !unknown && rejection_message;
+
         LogMessage(Marker(valid ? "ClientConnect" : "ClientConnect invalid").c_str());
+
         if (!valid)
         {
             return true;
@@ -114,6 +119,7 @@ public:
             0,
             rejection.data(),
             static_cast<int>(rejection.size() - 1));
+
         return false;
 #elif KEELS2_CALLBACK_PLUGIN_REJECTION == 2
         rejection_message->Insert(0, "second tie rejection");
@@ -131,6 +137,7 @@ public:
         const bool valid = slot.Get() == 4 && command.ArgC() == 2 &&
             std::strcmp(command[0], "say") == 0 &&
             std::strcmp(command[1], "keels2") == 0;
+
         LogMessage(Marker(valid ? "ClientCommand" : "ClientCommand invalid").c_str());
         return valid && KEELS2_CALLBACK_PLUGIN_COMMAND_ACCEPT != 0;
     }

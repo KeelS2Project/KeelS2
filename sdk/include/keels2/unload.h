@@ -16,6 +16,7 @@ typedef struct KeelUnloadApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*set_prepare_callback)(
         KeelPluginHandle plugin, KeelPrepareUnloadCallback callback, void* user_data);
 } KeelUnloadApi;

@@ -99,27 +99,33 @@ typedef struct KeelConVarApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*create)(
         KeelPluginHandle plugin,
         const KeelConVarSpec* spec,
         KeelConVarHandle* convar);
+
     KeelResult (*find)(
         KeelPluginHandle plugin,
         const char* name,
         KeelConVarType expected_type,
         KeelConVarHandle* convar);
+
     KeelResult (*release)(KeelPluginHandle plugin, KeelConVarHandle convar);
+
     KeelResult (*read)(
         KeelPluginHandle plugin,
         KeelConVarHandle convar,
         int32_t slot,
         KeelConVarValue* value);
+
     /* API v1 name retained: sets on the game thread outside callbacks; queues otherwise. */
     KeelResult (*queue_set)(
         KeelPluginHandle plugin,
         KeelConVarHandle convar,
         int32_t slot,
         const KeelConVarValue* value);
+
     KeelResult (*describe)(
         KeelPluginHandle plugin,
         KeelConVarHandle convar,

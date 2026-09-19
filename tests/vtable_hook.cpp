@@ -59,6 +59,7 @@ int main()
     void* first_original{};
     void** second_slot{};
     void* second_original{};
+
     if (keels2::hooking::ResolveVtableSlot(first, 0, first_slot, first_original) !=
             keels2::hooking::VtableHookResult::ok ||
         keels2::hooking::ResolveVtableSlot(second, 0, second_slot, second_original) !=
@@ -70,6 +71,7 @@ int main()
 
     g_shared_original = Function(first_original);
     std::unique_ptr<keels2::hooking::SharedVtableHook> shared;
+
     if (keels2::hooking::SharedVtableHook::Create(
             first_slot,
             Address(&SharedReplacement),
@@ -83,17 +85,21 @@ int main()
     {
         return 2;
     }
+
     std::atomic<bool> stop{};
     std::atomic<bool> failed{};
     std::array<std::thread, 4> workers;
+
     for (std::size_t index{}; index < workers.size(); ++index)
     {
         workers[index] = std::thread([&, index] {
             void* object = index % 2 == 0 ? first : second;
             const std::int32_t original = index % 2 == 0 ? 105 : 205;
+
             while (!stop.load(std::memory_order_acquire))
             {
                 const std::int32_t actual = KeelHookVirtualFixtureCallFirst(object, 5);
+
                 if (actual != original && actual != original + 1000)
                 {
                     failed.store(true, std::memory_order_release);
@@ -102,6 +108,7 @@ int main()
             }
         });
     }
+
     for (std::size_t iteration{}; iteration < 250 && !failed.load(std::memory_order_acquire); ++iteration)
     {
         if (shared->Enable() != keels2::hooking::VtableHookResult::ok ||
@@ -110,25 +117,31 @@ int main()
             failed.store(true, std::memory_order_release);
         }
     }
+
     stop.store(true, std::memory_order_release);
+
     for (auto& worker : workers)
     {
         worker.join();
     }
+
     if (failed.load(std::memory_order_acquire))
     {
         return 5;
     }
 
     std::shared_ptr<keels2::hooking::InstanceVtable> instance;
+
     if (keels2::hooking::InstanceVtable::Create(first, 2, instance) !=
             keels2::hooking::VtableHookResult::ok ||
         !instance || !instance->Intact())
     {
         return 3;
     }
+
     g_first_original = Function(instance->Original(0));
     g_second_original = Function(instance->Original(1));
+
     if (instance->Enable(0, Address(&FirstReplacement)) !=
             keels2::hooking::VtableHookResult::ok ||
         instance->Enable(1, Address(&SecondReplacement)) !=
@@ -148,14 +161,17 @@ int main()
     {
         return 4;
     }
+
     stop.store(false, std::memory_order_release);
     failed.store(false, std::memory_order_release);
+
     for (auto& worker : workers)
     {
         worker = std::thread([&] {
             while (!stop.load(std::memory_order_acquire))
             {
                 const std::int32_t actual = KeelHookVirtualFixtureCallFirst(first, 5);
+
                 if (actual != 105 && actual != 2105)
                 {
                     failed.store(true, std::memory_order_release);
@@ -164,6 +180,7 @@ int main()
             }
         });
     }
+
     for (std::size_t iteration{}; iteration < 250 && !failed.load(std::memory_order_acquire); ++iteration)
     {
         if (instance->Enable(0, Address(&FirstReplacement)) !=
@@ -174,14 +191,18 @@ int main()
             failed.store(true, std::memory_order_release);
         }
     }
+
     stop.store(true, std::memory_order_release);
+
     for (auto& worker : workers)
     {
         worker.join();
     }
+
     if (failed.load(std::memory_order_acquire) || !instance->Empty() || !instance->Intact())
     {
         return 6;
     }
+
     return 0;
 }

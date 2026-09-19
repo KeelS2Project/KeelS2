@@ -35,10 +35,13 @@ class SourceRootStyle
 public:
     Action Dispatch(ConCommandRef reference,
         const CCommandContext& context, const CCommand& command);
+
     Action Listening(HookCall<bool>& call,
         ConCommandRef& reference, CPlayerSlot slot, bool listening);
+
     void CommandPeer(ConCommandRef reference,
         const CCommandContext& context, const CCommand& command);
+
     void VoicePeer(ConCommandRef reference, CPlayerSlot slot, bool listening);
     void CommandPost(ConCommandRef, const CCommandContext&, const CCommand&);
     void VoicePost(ConCommandRef, CPlayerSlot, bool);

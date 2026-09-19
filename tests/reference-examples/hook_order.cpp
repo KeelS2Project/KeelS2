@@ -14,9 +14,15 @@ public:
     bool Load() override
     {
         const void* service = nullptr;
-        if (HostContext().QueryService(DOCS_MATH_NAME, DOCS_MATH_VERSION, &service) != KEEL_RESULT_OK) return false;
+
+        if (HostContext().QueryService(DOCS_MATH_NAME, DOCS_MATH_VERSION, &service) != KEEL_RESULT_OK)
+            return false;
+
         const auto* math = static_cast<const DocsMathService*>(service);
-        if (!math || math->size != sizeof(*math) || math->version != DOCS_MATH_VERSION || !math->add) return false;
+
+        if (!math || math->size != sizeof(*math) || math->version != DOCS_MATH_VERSION || !math->add)
+            return false;
+
         const auto address = keels2::kh::TargetSpec::Address(reinterpret_cast<void*>(math->add));
         return hooks.Connect(HostContext()) == KEEL_RESULT_OK
             && hooks.Resolve<std::int32_t(std::int32_t, std::int32_t)>(address, target) == KEEL_RESULT_OK
@@ -29,6 +35,7 @@ private:
     {
         LogMessage("{} {}: {} + {}", DOCS_HOOK_LABEL,
             call.CurrentPhase() == keels2::kh::Phase::Pre ? "pre" : "post", left, right);
+
         return PLUGIN_CONTINUE;
     }
 

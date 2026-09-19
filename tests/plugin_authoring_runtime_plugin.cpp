@@ -39,6 +39,7 @@ public:
         {
             throw std::runtime_error("dependency manifest exception");
         }
+
         return {
             {"Core Plugin", "1.2.3", DependencyRequirement::exact},
             {"Utility Plugin", "2.0.0", DependencyRequirement::at_least}
@@ -55,20 +56,25 @@ public:
             target->author == "KeelS2 Tests" && target->version == "3.4.5" &&
             target->description == "Runtime target" && target->file == "target.so" &&
             target->diagnostic.empty();
+
         PluginDetails details;
-        g_helpers_valid = g_helpers_valid && GetPlugin("Target Plugin", details) &&
-            details.handle == 22 && std::strcmp(details.name, "Target Plugin") == 0 &&
-            GetPlugin(PluginId{22}, details) && details.state == KEELS2_PLUGIN_STATE_RUNNING;
+        g_helpers_valid = g_helpers_valid && GetPlugin("Target Plugin", details) && details.handle == 22 &&
+                          std::strcmp(details.name, "Target Plugin") == 0 && GetPlugin(PluginId{22}, details) &&
+                          details.state == KEELS2_PLUGIN_STATE_RUNNING;
+
         uint32 count{};
+
         while (GetPluginAt(count, details))
         {
             ++count;
         }
-        g_helpers_valid = g_helpers_valid && count == 2 &&
-            LastResult() == KEEL_RESULT_NOT_FOUND && details.handle == 0 && details.name[0] == 0 &&
-            !GetPlugin("Missing Plugin", details) && LastResult() == KEEL_RESULT_NOT_FOUND &&
+
+        g_helpers_valid =
+            g_helpers_valid && count == 2 && LastResult() == KEEL_RESULT_NOT_FOUND && details.handle == 0 &&
+            details.name[0] == 0 && !GetPlugin("Missing Plugin", details) && LastResult() == KEEL_RESULT_NOT_FOUND &&
             !GetPlugin(static_cast<const char*>(nullptr), details) && LastResult() == KEEL_RESULT_INVALID_ARGUMENT &&
             !GetPlugin(PluginId{}, details) && LastResult() == KEEL_RESULT_INVALID_ARGUMENT;
+
         return g_helpers_valid;
     }
 
@@ -78,6 +84,7 @@ public:
         PluginDetails details;
         g_helpers_valid = g_helpers_valid && !GetPlugin("Target Plugin", details) &&
             LastResult() == KEEL_RESULT_NOT_READY && details.handle == 0;
+
         g_unload_helpers_disabled = Plugins().empty() && !FindPlugin("Target Plugin") &&
             !PausePlugin(22) && !ResumePlugin(22);
     }
@@ -176,24 +183,34 @@ extern "C" KEELS2_PLUGIN_EXPORT std::uint32_t KeelTest_PluginAuthoringRuntimeVal
     {
         case 0:
             return g_load_count;
+
         case 1:
             return g_unload_count;
+
         case 2:
             return g_loaded_count;
+
         case 3:
             return g_unloaded_count;
+
         case 4:
             return g_paused_count;
+
         case 5:
             return g_resumed_count;
+
         case 6:
             return g_all_loaded_count;
+
         case 7:
             return g_event_values_valid ? 1u : 0u;
+
         case 8:
             return g_helpers_valid ? 1u : 0u;
+
         case 9:
             return g_unload_helpers_disabled ? 1u : 0u;
+
         default:
             return 0;
     }

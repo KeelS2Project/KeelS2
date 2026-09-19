@@ -29,6 +29,7 @@ int main(void)
     const KeelPlayerInfo copied = player;
     player.name[0] = 'X';
     player.connection = 18;
+
     if (strcmp(copied.name, "Example player") != 0 || copied.connection != saved.generation ||
         player.connection == saved.generation || saved.reserved != 0) return 1;
 

@@ -34,6 +34,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Query(
     {
         return KEEL_FALSE;
     }
+
     *info = {
         sizeof(KeelPluginInfo),
         KEELS2_PLUGIN_ABI_VERSION,
@@ -55,7 +56,9 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     const void* value{};
+
     if (api->query_service(
             plugin,
             KEELS2_SERVICES_SERVICE_NAME,
@@ -64,12 +67,15 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     const auto* services = static_cast<const KeelServicesApi*>(value);
+
     if (services->size != sizeof(KeelServicesApi) || !services->publish ||
         !services->withdraw || !services->release)
     {
         return KEEL_FALSE;
     }
+
     KeelServiceHandle rejected{};
     const KeelServiceSpec reserved{
         sizeof(KeelServiceSpec),
@@ -84,6 +90,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
         KEELS2_TEST_MATH_SERVICE_NAME,
         &g_math
     };
+
     if (services->publish(plugin, &reserved, &rejected) != KEEL_RESULT_INVALID_ARGUMENT ||
         rejected || services->publish(plugin, &spec, &publication) != KEEL_RESULT_OK ||
         !publication || services->publish(plugin, &spec, &rejected) !=
@@ -91,6 +98,7 @@ extern "C" KEELS2_PLUGIN_EXPORT KeelBool KeelPlugin_Load(
     {
         return KEEL_FALSE;
     }
+
     g_host = api;
     g_plugin = plugin;
     api->log(plugin, KEEL_LOG_INFO, "versioned service published");
@@ -103,6 +111,7 @@ extern "C" KEELS2_PLUGIN_EXPORT void KeelPlugin_Unload(KeelPluginHandle plugin)
     {
         g_host->log(plugin, KEEL_LOG_INFO, "provider unloaded after publication withdrawal");
     }
+
     g_host = nullptr;
     g_plugin = 0;
 }

@@ -4,9 +4,11 @@
 set(keels2_keyvalues_headers "${CMAKE_BINARY_DIR}/_keels2/keyvalues-sdk")
 function(keels2_patch_keyvalues_header variable before after)
     string(FIND "${${variable}}" "${before}" position)
+
     if(position LESS 0)
         message(FATAL_ERROR "Pinned keyvalue SDK patch no longer applies")
     endif()
+
     string(REPLACE "${before}" "${after}" result "${${variable}}")
     set(${variable} "${result}" PARENT_SCOPE)
 endfunction()

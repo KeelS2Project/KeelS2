@@ -14,6 +14,7 @@ typedef struct KeelConVarObserveApi
 {
     uint32_t size;
     uint32_t api_version;
+
     KeelResult (*observe)(KeelPluginHandle plugin, KeelConVarHandle convar,
         KeelConVarChangeCallback callback, void* user_data);
 } KeelConVarObserveApi;

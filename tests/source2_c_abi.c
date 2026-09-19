@@ -16,6 +16,7 @@ _Static_assert(offsetof(KeelSource2InterfaceInfo, instance) == 24, "instance off
 _Static_assert(
     offsetof(KeelSource2InterfaceInfo, compatibility_profile) == 56,
     "profile offset");
+
 _Static_assert(offsetof(KeelSource2ApiV1, query_interface) == 8, "v1 query offset");
 _Static_assert(offsetof(KeelSource2Api, query_interface) == 8, "query offset");
 _Static_assert(

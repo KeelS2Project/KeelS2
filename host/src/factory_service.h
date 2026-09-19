@@ -19,6 +19,7 @@ namespace keels2::host
 {
 
 class Host;
+
 class KeelHookService;
 
 class FactoryService final
@@ -26,6 +27,7 @@ class FactoryService final
 public:
     FactoryService(Host& host, KeelHookService& hooks,
         KeelCreateInterfaceFn engine, KeelCreateInterfaceFn server);
+
     ~FactoryService();
     bool Initialize();
     const KeelFactoriesApi& Api() const noexcept;
@@ -52,6 +54,7 @@ private:
         std::atomic<bool> enabled{};
         std::atomic<std::uint32_t> active{};
     };
+
     struct Boundary
     {
         FactoryService* service{};
@@ -60,12 +63,14 @@ private:
         KeelHookTargetHandle target{};
         KeelHookCallbackHandle callback{};
     };
+
     struct Description
     {
         std::string name;
         std::string module;
         std::string path;
     };
+
     struct DispatchScope
     {
         Boundary* boundary{};
@@ -74,17 +79,22 @@ private:
 
     static KeelResult SubscribeEntry(KeelPluginHandle plugin,
         const KeelFactorySubscriptionSpec* spec, KeelFactorySubscriptionHandle* output);
+
     static KeelResult UnsubscribeEntry(KeelPluginHandle plugin,
         KeelFactorySubscriptionHandle subscription);
+
     static KeelResult OriginalEntry(KeelPluginHandle plugin,
         KeelSource2Factory factory, const char* name, KeelFactoryResult* result);
+
     static KeelHookAction DispatchEntry(KeelHookFrame* frame, void* data);
     KeelHookAction Dispatch(Boundary& boundary, KeelHookFrame& frame);
     KeelResult Subscribe(KeelPluginHandle plugin,
         const KeelFactorySubscriptionSpec* spec, KeelFactorySubscriptionHandle* output);
+
     KeelResult Unsubscribe(KeelPluginHandle plugin, KeelFactorySubscriptionHandle handle);
     KeelResult Query(KeelPluginHandle plugin, KeelSource2Factory factory,
         const char* name, KeelFactoryResult& result, bool original);
+
     Boundary* FindBoundary(KeelSource2Factory factory) noexcept;
     static bool ValidName(const char* name) noexcept;
     static void Wait(std::atomic<std::uint32_t>& count) noexcept;

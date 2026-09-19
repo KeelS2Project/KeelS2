@@ -23,6 +23,7 @@ public:
     // override there. Does not change the process default DLL search policy.
     bool OpenWithDependencies(const std::filesystem::path& path,
         const std::filesystem::path& dependencies, std::string& error);
+
     void Close();
     void* Symbol(const char* name) const;
     bool IsOpen() const;

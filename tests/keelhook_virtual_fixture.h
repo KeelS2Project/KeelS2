@@ -49,14 +49,17 @@ extern "C" std::int32_t KeelHookVirtualFixtureCallSecond(void* instance, std::in
 extern "C" KeelHookFixtureAggregate KeelHookVirtualFixtureCallAggregate(
     void* instance,
     KeelHookFixtureAggregate value);
+
 extern "C" std::int32_t KeelHookVirtualFixtureCallVafmt(
     void* instance,
     std::int32_t prefix);
+
 extern "C" void* KeelHookVirtualFixtureMultipleInstance();
 extern "C" std::int64_t KeelHookVirtualFixtureSecondaryOffset();
 extern "C" std::int32_t KeelHookVirtualFixtureCallPrimary(
     void* instance,
     std::int32_t value);
+
 extern "C" std::int32_t KeelHookVirtualFixtureCallAdjusted(
     void* instance,
     std::int32_t value);

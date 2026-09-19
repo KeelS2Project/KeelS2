@@ -14,11 +14,19 @@ public:
 
     bool Load() override
     {
-        if (services.Connect(HostContext()) != KEEL_RESULT_OK) return false;
+        if (services.Connect(HostContext()) != KEEL_RESULT_OK)
+            return false;
+
         const void* value = nullptr;
-        if (HostContext().QueryService(DOCS_MATH_NAME, DOCS_MATH_VERSION, &value) != KEEL_RESULT_OK) return false;
+
+        if (HostContext().QueryService(DOCS_MATH_NAME, DOCS_MATH_VERSION, &value) != KEEL_RESULT_OK)
+            return false;
+
         math = static_cast<const DocsMathService*>(value);
-        if (!math || math->size != sizeof(*math) || math->version != DOCS_MATH_VERSION || !math->add) return false;
+
+        if (!math || math->size != sizeof(*math) || math->version != DOCS_MATH_VERSION || !math->add)
+            return false;
+
         LogMessage("Math service: 20 + 22 = {}", math->add(20, 22));
         return CreateCommand("keel_docs_math_release", "Release the math service lease", &MathConsumer::Release);
     }
@@ -26,9 +34,19 @@ public:
 private:
     void Release(const CCommandContext&, const CCommand&)
     {
-        if (!math) { LogMessage("Math lease is already released."); return; }
+        if (!math)
+        {
+            LogMessage("Math lease is already released.");
+            return;
+        }
+
         const auto result = services.Release(DOCS_MATH_NAME, DOCS_MATH_VERSION);
-        if (result == KEEL_RESULT_OK) { math = nullptr; LogMessage("Math lease released."); }
+
+        if (result == KEEL_RESULT_OK)
+        {
+            math = nullptr;
+            LogMessage("Math lease released.");
+        }
         else LogWarning("Lease release failed: {}", result);
     }
 

@@ -10,6 +10,7 @@ typedef struct KeelTestMathService
 {
     uint32_t size;
     uint32_t version;
+
     int32_t (*add)(int32_t left, int32_t right);
 } KeelTestMathService;
 

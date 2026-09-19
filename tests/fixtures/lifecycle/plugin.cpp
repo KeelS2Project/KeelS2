@@ -25,10 +25,12 @@ void LifecyclePlugin::OnGameFrame(bool simulating, bool first_tick, bool last_ti
     {
         return;
     }
+
     char message[512]{};
     std::snprintf(message, sizeof(message),
         "[Lifecycle Example] GameFrame simulating=%u first_tick=%u last_tick=%u",
         simulating ? 1u : 0u, first_tick ? 1u : 0u, last_tick ? 1u : 0u);
+
     LogMessage(message);
 }
 
@@ -45,6 +47,7 @@ void LifecyclePlugin::OnClientConnected(
         "[Lifecycle Example] ClientConnected slot=%d xuid=%llu name=%s network_id=%s address=%s fake=%u",
         slot.Get(), static_cast<unsigned long long>(xuid), Text(name), Text(network_id), Text(address),
         fake_player ? 1u : 0u);
+
     LogMessage(message);
 }
 
@@ -58,6 +61,7 @@ void LifecyclePlugin::OnClientPutInServer(
     std::snprintf(message, sizeof(message),
         "[Lifecycle Example] ClientPutInServer slot=%d xuid=%llu name=%s client_type=%d",
         slot.Get(), static_cast<unsigned long long>(xuid), Text(name), client_type);
+
     LogMessage(message);
 }
 
@@ -71,6 +75,7 @@ void LifecyclePlugin::OnClientActive(
     std::snprintf(message, sizeof(message),
         "[Lifecycle Example] ClientActive slot=%d xuid=%llu name=%s load_game=%u",
         slot.Get(), static_cast<unsigned long long>(xuid), Text(name), load_game ? 1u : 0u);
+
     LogMessage(message);
 }
 
@@ -79,6 +84,7 @@ void LifecyclePlugin::OnClientFullyConnected(CPlayerSlot slot)
     char message[128]{};
     std::snprintf(message, sizeof(message),
         "[Lifecycle Example] ClientFullyConnected slot=%d", slot.Get());
+
     LogMessage(message);
 }
 
@@ -94,6 +100,7 @@ void LifecyclePlugin::OnClientDisconnecting(
         "[Lifecycle Example] ClientDisconnecting slot=%d xuid=%llu name=%s network_id=%s reason=%d",
         slot.Get(), static_cast<unsigned long long>(xuid), Text(name), Text(network_id),
         static_cast<int>(reason));
+
     LogMessage(message);
 }
 
@@ -102,6 +109,7 @@ void LifecyclePlugin::OnClientSettingsChanged(CPlayerSlot slot)
     char message[128]{};
     std::snprintf(message, sizeof(message),
         "[Lifecycle Example] ClientSettingsChanged slot=%d", slot.Get());
+
     LogMessage(message);
 }
 

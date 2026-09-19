@@ -29,6 +29,7 @@ class OwnedConstructions final
 public:
     static constexpr unsigned Capacity = 64;
     explicit OwnedConstructions(ConstructionBackend& backend) : backend_(backend) {}
+
     ~OwnedConstructions();
     OwnedConstructions(const OwnedConstructions&) = delete;
     OwnedConstructions& operator=(const OwnedConstructions&) = delete;
@@ -41,14 +42,23 @@ public:
     KeelResult Visit(std::uint64_t token, const char* class_name, KeelEntityAccessCallback callback, void* data) noexcept;
     void Reset() noexcept;
     unsigned Count() const noexcept;
+
 private:
-    struct ReleaseValues { void operator()(void* value) const noexcept { KeelCs2KeyValues_Release(value); } };
+    struct ReleaseValues
+    {
+        void operator()(void* value) const noexcept
+        {
+            KeelCs2KeyValues_Release(value);
+        }
+    };
     using Values = std::unique_ptr<void,ReleaseValues>;
+
     struct Key {
         KeelCs2EntityKeyValue value{};
         std::string name, text;
         KeelCs2EntityKeyValue View() const noexcept;
     };
+
     struct Record {
         std::uint64_t token{};
         host::GameEntityIdentity identity{};
@@ -57,6 +67,7 @@ private:
         Values values;
         bool busy{}, closed{}, created{}, consumed{};
     };
+
     struct Operation {
         OwnedConstructions& store;
         std::shared_ptr<Record> record;

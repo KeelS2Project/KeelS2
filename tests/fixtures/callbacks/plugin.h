@@ -18,6 +18,7 @@ public:
     void OnLevelInit(
         KeyValues* key_values,
         ILoopModePrerequisiteRegistry* prerequisite_registry) override;
+
     void OnLevelShutdown() override;
     bool OnClientConnect(
         CPlayerSlot slot,
@@ -26,6 +27,7 @@ public:
         const char* network_id,
         bool unknown,
         CBufferString* rejection_message) override;
+
     bool OnClientCommand(CPlayerSlot slot, const CCommand& command) override;
 
 private:

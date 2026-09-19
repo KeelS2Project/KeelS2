@@ -29,6 +29,7 @@ void Log(KeelPluginHandle plugin, KeelLogLevel level, const char* message)
     {
         throw 23;
     }
+
     if (message)
     {
         g_logs.push_back({plugin, level, message});
@@ -58,6 +59,7 @@ KeelResult QueryService(
     {
         *service = nullptr;
     }
+
     return KEEL_RESULT_NOT_FOUND;
 }
 
@@ -104,22 +106,21 @@ public:
         const char* null_text{};
         const char bounded[]{'o', 'k'};
 
-        context.Log(
-            KEEL_LOG_INFO,
-            "literal={} owned={} view={} null={} bounded={} external={} bool={} "
-            "signed={} unsigned={} float={} enum={} slot={} escaped={{value}}",
-            "text",
-            owned,
-            view,
-            null_text,
-            bounded,
-            g_external_text,
-            true,
-            -42,
-            std::uint64_t{99},
-            1.25F,
-            ProbeEnum::value,
-            ProbeSlot{});
+        context.Log(KEEL_LOG_INFO,
+                    "literal={} owned={} view={} null={} bounded={} external={} bool={} "
+                    "signed={} unsigned={} float={} enum={} slot={} escaped={{value}}",
+                    "text",
+                    owned,
+                    view,
+                    null_text,
+                    bounded,
+                    g_external_text,
+                    true,
+                    -42,
+                    std::uint64_t{99},
+                    1.25F,
+                    ProbeEnum::value,
+                    ProbeSlot{});
 
         context.Log(KEEL_LOG_INFO, kThrowingSinkMessage);
         context.Log(KEEL_LOG_INFO, "{}");
@@ -166,16 +167,19 @@ int main()
     };
 
     g_logs.clear();
+
     if (Adapter::Load(&api, kPlugin) != KEEL_TRUE)
     {
         return 1;
     }
+
     Adapter::Unload(kPlugin);
 
     if (g_logs.size() != 8)
     {
         return 2;
     }
+
     if (!Matches(
             0,
             KEEL_LOG_INFO,
@@ -184,30 +188,37 @@ int main()
     {
         return 3;
     }
+
     if (!Matches(1, KEEL_LOG_INFO, "{}"))
     {
         return 4;
     }
+
     if (!Matches(2, KEEL_LOG_WARNING, kFormattingFailure))
     {
         return 5;
     }
+
     if (!Matches(3, KEEL_LOG_ERROR, kFormattingFailure))
     {
         return 6;
     }
+
     if (!Matches(4, KEEL_LOG_INFO, kFormattingFailure))
     {
         return 7;
     }
+
     if (!Matches(5, KEEL_LOG_WARNING, kFormattingFailure))
     {
         return 8;
     }
+
     if (!Matches(6, KEEL_LOG_ERROR, kFormattingFailure))
     {
         return 9;
     }
+
     if (!Matches(7, KEEL_LOG_INFO, "after=contained"))
     {
         return 10;

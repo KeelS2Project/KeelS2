@@ -25,6 +25,7 @@ typedef struct TextChange
 static void Changed(const KeelConVarChange* change, void* user_data)
 {
     TextChange* saved = user_data;
+
     if (!saved || !change || change->size != sizeof(*change) ||
         change->old_value.size != sizeof(KeelConVarValue) ||
         change->new_value.size != sizeof(KeelConVarValue) ||
@@ -32,10 +33,13 @@ static void Changed(const KeelConVarChange* change, void* user_data)
         change->new_value.type != KEELS2_CONVAR_STRING ||
         !change->old_value.value.string_value || !change->new_value.value.string_value)
         return;
+
     const size_t previous_size = strlen(change->old_value.value.string_value) + 1;
     const size_t current_size = strlen(change->new_value.value.string_value) + 1;
+
     if (previous_size > sizeof(saved->previous) || current_size > sizeof(saved->current))
         return;
+
     memcpy(saved->previous, change->old_value.value.string_value, previous_size);
     memcpy(saved->current, change->new_value.value.string_value, current_size);
     ++saved->calls;

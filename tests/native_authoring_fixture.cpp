@@ -49,6 +49,7 @@ public:
     bool Reset()
     {
         bool valid = true;
+
         for (auto& callback : callbacks_)
         {
             if (callback)
@@ -57,11 +58,13 @@ public:
                 callback = 0;
             }
         }
+
         if (target_)
         {
             valid = api_.release_target(plugin_, target_) == KEEL_RESULT_OK && valid;
             target_ = 0;
         }
+
         return valid;
     }
 
@@ -87,12 +90,14 @@ public:
         {
             return false;
         }
+
         KeelHookCallbackSpec spec{};
         spec.size = sizeof(spec);
         spec.phases = phase;
         spec.priority = priority;
         spec.callback = &keels2::kh::detail::TypedCallback<
             Signature, false, Method, SourceRootStyle>::Dispatch;
+
         spec.user_data = &owner;
         return api_.add_callback(plugin_, target_, &spec, &callbacks_[count_++]) ==
             KEEL_RESULT_OK;
@@ -122,10 +127,12 @@ Action SourceRootStyle::Listening(HookCall<bool>& call,
     ++voice_pre;
     valid = valid && OriginalReference(reference) && slot.Get() == 7 && listening;
     reference = ConCommandRef(0x2345, 0x12345678);
+
     if (action != PLUGIN_CONTINUE)
     {
         valid = call.SetResult(false) && valid;
     }
+
     return action;
 }
 
@@ -160,6 +167,7 @@ bool Check(const KeelHookApi& api, KeelPluginHandle plugin)
     SourceRootStyle owner;
     Registration commands(api, plugin);
     Registration voice(api, plugin);
+
     if (!commands.Resolve(&CommandTarget) || !voice.Resolve(&VoiceTarget) ||
         !commands.Add<CommandSignature, &SourceRootStyle::Dispatch>(owner, KH_PHASE_PRE, 100) ||
         !commands.Add<CommandSignature, &SourceRootStyle::CommandPeer>(owner, KH_PHASE_PRE, -100) ||
@@ -176,6 +184,7 @@ bool Check(const KeelHookApi& api, KeelPluginHandle plugin)
     KeelHookValue value{};
     value.type = KH_VALUE_UINT64;
     using Adapter = keels2::kh::ValueAdapter<ConCommandRef>;
+
     if (!Adapter::Write(value, reference) || value.reserved != 0 ||
         value.scalar.uint64 != 0x7654321000001234 ||
         !OriginalReference(Adapter::Read(value)) || Adapter::Fallback().IsValidRef())
@@ -186,6 +195,7 @@ bool Check(const KeelHookApi& api, KeelPluginHandle plugin)
     ConCommandRef negative(uint16(7), -12345);
     std::memset(reinterpret_cast<unsigned char*>(&negative) + sizeof(uint16), 0x5a, 2);
     value.reserved = 1;
+
     if (!Adapter::Write(value, negative) || value.reserved != 0 ||
         value.scalar.uint64 != UINT64_C(0xffffcfc700000007) ||
         Adapter::Read(value).GetAccessIndex() != 7 ||
@@ -201,16 +211,20 @@ bool Check(const KeelHookApi& api, KeelPluginHandle plugin)
     constexpr std::array actions{PLUGIN_CONTINUE, PLUGIN_OVERRIDE, PLUGIN_SUPERSEDE};
     int dispatched{};
     int expected_originals{};
+
     for (const Action action : actions)
     {
         owner.action = action;
         ++dispatched;
+
         if (action != PLUGIN_SUPERSEDE)
         {
             ++expected_originals;
         }
+
         InvokeCommand(reference, context, command);
         const bool listening = InvokeVoice(reference, CPlayerSlot(7), true);
+
         if (!owner.valid || !Calls().valid || listening != (action == PLUGIN_CONTINUE) ||
             owner.command_pre != dispatched || owner.voice_pre != dispatched ||
             owner.command_peer != dispatched || owner.voice_peer != dispatched ||
@@ -221,10 +235,12 @@ bool Check(const KeelHookApi& api, KeelPluginHandle plugin)
             return false;
         }
     }
+
     if (!commands.Reset() || !voice.Reset())
     {
         return false;
     }
+
     InvokeCommand(reference, context, command);
     return !InvokeVoice(reference, CPlayerSlot(7), true) &&
         Calls().commands == expected_originals + 1 && Calls().voices == expected_originals + 1 &&

@@ -6,6 +6,7 @@ extern "C" KeelBool KeelPlugin_Query(const KeelHostQuery*, KeelPluginInfo* info)
     {
         return KEEL_FALSE;
     }
+
     info->size = sizeof(KeelPluginInfo);
     info->abi_version = KEELS2_PLUGIN_ABI_VERSION + 1;
     info->name = "Invalid Test Plugin";
