@@ -7,7 +7,13 @@
 #include <vector>
 namespace
 {
+#if defined(_WIN32)
+constexpr const char* profile = "cs2-25218825-win64-33042584-2212b672d2410a30", *other_profile = "cs2-25218825-linuxsteamrt64-40575640-b2ce91a0f330222a";
+keels2::platform::FileFingerprint g_fingerprint{33042584, 0x2212b672d2410a30ull};
+#else
+constexpr const char* profile = "cs2-25218825-linuxsteamrt64-40575640-b2ce91a0f330222a", *other_profile = "cs2-25218825-win64-33042584-2212b672d2410a30";
 keels2::platform::FileFingerprint g_fingerprint{40575640, 0xb2ce91a0f330222aull};
+#endif
 bool g_readable = true;
 keels2::platform::ModuleLookup g_lookup = keels2::platform::ModuleLookup::found;
 std::array<void*, 3> g_table{}, g_proxy{};
@@ -48,23 +54,24 @@ int main()
     KeelCs2RoundBindings bindings{};
     std::string error;
 #if defined(_WIN32)
-    constexpr const char* profile = "cs2-25218825-linuxsteamrt64-40575640-b2ce91a0f330222a";
-    return cs2::ResolveRoundControl(module, profile, bindings, error) == KEEL_RESULT_UNSUPPORTED ? 0 : 1;
+    constexpr std::size_t rva = 0x93d800;
+    constexpr std::array<unsigned char,16> bytes{0x48,0x8b,0xc4,0x4c,0x89,0x48,0x20,0x48,0x89,0x48,0x08,0x55,0x41,0x54,0x41,0x56};
 #else
     constexpr std::size_t rva = 0x13d6f10;
     constexpr std::array<unsigned char,16> bytes{0x55,0x48,0x89,0xe5,0x41,0x57,0x41,0x56,0x41,0x55,0x41,0x54,0x41,0x89,0xf4,0x53};
+#endif
     std::vector<std::byte> image(rva + bytes.size());
-    module.path = "fixture-server.so"; module.base = image.data(); module.image_size = image.size();
+    module.path = "fixture-server"; module.base = image.data(); module.image_size = image.size();
     std::memcpy(image.data() + rva,bytes.data(),bytes.size());
     module.ranges.push_back({image.data()+rva,bytes.size(),true,true});
-    const auto resolve = [&](KeelResult expected, const char* selected = "cs2-25218825-linuxsteamrt64-40575640-b2ce91a0f330222a") {
+    const auto resolve = [&](KeelResult expected, const char* selected = profile) {
         bindings = {g_table.data(),g_proxy.data(),image.data()};
         const auto result = cs2::ResolveRoundControl(module, selected, bindings, error);
         if (result != expected) { std::cerr << "unexpected binding result: " << result << '\n'; return false; }
         return result == KEEL_RESULT_OK || (!bindings.rules_vtable && !bindings.proxy_vtable && !bindings.terminate);
     };
     if (!resolve(KEEL_RESULT_UNSUPPORTED, "unreviewed")) return 1;
-    if (!resolve(KEEL_RESULT_UNSUPPORTED, "cs2-25218825-win64-33042584-2212b672d2410a30")) return 2;
+    if (!resolve(KEEL_RESULT_UNSUPPORTED, other_profile)) return 2;
     if (!resolve(KEEL_RESULT_OK) || bindings.rules_vtable != g_table.data() || bindings.proxy_vtable != g_proxy.data() || bindings.terminate != image.data()+rva) return 3;
     g_readable = false; if (!resolve(KEEL_RESULT_INCOMPATIBLE)) return 4;
     g_readable = true; ++g_fingerprint.fnv1a64; if (!resolve(KEEL_RESULT_INCOMPATIBLE)) return 5;
@@ -81,5 +88,4 @@ int main()
     g_lookup = platform::ModuleLookup::found;
     module.base = reinterpret_cast<void*>(UINTPTR_MAX - rva - 8);
     return resolve(KEEL_RESULT_INCOMPATIBLE) ? 0 : 11;
-#endif
 }

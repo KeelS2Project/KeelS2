@@ -1001,11 +1001,16 @@ int RunPlayerManagementChecks()
     SchemaBaseClassInfoData_t base{0, &g_base_class};
     g_controller_base.m_nBaseClassCount = 1; g_controller_base.m_pBaseClasses = &base;
     g_controller_storage[kHealthOffset + 24] = std::byte{2};
-    std::array<void*, 273> table{};
-    table[102] = FunctionAddress(&ManagementChangeTeam); table[272] = FunctionAddress(&ManagementRespawn);
+#if defined(_WIN32)
+    constexpr std::size_t change_slot = 103, respawn_slot = 270;
+#else
+    constexpr std::size_t change_slot = 102, respawn_slot = 272;
+#endif
+    std::array<void*, respawn_slot + 1> table{};
+    table[change_slot] = FunctionAddress(&ManagementChangeTeam); table[respawn_slot] = FunctionAddress(&ManagementRespawn);
     StorePointer(g_controller_storage.data(), table.data());
-    KeelCs2PlayerManagementBindings bindings{table.data(), table[102], FunctionAddress(&ManagementSwitchTeam),
-        table[272], FunctionAddress(&ManagementSetPawn)};
+    KeelCs2PlayerManagementBindings bindings{table.data(), table[change_slot], FunctionAddress(&ManagementSwitchTeam),
+        table[respawn_slot], FunctionAddress(&ManagementSetPawn)};
     KeelCs2EntityIdentity controller{}, pawn{};
     if (KeelCs2_FindEntityByIndex(EntitySystem(), 4, &controller) != KEEL_RESULT_OK) return 400;
     KeelPlayerManagementAction action{sizeof(action), KEELS2_PLAYER_MANAGEMENT_CHANGE_TEAM, 3, 0};
@@ -1038,9 +1043,9 @@ int RunPlayerManagementChecks()
     g_controller_class.m_pszName = "NotAPlayerController";
     if (prepare() != KEEL_RESULT_INCOMPATIBLE || g_management_calls != 1111) return 410;
     g_controller_class.m_pszName = "CCSPlayerController";
-    table[102] = nullptr;
+    table[change_slot] = nullptr;
     if (prepare() != KEEL_RESULT_INCOMPATIBLE || g_management_calls != 1111) return 411;
-    table[102] = bindings.change_team;
+    table[change_slot] = bindings.change_team;
     std::memcpy(g_controller_storage.data() + kHealthOffset + 8, &invalid, sizeof(invalid));
     if (prepare() != KEEL_RESULT_NOT_READY || g_management_calls != 1111) return 412;
     const CEntityHandle stale(kEntityIndex, 13);

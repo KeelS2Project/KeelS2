@@ -997,7 +997,12 @@ KeelResult ManagementController(void* system, const KeelCs2EntityIdentity* entit
         return KEEL_RESULT_INCOMPATIBLE;
     void** table{};
     std::memcpy(&table, identity->m_pInstance, sizeof(table));
-    if (table != bindings->controller_vtable || table[102] != bindings->change_team || table[272] != bindings->respawn)
+#if defined(_WIN32)
+    constexpr std::size_t change_slot = 103, respawn_slot = 270;
+#else
+    constexpr std::size_t change_slot = 102, respawn_slot = 272;
+#endif
+    if (table != bindings->controller_vtable || table[change_slot] != bindings->change_team || table[respawn_slot] != bindings->respawn)
         return KEEL_RESULT_INCOMPATIBLE;
     instance = identity->m_pInstance;
     return KEEL_RESULT_OK;
