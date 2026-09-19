@@ -43,6 +43,11 @@ else()
         "${CMAKE_CURRENT_SOURCE_DIR}/games/cs2/keyvalues_exports.map")
 endif()
 
+add_library(keels2_cs2_constructions STATIC games/cs2/src/owned_construction.cpp)
+target_include_directories(keels2_cs2_constructions PUBLIC games/cs2/include sdk/include)
+target_link_libraries(keels2_cs2_constructions PUBLIC keels2_cs2_keyvalues)
+keels2_enable_warnings(keels2_cs2_constructions)
+
 if(BUILD_TESTING)
     add_library(keels2_keyvalues_fixture SHARED tests/entity_keyvalues_fixture.cpp
         $<TARGET_OBJECTS:keels2_cs2_keyvalues_sdk>)
@@ -69,8 +74,13 @@ if(BUILD_TESTING)
         keels2_cs2_keyvalues keels2_keyvalues_fixture keels2_fake_tier0)
     keels2_enable_warnings(keels2_entity_keyvalues_test)
     add_test(NAME entity_keyvalues COMMAND keels2_entity_keyvalues_test)
+    add_executable(keels2_owned_construction_test tests/owned_construction_test.cpp)
+    target_link_libraries(keels2_owned_construction_test PRIVATE
+        keels2_cs2_constructions keels2_keyvalues_fixture keels2_fake_tier0)
+    keels2_enable_warnings(keels2_owned_construction_test)
+    add_test(NAME owned_construction COMMAND keels2_owned_construction_test)
     if(WIN32)
-        set_property(TEST entity_keyvalues APPEND PROPERTY ENVIRONMENT_MODIFICATION
+        set_property(TEST entity_keyvalues owned_construction APPEND PROPERTY ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:keels2_cs2_keyvalues>")
     endif()
 endif()

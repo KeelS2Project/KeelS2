@@ -3,6 +3,7 @@ unsigned g_construction_mode{}, g_create_calls{}, g_spawn_calls{}, g_cancel_call
 bool g_construction_arguments{};
 char* g_construction_source{};
 std::string g_construction_name;
+const void* g_construction_values{};
 void* CreateEntityFixture(const char* name, int forced_index)
 {
     ++g_create_calls;
@@ -18,7 +19,7 @@ void* CreateEntityFixture(const char* name, int forced_index)
 void SpawnEntityFixture(void* entity, const void* key_values)
 {
     ++g_spawn_calls;
-    g_construction_arguments = entity == Identity()->m_pInstance && !key_values;
+    g_construction_arguments = entity == Identity()->m_pInstance && key_values == g_construction_values;
     Identity()->m_flags = static_cast<EntityFlags_t>(0);
     if (g_construction_mode == 4 || g_construction_mode == 5) {
         Identity()->m_pInstance = nullptr;
@@ -55,7 +56,7 @@ int RunEntityConstructionChecks()
     KeelBool invoked = KEEL_FALSE;
     const auto spawn = [&] {
         invoked = KEEL_TRUE;
-        return KeelCs2_SpawnCreatedEntity(EntitySystem(),&entity,&g_base_class,&bindings,&invoked);
+        return KeelCs2_SpawnCreatedEntity(EntitySystem(),&entity,&g_base_class,&bindings,g_construction_values,&invoked);
     };
     const auto cancel = [&] {
         invoked = KEEL_TRUE;
@@ -142,7 +143,7 @@ int RunEntityConstructionChecks()
     if (validate() != KEEL_RESULT_NOT_FOUND || capture() != KEEL_RESULT_NOT_FOUND || entity.source2_handle) return 1126;
     EntitySystem()->m_EntityList.m_pIdentityChunks[0] = chunk;
     if (KeelCs2_CaptureCreatedEntity(nullptr,instance,&entity) != KEEL_RESULT_INVALID_ARGUMENT || entity.source2_handle ||
-        KeelCs2_SpawnCreatedEntity(EntitySystem(),&saved,&g_base_class,&bindings,nullptr) != KEEL_RESULT_INVALID_ARGUMENT) return 1127;
+        KeelCs2_SpawnCreatedEntity(EntitySystem(),&saved,&g_base_class,&bindings,nullptr,nullptr) != KEEL_RESULT_INVALID_ARGUMENT) return 1127;
     for (unsigned mode : {0u,7u}) {
         Reset(); g_construction_mode = mode;
         if (create() != KEEL_RESULT_OK || capture() != KEEL_RESULT_OK) return 1128;
@@ -163,6 +164,48 @@ int RunEntityConstructionChecks()
                 capture() != KEEL_RESULT_NOT_FOUND || entity.source2_handle) return 1132;
         }
     }
+    Reset(); g_construction_mode = 0;
+    std::array<unsigned,4> key_values{1,2,3,4}; g_construction_values = key_values.data();
+    if (create() != KEEL_RESULT_OK || capture() != KEEL_RESULT_OK || spawn() != KEEL_RESULT_OK ||
+        !invoked || !g_construction_arguments) return 1133;
+    g_construction_values = nullptr;
+    Reset();
+    if (create() != KEEL_RESULT_OK || capture() != KEEL_RESULT_OK) return 1134;
+    void* pointer = reinterpret_cast<void*>(1);
+    if (KeelCs2_ResolveEntityPointer(EntitySystem(),&entity,"CCSPlayerPawn",&pointer) != KEEL_RESULT_NOT_FOUND || pointer ||
+        KeelCs2_ResolveCreatedEntityPointer(EntitySystem(),&entity,"CCSPlayerPawn",&pointer) != KEEL_RESULT_OK || pointer != instance ||
+        KeelCs2_ResolveCreatedEntityPointer(EntitySystem(),&entity,"CBaseEntity",&pointer) != KEEL_RESULT_INCOMPATIBLE || pointer) return 1135;
+    const auto entity_size = g_derived_class.m_nSize;
+    g_derived_class.m_nSize = 8;
+    if (KeelCs2_ResolveCreatedEntityPointer(EntitySystem(),&entity,"CCSPlayerPawn",&pointer) != KEEL_RESULT_INCOMPATIBLE || pointer) return 1141;
+    g_derived_class.m_nSize = entity_size;
+#if defined(_WIN32)
+    constexpr unsigned teleport_slot = 163;
+#else
+    constexpr unsigned teleport_slot = 162;
+#endif
+    std::array<void*,teleport_slot+1> table{};
+    table[teleport_slot] = FunctionAddress(&EntityToolTeleport); StorePointer(g_entity_storage.data(),table.data());
+    const KeelCs2EntityToolBindings tools{FunctionAddress(&EntityToolSetModel),FunctionAddress(&EntityToolRemove),teleport_slot,0};
+    const KeelCs2EntityToolClass target{table.data(),table[teleport_slot]};
+    KeelCs2EntityToolContext context{};
+    if (KeelCs2_PrepareEntityTool(EntitySystem(),&entity,&g_base_class,&context) != KEEL_RESULT_NOT_FOUND ||
+        KeelCs2_PrepareCreatedEntityTool(EntitySystem(),&entity,&g_base_class,&context) != KEEL_RESULT_OK) return 1136;
+    KeelEntityTeleport request{sizeof(request),7,{1,2,3},{4,5,6},{7,8,9}};
+    const auto teleport = [&] { return KeelCs2_TeleportCreatedEntity(EntitySystem(),&entity,&context,&tools,&target,&request); };
+    g_tool_calls = 0; g_tool_destroy = g_tool_throw = false;
+    if (teleport() != KEEL_RESULT_OK || g_tool_calls != 1 || !g_tool_arguments || g_tool_flags != 7 ||
+        g_tool_vectors != std::array<float,9>{1,2,3,4,5,6,7,8,9}) return 1137;
+    Identity()->m_flags = static_cast<EntityFlags_t>(0);
+    if (teleport() != KEEL_RESULT_NOT_FOUND ||
+        KeelCs2_ResolveCreatedEntityPointer(EntitySystem(),&entity,"CCSPlayerPawn",&pointer) != KEEL_RESULT_NOT_FOUND || pointer) return 1138;
+    Identity()->m_flags = EF_IS_PRE_SPAWN;
+    SetHandle(*Identity(),13);
+    if (teleport() != KEEL_RESULT_NOT_FOUND) return 1139;
+    SetHandle(*Identity(),12); g_tool_destroy = g_tool_throw = true;
+    if (teleport() != KEEL_RESULT_ENGINE_FAILURE || g_tool_calls != 2 || Identity()->m_pInstance ||
+        teleport() != KEEL_RESULT_NOT_FOUND) return 1140;
+    g_tool_destroy = g_tool_throw = false;
     Reset();
     return 0;
 }

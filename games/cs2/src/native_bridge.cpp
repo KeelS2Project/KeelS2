@@ -1829,7 +1829,7 @@ KeelResult CheckCreatedClass(CEntityIdentity* identity, void* base)
     return KEEL_RESULT_OK;
 }
 KeelResult DispatchCreatedEntity(void* system, const KeelCs2EntityIdentity* entity, void* base,
-    const KeelCs2EntityConstructionBindings* bindings, KeelBool* invoked, bool spawn)
+    const KeelCs2EntityConstructionBindings* bindings, const void* key_values, KeelBool* invoked, bool spawn)
 {
     if (invoked) *invoked = KEEL_FALSE;
     if (!system || !entity || (spawn && !base) || !bindings || !bindings->create || !bindings->spawn || !bindings->remove || !invoked)
@@ -1840,7 +1840,7 @@ KeelResult DispatchCreatedEntity(void* system, const KeelCs2EntityIdentity* enti
         if (result != KEEL_RESULT_OK) return result;
         auto* instance = identity->m_pInstance;
         *invoked = KEEL_TRUE;
-        if (spawn) NativeActionFunction<void (*)(void*,const void*)>(bindings->spawn)(instance,nullptr);
+        if (spawn) NativeActionFunction<void (*)(void*,const void*)>(bindings->spawn)(instance,key_values);
         else NativeActionFunction<void (*)(void*)>(bindings->remove)(instance);
         return KEEL_RESULT_OK;
     } catch (const StatFailure& failure) { return failure.result; }
@@ -1901,11 +1901,30 @@ extern "C" KeelResult KeelCs2_ValidateCreatedEntity(void* system, const KeelCs2E
     catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
 }
 extern "C" KeelResult KeelCs2_SpawnCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
-    void* base, const KeelCs2EntityConstructionBindings* bindings, KeelBool* invoked)
-{ return DispatchCreatedEntity(system,entity,base,bindings,invoked,true); }
+    void* base, const KeelCs2EntityConstructionBindings* bindings, const void* key_values, KeelBool* invoked)
+{ return DispatchCreatedEntity(system,entity,base,bindings,key_values,invoked,true); }
 extern "C" KeelResult KeelCs2_RemoveCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
     const KeelCs2EntityConstructionBindings* bindings, KeelBool* invoked)
-{ return DispatchCreatedEntity(system,entity,nullptr,bindings,invoked,false); }
+{ return DispatchCreatedEntity(system,entity,nullptr,bindings,nullptr,invoked,false); }
+
+extern "C" KeelResult KeelCs2_ResolveCreatedEntityPointer(void* system, const KeelCs2EntityIdentity* entity,
+    const char* class_name, void** output)
+{
+    if (output) *output = nullptr;
+    if (!system || !entity || !class_name || !*class_name || !output) return KEEL_RESULT_INVALID_ARGUMENT;
+    try {
+        auto* identity = CreatedIdentity(static_cast<CEntitySystem*>(system),*entity,true);
+        if (!identity) return KEEL_RESULT_NOT_FOUND;
+        auto* type = identity->m_pClass->GetSchemaBinding();
+        if (!ValidClass(type) || !type->m_pszName || std::strcmp(type->m_pszName,class_name) ||
+            type->m_nSize < static_cast<int>(sizeof(CEntityInstance)) ||
+            reinterpret_cast<std::uintptr_t>(identity->m_pInstance) % type->m_nAlignment ||
+            static_cast<std::uint32_t>(type->m_nSize)-1 > UINTPTR_MAX-reinterpret_cast<std::uintptr_t>(identity->m_pInstance))
+            return KEEL_RESULT_INCOMPATIBLE;
+        *output = identity->m_pInstance;
+        return KEEL_RESULT_OK;
+    } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
 
 extern "C" KeelResult KeelCs2_ResolveEntityToolBase(void* system, const char* module, std::uint32_t kind, void** output)
 {
@@ -1921,22 +1940,26 @@ extern "C" KeelResult KeelCs2_ResolveEntityToolBase(void* system, const char* mo
     } catch (const StatFailure& failure) { return failure.result; }
     catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
 }
-extern "C" KeelResult KeelCs2_PrepareEntityTool(void* system, const KeelCs2EntityIdentity* entity, void* base,
-    KeelCs2EntityToolContext* context)
+namespace {
+KeelResult PrepareEntityTool(void* system, const KeelCs2EntityIdentity* entity, void* base,
+    KeelCs2EntityToolContext* context, bool created)
 {
     if (context) *context = {};
     if (!system || !entity || !base || !context) return KEEL_RESULT_INVALID_ARGUMENT;
     try {
-        auto* identity = IdentityByHandle(static_cast<CEntitySystem*>(system),entity->source2_handle);
+        auto* identity = created ? CreatedIdentity(static_cast<CEntitySystem*>(system),*entity,true) :
+            IdentityByHandle(static_cast<CEntitySystem*>(system),entity->source2_handle);
         if (!identity || identity->GetEntityIndex().Get() != entity->index) return KEEL_RESULT_NOT_FOUND;
         auto* type = identity->m_pClass->GetSchemaBinding();
         auto* required = static_cast<CSchemaClassInfo*>(base);
         StatRequire(ValidClass(type) && ValidClass(required) && type->m_pszName && required->m_pszName);
-        StatRequire(std::strcmp(required->m_pszName,"CBaseEntity") == 0 || std::strcmp(required->m_pszName,"CBaseModelEntity") == 0);
+        StatRequire(std::strcmp(required->m_pszName,"CBaseEntity") == 0 || (!created && std::strcmp(required->m_pszName,"CBaseModelEntity") == 0));
         StatRequire(StatBase(type,required) == 0);
         const auto instance = reinterpret_cast<std::uintptr_t>(identity->m_pInstance);
         StatRequire(instance % type->m_nAlignment == 0 && static_cast<std::uint32_t>(type->m_nSize) >= sizeof(void*) &&
             sizeof(void*)-1 <= UINTPTR_MAX-instance);
+        if (created) StatRequire(static_cast<std::uint32_t>(type->m_nSize) >= sizeof(CEntityInstance) &&
+            static_cast<std::uint32_t>(type->m_nSize)-1 <= UINTPTR_MAX-instance);
         std::size_t length{};
         while (length < sizeof(context->class_name) && type->m_pszName[length]) ++length;
         StatRequire(length && length < sizeof(context->class_name));
@@ -1946,9 +1969,9 @@ extern "C" KeelResult KeelCs2_PrepareEntityTool(void* system, const KeelCs2Entit
     } catch (const StatFailure& failure) { return failure.result; }
     catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
 }
-extern "C" KeelResult KeelCs2_ApplyEntityTool(void* system, const KeelCs2EntityIdentity* entity,
+KeelResult ApplyEntityTool(void* system, const KeelCs2EntityIdentity* entity,
     const KeelCs2EntityToolContext* context, const KeelCs2EntityToolBindings* bindings,
-    const KeelCs2EntityToolClass* target, std::uint32_t kind, const KeelEntityTeleport* request, const char* model)
+    const KeelCs2EntityToolClass* target, std::uint32_t kind, const KeelEntityTeleport* request, const char* model, bool created)
 {
 #if defined(_WIN32)
     constexpr std::uint32_t slot = 163;
@@ -1979,14 +2002,15 @@ extern "C" KeelResult KeelCs2_ApplyEntityTool(void* system, const KeelCs2EntityI
     } else if (kind != KEELS2_ENTITY_TOOL_REMOVE || request || model) return KEEL_RESULT_INVALID_ARGUMENT;
     try {
         KeelCs2EntityToolContext current{};
-        const auto result = KeelCs2_PrepareEntityTool(system,entity,context->base_class,&current);
+        const auto result = PrepareEntityTool(system,entity,context->base_class,&current,created);
         if (result != KEEL_RESULT_OK) return result;
         if (current.class_info != context->class_info || std::memcmp(current.class_name,context->class_name,sizeof(current.class_name)))
             return KEEL_RESULT_INCOMPATIBLE;
         const auto* base = static_cast<CSchemaClassInfo*>(current.base_class);
         if (std::strcmp(base->m_pszName,kind == KEELS2_ENTITY_TOOL_SET_MODEL ? "CBaseModelEntity" : "CBaseEntity"))
             return KEEL_RESULT_INCOMPATIBLE;
-        auto* identity = IdentityByHandle(static_cast<CEntitySystem*>(system),entity->source2_handle);
+        auto* identity = created ? CreatedIdentity(static_cast<CEntitySystem*>(system),*entity,true) :
+            IdentityByHandle(static_cast<CEntitySystem*>(system),entity->source2_handle);
         if (!identity || identity->GetEntityIndex().Get() != entity->index) return KEEL_RESULT_NOT_FOUND;
         auto* instance = identity->m_pInstance;
         void** table{}; std::memcpy(&table,instance,sizeof(table));
@@ -2008,3 +2032,18 @@ extern "C" KeelResult KeelCs2_ApplyEntityTool(void* system, const KeelCs2EntityI
     } catch (const StatFailure& failure) { return failure.result; }
     catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
 }
+}
+extern "C" KeelResult KeelCs2_PrepareEntityTool(void* system, const KeelCs2EntityIdentity* entity, void* base,
+    KeelCs2EntityToolContext* context)
+{ return PrepareEntityTool(system,entity,base,context,false); }
+extern "C" KeelResult KeelCs2_PrepareCreatedEntityTool(void* system, const KeelCs2EntityIdentity* entity, void* base,
+    KeelCs2EntityToolContext* context)
+{ return PrepareEntityTool(system,entity,base,context,true); }
+extern "C" KeelResult KeelCs2_ApplyEntityTool(void* system, const KeelCs2EntityIdentity* entity,
+    const KeelCs2EntityToolContext* context, const KeelCs2EntityToolBindings* bindings,
+    const KeelCs2EntityToolClass* target, std::uint32_t kind, const KeelEntityTeleport* request, const char* model)
+{ return ApplyEntityTool(system,entity,context,bindings,target,kind,request,model,false); }
+extern "C" KeelResult KeelCs2_TeleportCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
+    const KeelCs2EntityToolContext* context, const KeelCs2EntityToolBindings* bindings,
+    const KeelCs2EntityToolClass* target, const KeelEntityTeleport* request)
+{ return ApplyEntityTool(system,entity,context,bindings,target,KEELS2_ENTITY_TOOL_TELEPORT,request,nullptr,true); }

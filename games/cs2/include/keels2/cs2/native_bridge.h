@@ -220,9 +220,16 @@ KeelResult KeelCs2_ValidateCreatedEntity(void* system, const KeelCs2EntityIdenti
  * true if the engine throws. Callers must not retry a dispatched spawn or
  * cancellation. No borrowed entity is accessed after the engine call. */
 KeelResult KeelCs2_SpawnCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
-    void* base_class, const KeelCs2EntityConstructionBindings* bindings, KeelBool* invoked);
+    void* base_class, const KeelCs2EntityConstructionBindings* bindings, const void* key_values, KeelBool* invoked);
 KeelResult KeelCs2_RemoveCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
     const KeelCs2EntityConstructionBindings* bindings, KeelBool* invoked);
+KeelResult KeelCs2_ResolveCreatedEntityPointer(void* system, const KeelCs2EntityIdentity* entity,
+    const char* class_name, void** output);
+KeelResult KeelCs2_PrepareCreatedEntityTool(void* system, const KeelCs2EntityIdentity* entity, void* base,
+    KeelCs2EntityToolContext* context);
+KeelResult KeelCs2_TeleportCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
+    const KeelCs2EntityToolContext* context, const KeelCs2EntityToolBindings* bindings,
+    const KeelCs2EntityToolClass* target, const KeelEntityTeleport* request);
 KeelResult KeelCs2_ResolveEntityPointer(void* entity_system, const KeelCs2EntityIdentity* entity,
     const char* class_name, void** output);
 KeelResult KeelCs2_ReadEntityField(
