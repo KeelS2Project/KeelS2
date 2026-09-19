@@ -222,6 +222,28 @@ KeelResult KeelCs2_ValidateEntity(
     void* entity_system,
     const KeelCs2EntityIdentity* entity);
 KeelResult KeelCs2_CaptureEntity(void* entity_system, const void* instance, KeelCs2EntityIdentity* output);
+typedef struct KeelCs2EntityOutputContext
+{
+    KeelCs2EntityIdentity entities[3]; /* Owner, optional activator, optional caller. */
+    const void* instances[3];
+    const void* output;
+    const void* owner_class;
+    const void* owner_schema;
+    char class_name[256];
+    char schema_name[256];
+    char output_name[128];
+} KeelCs2EntityOutputContext;
+/* Internal main-thread callback bridge for a native FireOutput argument.
+ * Finds the output's containing entity using
+ * canonical registry identities and schema bounds, independently of caller.
+ * Input addresses are opaque until registry membership is established. Only
+ * then reads the output's native descriptor/name. Copies names without engine
+ * calls or allocation; accepts registered pending/spawning entities too.
+ * Reacquire the same map epoch/system before validating after callbacks.
+ * Validation never dereferences saved output/instance addresses. */
+KeelResult KeelCs2_CaptureOutputContext(void* system, const void* output,
+    const void* activator, const void* caller, KeelCs2EntityOutputContext* context);
+KeelResult KeelCs2_ValidateOutputContext(void* system, const KeelCs2EntityOutputContext* context);
 /* Internal construction primitives. The adapter must retain its map epoch and
  * reacquire the entity system after factory callbacks, before capturing the
  * returned address. The factory result is opaque and may already be dangling.

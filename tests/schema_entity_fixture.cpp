@@ -476,6 +476,7 @@ constexpr std::size_t kNotifySlot = 29;
 #include "entity_construction_fixture.h"
 #include "native_construction_fixture.h"
 #include "entity_input_native_fixture.h"
+#include "entity_output_native_fixture.h"
 int RunHookDataChecks()
 {
     Reset(); HookDataFixture(); SetGameEntitySystem(true);
@@ -1758,7 +1759,7 @@ int main()
 {
     for (const auto check : {RunHandleChecks, RunPlayerInputChecks, RunEntityWriteChecks,
                             RunPlayerStatChecks, RunRoundChecks, RunPlayerManagementChecks,
-                            RunPlayerActionChecks, RunNativeBridgeChecks, RunHookDataChecks, RunEntityToolChecks, RunEntityConstructionChecks, RunNativeConstructionChecks, RunEntityInputChecks, RunNativeInputChecks})
+                            RunPlayerActionChecks, RunNativeBridgeChecks, RunHookDataChecks, RunEntityToolChecks, RunEntityConstructionChecks, RunNativeConstructionChecks, RunEntityInputChecks, RunNativeInputChecks, RunOutputContextChecks})
         if (const int result = check()) {
             std::cerr << "schema/entity native bridge check " << result << " failed\n";
             return result;

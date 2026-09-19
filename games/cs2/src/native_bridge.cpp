@@ -1960,6 +1960,91 @@ extern "C" KeelResult KeelCs2_ValidateCreatedEntity(void* system, const KeelCs2E
     catch (const StatFailure& failure) { return failure.result; }
     catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
 }
+
+namespace
+{
+const CSchemaClassInfo* OutputOwnerType(const CEntityIdentity& identity, const void* output) noexcept
+{
+    const auto* descriptor = identity.m_pClass;
+    if (!descriptor || !descriptor->m_pClassInfo) return nullptr;
+    const auto* type = descriptor->GetSchemaBinding();
+    if (!ValidClass(type) || static_cast<std::uint32_t>(type->m_nSize) < sizeof(CEntityInstance)+24) return nullptr;
+    const auto begin = reinterpret_cast<std::uintptr_t>(identity.m_pInstance);
+    const auto address = reinterpret_cast<std::uintptr_t>(output);
+    const auto size = static_cast<std::uint32_t>(type->m_nSize);
+    return begin % type->m_nAlignment == 0 && size-1 <= UINTPTR_MAX-begin && address >= begin &&
+        address-begin >= sizeof(CEntityInstance) && address-begin <= size-24 ? type : nullptr;
+}
+template <std::size_t N>
+bool CopyOutputName(char (&destination)[N], const char* source, bool allow_empty = false) noexcept
+{
+    if (!source) return allow_empty;
+    std::size_t length{};
+    while (length < N && source[length]) {
+        const auto byte = static_cast<unsigned char>(source[length]);
+        if (byte < 32 || byte == 127) return false;
+        ++length;
+    }
+    if (length == N || (!length && !allow_empty)) return false;
+    std::memcpy(destination,source,length+1);
+    return true;
+}
+}
+extern "C" KeelResult KeelCs2_CaptureOutputContext(void* system, const void* output,
+    const void* activator, const void* caller, KeelCs2EntityOutputContext* context)
+{
+    if (context) *context = {};
+    if (!system || !output || !context || reinterpret_cast<std::uintptr_t>(output) % alignof(void*))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    try {
+        auto* registry = static_cast<CEntitySystem*>(system);
+        KeelCs2EntityOutputContext captured{};
+        captured.output = output;
+        CEntityIdentity* owner{};
+        for (std::size_t chunk_index = 0; chunk_index < std::size(registry->m_EntityList.m_pIdentityChunks); ++chunk_index) {
+            auto* chunk = registry->m_EntityList.m_pIdentityChunks[chunk_index];
+            if (!chunk) continue;
+            for (std::size_t slot = 0; slot < MAX_ENTITIES_IN_LIST; ++slot) {
+                auto* candidate = &chunk[slot];
+                if (!candidate->m_pInstance) continue;
+                const KeelCs2EntityIdentity identity{static_cast<std::int32_t>(chunk_index*MAX_ENTITIES_IN_LIST+slot),
+                    static_cast<std::uint32_t>(candidate->GetRefEHandle().ToInt())};
+                if (!CreatedIdentity(registry,identity,false)) continue;
+                if (candidate->m_pInstance == activator) { captured.entities[1] = identity; captured.instances[1] = activator; }
+                if (candidate->m_pInstance == caller) { captured.entities[2] = identity; captured.instances[2] = caller; }
+                const auto* type = OutputOwnerType(*candidate,output);
+                if (!type) continue;
+                if (owner) return KEEL_RESULT_INCOMPATIBLE;
+                owner = candidate; captured.entities[0] = identity; captured.instances[0] = owner->m_pInstance;
+                captured.owner_class = owner->m_pClass; captured.owner_schema = type;
+            }
+        }
+        if (!owner || (activator && !captured.instances[1]) || (caller && !captured.instances[2])) return KEEL_RESULT_NOT_FOUND;
+        const auto* type = static_cast<const CSchemaClassInfo*>(captured.owner_schema);
+        if (!CopyOutputName(captured.class_name,owner->GetClassname()) ||
+            !CopyOutputName(captured.schema_name,type->m_pszName)) return KEEL_RESULT_INCOMPATIBLE;
+        const void* descriptor{};
+        std::memcpy(&descriptor,static_cast<const std::byte*>(output)+16,sizeof(descriptor));
+        const char* name{};
+        if (descriptor) std::memcpy(&name,descriptor,sizeof(name));
+        if (!CopyOutputName(captured.output_name,name,true)) return KEEL_RESULT_INCOMPATIBLE;
+        *context = captured;
+        return KEEL_RESULT_OK;
+    } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+extern "C" KeelResult KeelCs2_ValidateOutputContext(void* system, const KeelCs2EntityOutputContext* context)
+{
+    if (!system || !context || !context->output || !context->instances[0]) return KEEL_RESULT_INVALID_ARGUMENT;
+    auto* registry = static_cast<CEntitySystem*>(system);
+    for (std::size_t i = 0; i < std::size(context->instances); ++i) {
+        if (!context->instances[i]) continue;
+        auto* identity = CreatedIdentity(registry,context->entities[i],false);
+        if (!identity || identity->m_pInstance != context->instances[i]) return KEEL_RESULT_NOT_FOUND;
+        if (i == 0 && (identity->m_pClass != context->owner_class ||
+            OutputOwnerType(*identity,context->output) != context->owner_schema)) return KEEL_RESULT_NOT_FOUND;
+    }
+    return KEEL_RESULT_OK;
+}
 extern "C" KeelResult KeelCs2_SnapshotEntityHandles(void* system, uint32_t* handles, uint32_t count)
 {
     static_assert(KEELS2_CS2_ENTITY_CAPACITY == MAX_TOTAL_ENTITIES);
