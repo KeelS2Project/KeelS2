@@ -35,6 +35,12 @@ typedef struct KeelCs2EntityConstructionBindings
     void* remove;
 } KeelCs2EntityConstructionBindings;
 
+typedef struct KeelCs2EntityInputBindings
+{
+    void* accept;
+    void* queue;
+} KeelCs2EntityInputBindings;
+
 typedef struct KeelCs2EntityToolBindings
 {
     void* set_model;
@@ -68,6 +74,20 @@ typedef struct KeelCs2EntityIdentity
     int32_t index;
     uint32_t source2_handle;
 } KeelCs2EntityIdentity;
+
+/* Internal main-thread operation after the caller reacquires its map epoch.
+ * native_value is a live, immutable helper-built CVariant. All supplied entity
+ * identities must be live; the entity-valued payload requires value_entity.
+ * Queue rejects colors because the pinned game only shallow-copies that type.
+ * Delay is finite/nonnegative, and zero for direct calls. The input name is
+ * copied (1..127 non-control bytes). Invoked means entry into the engine call,
+ * not acceptance of the input; it remains true if the engine throws. No entity
+ * memory is read after invocation. The caller keeps native_value alive through
+ * this call and releases it afterward, including failures. */
+KeelResult KeelCs2_EntityInput(void* system, const KeelCs2EntityIdentity* entity,
+    const KeelCs2EntityIdentity* activator, const KeelCs2EntityIdentity* caller,
+    const KeelCs2EntityIdentity* value_entity, const KeelCs2EntityInputBindings* bindings,
+    const char* input, const void* native_value, KeelBool queued, float delay, KeelBool* invoked);
 
 /* Per-operation schema snapshots. Resolve before reacquiring the adapter map
  * epoch and entity system; never retain native argument pointers in these. */

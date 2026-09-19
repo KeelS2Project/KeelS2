@@ -618,6 +618,58 @@ extern "C" KeelResult KeelCs2_ValidateEntity(
     }
 }
 
+extern "C" KeelResult KeelCs2_EntityInput(void* system, const KeelCs2EntityIdentity* entity,
+    const KeelCs2EntityIdentity* activator, const KeelCs2EntityIdentity* caller,
+    const KeelCs2EntityIdentity* value_entity, const KeelCs2EntityInputBindings* bindings,
+    const char* input, const void* native_value, KeelBool queued, float delay, KeelBool* invoked)
+{
+    if (invoked) *invoked = KEEL_FALSE;
+    if (!system || !entity || !bindings || !bindings->accept || !bindings->queue || !input || !*input ||
+        !native_value || !invoked || queued > KEEL_TRUE || !std::isfinite(delay) || delay < 0 || (!queued && delay != 0))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    std::array<char,128> name{};
+    std::size_t length{};
+    while (length < name.size() && input[length]) {
+        const auto c = static_cast<unsigned char>(input[length]);
+        if (c < 32 || c == 127) return KEEL_RESULT_INVALID_ARGUMENT;
+        name[length++] = static_cast<char>(c);
+    }
+    if (length == name.size()) return KEEL_RESULT_INVALID_ARGUMENT;
+    const auto& value = *static_cast<const CVariant*>(native_value);
+    switch (value.m_type) {
+        case FIELD_VOID: case FIELD_CSTRING: case FIELD_BOOLEAN: case FIELD_INT32:
+        case FIELD_FLOAT32: case FIELD_VECTOR: case FIELD_QANGLE: case FIELD_EHANDLE: break;
+        case FIELD_COLOR32: if (queued) return KEEL_RESULT_UNSUPPORTED; break;
+        default: return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    if ((value.m_type == FIELD_EHANDLE) != (value_entity != nullptr) ||
+        (value_entity && static_cast<std::uint32_t>(value.m_hEntity.ToInt()) != value_entity->source2_handle))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    const KeelCs2EntityIdentity* identities[]{entity,activator,caller,value_entity};
+    std::array<CEntityInstance*,4> instances{};
+    for (std::size_t i = 0; i < instances.size(); ++i) if (identities[i]) {
+        const auto selected = *identities[i];
+        if (selected.index < 0 || selected.index >= MAX_TOTAL_ENTITIES || selected.source2_handle == INVALID_EHANDLE_INDEX)
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        auto* found = IdentityByHandle(static_cast<CEntitySystem*>(system),selected.source2_handle);
+        if (!found || found->GetEntityIndex().Get() != selected.index) return KEEL_RESULT_NOT_FOUND;
+        instances[i] = found->m_pInstance;
+    }
+    void* function = queued ? bindings->queue : bindings->accept;
+    try {
+        *invoked = KEEL_TRUE;
+        // These functions have no reviewed acceptance return value or Source 1
+        // output ID. Engine callbacks may delete participants or change maps.
+        if (queued)
+            NativeActionFunction<void (*)(void*,void*,const char*,void*,void*,const void*,float,void*,void*)>(function)(
+                system,instances[0],name.data(),instances[1],instances[2],native_value,delay,nullptr,nullptr);
+        else
+            NativeActionFunction<void (*)(void*,const char*,void*,void*,const void*)>(function)(
+                instances[0],name.data(),instances[1],instances[2],native_value);
+        return KEEL_RESULT_OK;
+    } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
 extern "C" KeelResult KeelCs2_CaptureEntity(void* entity_system, const void* instance, KeelCs2EntityIdentity* output)
 {
     if (output) *output = {};
