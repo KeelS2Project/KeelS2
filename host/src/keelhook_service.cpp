@@ -204,6 +204,20 @@ KeelHookVirtualTargetSpec UpgradeVirtualTarget(const KeelHookVirtualTargetSpecV4
 class KeelHookService::Implementation final
 {
 public:
+    static KeelResult DeferInternal(KeelHookFrame* frame, void (*cleanup)(void*), void* data) noexcept
+    {
+        auto* instance = active_.load(std::memory_order_acquire);
+        if (!cleanup) return KEEL_RESULT_INVALID_ARGUMENT;
+        auto* control = instance ? instance->CurrentControl(0,frame) : nullptr;
+        if (!control || !control->completions) return KEEL_RESULT_NOT_READY;
+        auto& completions = *control->completions;
+        for (std::size_t i = 0; i < completions.count; ++i)
+            if (completions.entries[i].cleanup == cleanup && completions.entries[i].data == data)
+                return KEEL_RESULT_ALREADY_EXISTS;
+        if (completions.count == completions.entries.size()) return KEEL_RESULT_BUSY;
+        completions.entries[completions.count++] = {cleanup,data};
+        return KEEL_RESULT_OK;
+    }
     Implementation(
         KeelHookService& service,
         std::string profile,
@@ -2580,6 +2594,19 @@ private:
     using ArgumentAggregateStorage =
         std::array<AggregateStorage, KEELHOOK_MAX_ARGUMENTS>;
 
+    struct Completions
+    {
+        struct Entry { void (*cleanup)(void*); void* data; };
+        std::array<Entry,8> entries{};
+        std::size_t count{};
+        void Run() noexcept {
+            while (count) {
+                const auto entry = entries[--count];
+                try { entry.cleanup(entry.data); } catch (...) {}
+            }
+        }
+        ~Completions() { Run(); }
+    };
     struct DispatchControl
     {
         KeelHookFrame* frame{};
@@ -2592,6 +2619,7 @@ private:
         bool* overridden{};
         bool* superseded{};
         bool* recalled{};
+        Completions* completions{};
     };
 
     struct RecallState
@@ -2775,6 +2803,7 @@ private:
         bool superseded{};
         bool recalled{};
         bool control_pushed{};
+        Completions completions;
         const CallbackRecord* recall_from =
             recall_state && recall_state->target == &target ? recall_state->callback : nullptr;
         try
@@ -2813,7 +2842,8 @@ private:
                 &original_called,
                 &overridden,
                 &superseded,
-                &recalled
+                &recalled,
+                &completions
             };
             if (dispatch_depth_ >= dispatch_stack_.size())
             {
@@ -3033,6 +3063,7 @@ private:
             result_storage,
             native_arguments,
             native_result);
+        completions.Run();
         --target_depth_;
         target_stack_[target_depth_] = nullptr;
         LeaveActive(target.active);
@@ -4214,6 +4245,11 @@ const KeelHookApiV3& KeelHookService::ApiV3() const noexcept
 const KeelCallApi& KeelHookService::CallApi() const noexcept
 {
     return call_api_;
+}
+
+KeelResult KeelHookService::DeferInternal(KeelHookFrame* frame, void (*cleanup)(void*), void* data) noexcept
+{
+    return Implementation::DeferInternal(frame,cleanup,data);
 }
 
 KeelResult KeelHookService::InvokeEntry(KeelPluginHandle plugin, KeelHookTargetHandle target,

@@ -1,6 +1,7 @@
 #ifndef KEELS2_CS2_ENTITY_VARIANT_H
 #define KEELS2_CS2_ENTITY_VARIANT_H
 #include <keels2/cs2/entity_keyvalues.h>
+#include <keels2/entity_outputs.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -27,18 +28,7 @@ typedef struct KeelCs2VariantValue
     uint32_t entity_handle;
 } KeelCs2VariantValue;
 
-typedef struct KeelCs2VariantSnapshot
-{
-    uint32_t size;
-    uint32_t type;
-    uint32_t native_type;
-    int32_t int_value;
-    float float_value;
-    float vector_value[3];
-    uint8_t color_value[4];
-    uint32_t entity_handle;
-    char string_value[KEELS2_CS2_VARIANT_MAX_STRING + 1];
-} KeelCs2VariantSnapshot;
+typedef KeelEntityOutputValue KeelCs2VariantSnapshot;
 
 /* Read only during a native callback while its variant and indirect payloads
  * are valid. Copies without allocation or engine calls; contains no pointers.

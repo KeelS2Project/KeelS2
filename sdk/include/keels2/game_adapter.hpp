@@ -9,6 +9,7 @@
 #include <keels2/entity_writes.h>
 #include <keels2/entity_tools.h>
 #include <keels2/entity_input.h>
+#include <keels2/entity_outputs.h>
 #include <keels2/entity_keyvalues.h>
 #include <keels2/entity_access.h>
 #include <keels2/entity_hook_data.h>
@@ -307,6 +308,22 @@ struct GameAdapterEntityInputApi
     KeelResult (*dispatch)(GameAdapter*, const GameEntityInputRequest*, KeelBool*) noexcept;
 };
 using GameAdapterQueryEntityInputFn = KeelResult (*)(std::uint32_t, GameAdapterEntityInputApi*) noexcept;
+
+using GameHookDefer = KeelResult (*)(KeelHookFrame*, void (*)(void*), void*) noexcept;
+// A null event ends the invocation, including paths without a post callback.
+using GameEntityOutputCallback = std::uint32_t (*)(const KeelEntityOutputEvent*, std::uint64_t invocation, void*);
+inline constexpr const char* kGameAdapterEntityOutputsSymbol = "KeelGameAdapter_QueryEntityOutputs";
+inline constexpr std::uint32_t kGameAdapterEntityOutputsVersion = 1;
+struct GameAdapterEntityOutputsApi
+{
+    std::uint32_t size;
+    std::uint32_t api_version;
+    // Defer attaches internal cleanup to the current host-owned hook frame.
+    // It runs after all post callbacks, before the target becomes inactive.
+    KeelResult (*start)(GameAdapter*, const KeelHookApi*, GameHookDefer, GameEntityOutputCallback, void*) noexcept;
+    KeelResult (*stop)(GameAdapter*) noexcept;
+};
+using GameAdapterQueryEntityOutputsFn = KeelResult (*)(std::uint32_t, GameAdapterEntityOutputsApi*) noexcept;
 
 inline constexpr const char* kGameAdapterEntityToolsSymbol = "KeelGameAdapter_QueryEntityTools";
 inline constexpr std::uint32_t kGameAdapterEntityToolsVersion = 1;

@@ -14,6 +14,7 @@
 #include <keels2/cs2/native_bridge.h>
 #include <keels2/cs2/native_construction.h>
 #include <keels2/cs2/native_input.h>
+#include <keels2/cs2/native_outputs.h>
 #include <keels2/cs2/entity_variant.h>
 extern "C" {
 KEELS2_CS2_KEYVALUES_EXPORT void KeelFixtureKeyValuesMemoryStart();
@@ -477,6 +478,7 @@ constexpr std::size_t kNotifySlot = 29;
 #include "native_construction_fixture.h"
 #include "entity_input_native_fixture.h"
 #include "entity_output_native_fixture.h"
+#include "entity_output_hooks_fixture.h"
 int RunHookDataChecks()
 {
     Reset(); HookDataFixture(); SetGameEntitySystem(true);
@@ -1759,7 +1761,7 @@ int main()
 {
     for (const auto check : {RunHandleChecks, RunPlayerInputChecks, RunEntityWriteChecks,
                             RunPlayerStatChecks, RunRoundChecks, RunPlayerManagementChecks,
-                            RunPlayerActionChecks, RunNativeBridgeChecks, RunHookDataChecks, RunEntityToolChecks, RunEntityConstructionChecks, RunNativeConstructionChecks, RunEntityInputChecks, RunNativeInputChecks, RunOutputContextChecks})
+                            RunPlayerActionChecks, RunNativeBridgeChecks, RunHookDataChecks, RunEntityToolChecks, RunEntityConstructionChecks, RunNativeConstructionChecks, RunEntityInputChecks, RunNativeInputChecks, RunOutputContextChecks, RunOutputHookChecks})
         if (const int result = check()) {
             std::cerr << "schema/entity native bridge check " << result << " failed\n";
             return result;

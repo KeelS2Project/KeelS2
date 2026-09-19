@@ -563,6 +563,16 @@ if(BUILD_TESTING)
             --self-test
     )
 
+    add_executable(keels2_keelhook_completion
+        tests/keelhook_completion.cpp ${KEELS2_HOST_SOURCE_CONTRACT})
+    target_compile_definitions(keels2_keelhook_completion PRIVATE KEELS2_HOST_VERSION="${PROJECT_VERSION}")
+    target_include_directories(keels2_keelhook_completion PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/generated" bootstrap/include host/src platform/include sdk/include)
+    target_link_libraries(keels2_keelhook_completion PRIVATE ${KEELS2_HOST_LINK_CONTRACT} keels2_keelhook_backend_target)
+    keels2_enable_warnings(keels2_keelhook_completion)
+    add_test(NAME keelhook_completion COMMAND keels2_keelhook_completion)
+    set_tests_properties(keelhook_completion PROPERTIES TIMEOUT 30)
+
     add_executable(keels2_entity_input_service_test
         tests/entity_input_service.cpp ${KEELS2_HOST_SOURCE_CONTRACT})
     target_compile_definitions(keels2_entity_input_service_test PRIVATE KEELS2_HOST_VERSION="${PROJECT_VERSION}")

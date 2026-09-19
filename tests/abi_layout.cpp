@@ -5,6 +5,7 @@
 #include <keels2/entities.h>
 #include <keels2/entity_construction.h>
 #include <keels2/entity_input.h>
+#include <keels2/entity_outputs.h>
 #include <keels2/game_adapter.hpp>
 #include <keels2/keelhook.hpp>
 #include <keels2/lifecycle.h>
@@ -366,3 +367,11 @@ static_assert(sizeof(KeelEntityInputApi) == 24);
 static_assert(sizeof(KeelEntityInputValue) == 40);
 static_assert(sizeof(KeelEntityInputRequest) == 88);
 static_assert(std::is_standard_layout_v<KeelEntityInputRequest>);
+
+static_assert(sizeof(KeelEntityOutputValue) == 4136, "output snapshot ABI");
+static_assert(sizeof(KeelEntityOutputEvent) == 4872, "output event ABI");
+static_assert(offsetof(KeelEntityOutputEvent, value) == 736, "output value ABI");
+static_assert(sizeof(KeelEntityOutputSpec) == 56, "output filter ABI");
+static_assert(offsetof(KeelEntityOutputSpec, callback) == 40, "output callback ABI");
+static_assert(sizeof(KeelEntityOutputsApi) == 32, "output API ABI");
+static_assert(sizeof(keels2::host::GameAdapterEntityOutputsApi) == 24);

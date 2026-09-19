@@ -1,5 +1,6 @@
 #include <keels2/entities.h>
 #include <keels2/entity_input.h>
+#include <keels2/entity_outputs.h>
 #include <keels2/entity_construction.h>
 #include <keels2/entity_tools.h>
 #include <keels2/entity_access.h>
@@ -65,6 +66,13 @@ _Static_assert(offsetof(KeelEntityInputRequest, value) == 40, "input payload ABI
 _Static_assert(offsetof(KeelEntityInputRequest, delay) == 80, "input delay ABI");
 _Static_assert(sizeof(KeelEntityInputApi) == 24, "input table ABI");
 _Static_assert(offsetof(KeelEntityInputApi, dispatch) == 16, "input dispatch ABI");
+
+_Static_assert(sizeof(KeelEntityOutputValue) == 4136, "output snapshot ABI");
+_Static_assert(sizeof(KeelEntityOutputEvent) == 4872, "output event ABI");
+_Static_assert(offsetof(KeelEntityOutputEvent, value) == 736, "output value ABI");
+_Static_assert(sizeof(KeelEntityOutputSpec) == 56, "output filter ABI");
+_Static_assert(offsetof(KeelEntityOutputSpec, callback) == 40, "output callback ABI");
+_Static_assert(sizeof(KeelEntityOutputsApi) == 32, "output API ABI");
 
 int main(void)
 {
