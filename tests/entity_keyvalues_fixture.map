@@ -1,4 +1,5 @@
 {
     global: KeelFixtureKeyValuesInspect; KeelFixtureKeyValuesRetain; KeelFixtureKeyValuesRelease;
+            KeelFixtureVariantInspect; KeelFixtureVariantCopy; KeelFixtureVariantRelease;
     local: *;
 };

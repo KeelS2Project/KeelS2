@@ -8,8 +8,8 @@ add_library(keels2_cs2_keyvalues_sdk OBJECT
     games/cs2/src/keyvalues_allocator.cpp
 )
 get_target_property(keels2_keyvalues_sdk_sources keels2_cs2_keyvalues_sdk SOURCES)
-set_property(SOURCE ${keels2_keyvalues_sdk_sources} games/cs2/src/entity_keyvalues.cpp
-    tests/entity_keyvalues_fixture.cpp APPEND PROPERTY OBJECT_DEPENDS "${keels2_keyvalues_patched_headers}")
+set_property(SOURCE ${keels2_keyvalues_sdk_sources} games/cs2/src/entity_keyvalues.cpp games/cs2/src/entity_variant.cpp
+    tests/entity_keyvalues_fixture.cpp tests/entity_variant_fixture.cpp APPEND PROPERTY OBJECT_DEPENDS "${keels2_keyvalues_patched_headers}")
 target_include_directories(keels2_cs2_keyvalues_sdk SYSTEM BEFORE PRIVATE
     "${keels2_keyvalues_headers}" "${keels2_keyvalues_headers}/tier0")
 target_link_libraries(keels2_cs2_keyvalues_sdk PRIVATE KeelS2::SourceSDK)
@@ -21,7 +21,7 @@ else()
     target_compile_options(keels2_cs2_keyvalues_sdk PRIVATE -fno-sized-deallocation -fno-sanitize=vptr)
 endif()
 
-add_library(keels2_cs2_keyvalues SHARED games/cs2/src/entity_keyvalues.cpp
+add_library(keels2_cs2_keyvalues SHARED games/cs2/src/entity_keyvalues.cpp games/cs2/src/entity_variant.cpp
     $<TARGET_OBJECTS:keels2_cs2_keyvalues_sdk>)
 target_include_directories(keels2_cs2_keyvalues PRIVATE games/cs2/include sdk/include)
 target_include_directories(keels2_cs2_keyvalues SYSTEM BEFORE PRIVATE
@@ -49,7 +49,7 @@ target_link_libraries(keels2_cs2_constructions PUBLIC keels2_cs2_keyvalues keels
 keels2_enable_warnings(keels2_cs2_constructions)
 
 if(BUILD_TESTING)
-    add_library(keels2_keyvalues_fixture SHARED tests/entity_keyvalues_fixture.cpp
+    add_library(keels2_keyvalues_fixture SHARED tests/entity_keyvalues_fixture.cpp tests/entity_variant_fixture.cpp
         $<TARGET_OBJECTS:keels2_cs2_keyvalues_sdk>)
     target_include_directories(keels2_keyvalues_fixture PRIVATE games/cs2/include sdk/include)
     target_include_directories(keels2_keyvalues_fixture SYSTEM BEFORE PRIVATE
@@ -74,13 +74,19 @@ if(BUILD_TESTING)
         keels2_cs2_keyvalues keels2_keyvalues_fixture keels2_fake_tier0)
     keels2_enable_warnings(keels2_entity_keyvalues_test)
     add_test(NAME entity_keyvalues COMMAND keels2_entity_keyvalues_test)
+    add_executable(keels2_entity_variant_test tests/entity_variant_test.cpp)
+    target_include_directories(keels2_entity_variant_test PRIVATE games/cs2/include sdk/include)
+    target_link_libraries(keels2_entity_variant_test PRIVATE
+        keels2_cs2_keyvalues keels2_keyvalues_fixture keels2_fake_tier0)
+    keels2_enable_warnings(keels2_entity_variant_test)
+    add_test(NAME entity_variant COMMAND keels2_entity_variant_test)
     add_executable(keels2_owned_construction_test tests/owned_construction_test.cpp)
     target_link_libraries(keels2_owned_construction_test PRIVATE
         keels2_cs2_constructions keels2_keyvalues_fixture keels2_fake_tier0)
     keels2_enable_warnings(keels2_owned_construction_test)
     add_test(NAME owned_construction COMMAND keels2_owned_construction_test)
     if(WIN32)
-        set_property(TEST entity_keyvalues owned_construction APPEND PROPERTY ENVIRONMENT_MODIFICATION
+        set_property(TEST entity_keyvalues entity_variant owned_construction APPEND PROPERTY ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:keels2_cs2_keyvalues>")
     endif()
 endif()

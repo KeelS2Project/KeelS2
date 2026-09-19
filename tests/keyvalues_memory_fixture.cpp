@@ -18,11 +18,18 @@ extern "C" IMemAlloc* g_pMemAlloc;
 namespace {
 struct Allocation { void* base; std::size_t size; std::size_t alignment; };
 std::unordered_map<void*,Allocation> allocations;
+int fail_after = -1;
+bool throw_failure{};
 std::array<void*,64> methods{};
 struct Memory { void** methods; } memory{methods.data()};
 [[noreturn]] void Unsupported() { std::abort(); }
 void* Allocate(std::size_t size, std::size_t alignment = 16)
 {
+    if (!fail_after) {
+        if (throw_failure) throw std::bad_alloc();
+        return nullptr;
+    }
+    if (fail_after > 0) --fail_after;
     if (!alignment || (alignment & (alignment-1)) || alignment > 4096 ||
         size > std::numeric_limits<std::size_t>::max()-alignment-32) throw std::bad_alloc();
     void* base = std::malloc(size+alignment+32);
@@ -89,6 +96,7 @@ extern "C" KV_FIXTURE_EXPORT void KeelFixtureKeyValuesMemoryStart()
 }
 extern "C" KV_FIXTURE_EXPORT std::size_t KeelFixtureKeyValuesMemoryCount() { return allocations.size(); }
 extern "C" KV_FIXTURE_EXPORT bool KeelFixtureKeyValuesMemoryOwns(void* value) { return allocations.contains(value); }
+extern "C" KV_FIXTURE_EXPORT void KeelFixtureKeyValuesMemoryFailAfter(int count, bool throws) { fail_after = count; throw_failure = throws; }
 extern "C" KV_FIXTURE_EXPORT void KeelFixtureKeyValuesMemoryStop() {
     if (!allocations.empty()) Unsupported();
     g_pMemAlloc = nullptr;
