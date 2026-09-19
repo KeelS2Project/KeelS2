@@ -61,6 +61,7 @@ SchemaBaseClassInfoData_t g_derived_bases[1]{};
 CSchemaClassInfo g_derived_class{};
 std::uint32_t g_schema_lookup_count{};
 void (*g_input_read_callback)(){};
+void (*g_write_schema_callback)(){};
 CSchemaClassInfo g_input_pawn_class{}, g_movement_class{}, g_buttons_class{};
 bool g_buttons_registered = true;
 SchemaClassFieldData_t g_input_pointer{}, g_input_state{}, g_input_masks{};
@@ -109,6 +110,9 @@ CSchemaClassInfo* DeclaredClass(const char* name)
     }
     if (name && std::strcmp(name, "CBaseEntity") == 0)
     {
+        if (g_write_schema_callback) {
+            const auto callback = g_write_schema_callback; g_write_schema_callback = nullptr; callback();
+        }
         return &g_base_class;
     }
     if (name && std::strcmp(name, "CCSPlayerPawn") == 0)
@@ -252,7 +256,7 @@ void SetHealth(int32 health)
 void Reset()
 {
     g_schema_lookup_count = 0;
-    g_input_read_callback = nullptr;
+    g_input_read_callback = nullptr; g_write_schema_callback = nullptr;
     g_hook_schema_callback = nullptr; g_hook_component = g_hook_component_base = {};
     g_input_pawn_class = g_movement_class = g_buttons_class = g_controller_base = g_controller_class = {};
     g_round_proxy_class = g_round_rules_class = {};
@@ -445,6 +449,11 @@ struct Initialize
 } g_initialize;
 
 #if defined(KEELS2_SCHEMA_FIXTURE_NATIVE_TEST)
+#if defined(_WIN32)
+constexpr std::size_t kNotifySlot = 28;
+#else
+constexpr std::size_t kNotifySlot = 29;
+#endif
 int RunHookDataChecks()
 {
     Reset(); HookDataFixture(); SetGameEntitySystem(true);
@@ -752,7 +761,7 @@ int RunPlayerStatChecks()
 #endif
     std::array<void*,30> controller_table{};
     std::array<void*,3> money_table{}, tracking_table{}, wrong_table{};
-    controller_table[29] = FunctionAddress(&TestStatNotify);
+    controller_table[kNotifySlot] = FunctionAddress(&TestStatNotify);
     alignas(16) std::array<std::byte,128> money{};
     alignas(16) std::array<std::byte,256> tracking{};
     const auto info = [](CSchemaClassInfo& type, const char* name, int size, std::uint8_t alignment) {
@@ -801,7 +810,7 @@ int RunPlayerStatChecks()
     StorePointer(g_entity_storage.data()+tracking_pointer_offset,tracking.data());
     StorePointer(money.data(),money_table.data()); StorePointer(tracking.data(),tracking_table.data());
     StorePointer(money.data()+8,EntityInstance()); StorePointer(tracking.data()+8,EntityInstance());
-    const KeelCs2PlayerStatisticsBindings bindings{controller_table.data(),money_table.data(),tracking_table.data(),controller_table[29]};
+    const KeelCs2PlayerStatisticsBindings bindings{controller_table.data(),money_table.data(),tracking_table.data(),controller_table[kNotifySlot]};
     KeelCs2EntityIdentity entity{};
     if (KeelCs2_FindEntityByIndex(EntitySystem(),kEntityIndex,&entity) != KEEL_RESULT_OK) return 801;
     KeelCs2PlayerStatSchema schema{};
@@ -876,22 +885,31 @@ int RunEntityWriteChecks()
     constexpr const char* module = "libserver.so";
 #endif
     std::array<void*,30> table{}; auto* notify = FunctionAddress(&TestEntityWriteNotify);
-    table[29] = notify; StorePointer(g_entity_storage.data(), table.data());
+    table[kNotifySlot] = notify; StorePointer(g_entity_storage.data(), table.data());
     g_write_notifications = 0; g_write_destroy = false;
     KeelCs2EntityIdentity entity{};
     if (KeelCs2_FindEntityByIndex(EntitySystem(), kEntityIndex, &entity) != KEEL_RESULT_OK) return 450;
     KeelCs2SchemaField field{};
     if (KeelCs2_ResolveSchemaField(&g_schema_system,module,"CBaseEntity","m_iHealth",KEELS2_SCHEMA_INT32,&field) != KEEL_RESULT_OK) return 451;
     std::int32_t value = 84;
-    const auto write = [&](const void* input, unsigned size) { return KeelCs2_WriteEntityField(EntitySystem(),&g_schema_system,module,&entity,&field,input,size,notify); };
+    const auto write = [&](const void* input, unsigned size) {
+        void* base{};
+        const auto result = KeelCs2_ResolveEntityWriteClass(&g_schema_system,module,&base);
+        return result == KEEL_RESULT_OK ? KeelCs2_WriteEntityField(EntitySystem(),base,&entity,&field,input,size,notify) : result;
+    };
+    // Exercise the pinned SDK's actual virtual dispatch, independently of the
+    // resolver constant, so Windows cannot accidentally use Linux's slot.
+    EntityInstance()->NetworkStateChanged(NetworkStateChangedData(true));
+    if (g_write_notifications != 1 || !g_write_notification_valid) return 464;
+    g_write_notifications = 0;
     const auto health = [&] { std::int32_t result{}; std::memcpy(&result,g_entity_storage.data()+kHealthOffset,sizeof(result)); return result; };
     if (write(&value,sizeof(value)) != KEEL_RESULT_OK || health() != value || g_write_notifications != 1 || !g_write_notification_valid) return 452;
     if (write(&value,sizeof(value)) != KEEL_RESULT_OK || g_write_notifications != 1) return 453;
     auto original = entity; ++entity.source2_handle;
     if (write(&value,sizeof(value)) != KEEL_RESULT_NOT_FOUND || g_write_notifications != 1) return 454;
-    entity = original; table[29] = nullptr; value = 12;
+    entity = original; table[kNotifySlot] = nullptr; value = 12;
     if (write(&value,sizeof(value)) != KEEL_RESULT_INCOMPATIBLE || health() != 84) return 455;
-    table[29] = notify; const auto original_field = field;
+    table[kNotifySlot] = notify; const auto original_field = field;
     field.offset = static_cast<int>(kEntitySize);
     if (write(&value,sizeof(value)) != KEEL_RESULT_INCOMPATIBLE || g_write_notifications != 1) return 456;
     field = original_field; ++field.offset;
@@ -909,7 +927,17 @@ int RunEntityWriteChecks()
     field = {&g_base_class,static_cast<int>(kHealthOffset),12,4,KEELS2_SCHEMA_VECTOR3};
     const float vector[]{1,2,3};
     if (write(vector,sizeof(vector)) != KEEL_RESULT_OK || g_write_notifications != 3) return 462;
-    field = original_field; g_write_destroy = true;
+    field = original_field;
+    void* invalid_base = &g_base_class;
+    if (KeelCs2_ResolveEntityWriteClass(nullptr,module,&invalid_base) != KEEL_RESULT_INVALID_ARGUMENT || invalid_base ||
+        KeelCs2_ResolveEntityWriteClass(&g_schema_system,"unknown",&invalid_base) != KEEL_RESULT_INCOMPATIBLE || invalid_base)
+        return 465;
+    // Discovery may reenter the host or delete an entity. No borrowed entity
+    // address is retained across it; only the subsequent write reads identity.
+    g_write_schema_callback = [] { Identity()->m_pInstance = nullptr; };
+    if (write(&value,sizeof(value)) != KEEL_RESULT_NOT_FOUND || g_write_notifications != 3) return 466;
+    Identity()->m_pInstance = EntityInstance();
+    g_write_destroy = true;
     if (write(&value,sizeof(value)) != KEEL_RESULT_OK || g_write_notifications != 4 ||
         KeelCs2_ValidateEntity(EntitySystem(),&entity) != KEEL_RESULT_NOT_FOUND) return 463;
     g_write_destroy = false;

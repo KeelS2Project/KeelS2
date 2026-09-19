@@ -1919,6 +1919,9 @@ public:
         if (current.declaring_class != field.declaring_class || current.offset != field.offset ||
             current.value_size != field.value_size || current.value_alignment != field.value_alignment)
             return KEEL_RESULT_INCOMPATIBLE;
+        void* base_class{};
+        result = KeelCs2_ResolveEntityWriteClass(schema_system_.instance, schema_server_module_.c_str(), &base_class);
+        if (result != KEEL_RESULT_OK) return result;
         void* system{};
         {
             std::scoped_lock lock(schema_entity_mutex_);
@@ -1930,7 +1933,7 @@ public:
         const KeelCs2SchemaField native_field{current.declaring_class, current.offset,
             current.value_size, current.value_alignment, current.value_type};
         // Do not hold the schema registry mutex while notifying the engine.
-        return KeelCs2_WriteEntityField(system, schema_system_.instance, schema_server_module_.c_str(),
+        return KeelCs2_WriteEntityField(system, base_class,
             &native_entity, &native_field, value, size, entity_write_notify_);
     }
 

@@ -758,12 +758,28 @@ extern "C" KeelResult KeelCs2_ReadEntityField(
     }
 }
 
-extern "C" KeelResult KeelCs2_WriteEntityField(void* entity_system, void* schema_system,
-    const char* module, const KeelCs2EntityIdentity* entity, const KeelCs2SchemaField* field,
+extern "C" KeelResult KeelCs2_ResolveEntityWriteClass(void* schema_system, const char* module, void** base_class)
+{
+    if (base_class) *base_class = nullptr;
+    if (!schema_system || !module || !*module || !base_class) return KEEL_RESULT_INVALID_ARGUMENT;
+    try
+    {
+        auto* scope = reinterpret_cast<ISchemaSystemTypeScope*>(
+            static_cast<ISchemaSystem*>(schema_system)->FindTypeScopeForModule(module));
+        auto* base = scope ? scope->FindDeclaredClass("CBaseEntity").Get() : nullptr;
+        if (!ValidClass(base)) return KEEL_RESULT_INCOMPATIBLE;
+        *base_class = base;
+        return KEEL_RESULT_OK;
+    }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+
+extern "C" KeelResult KeelCs2_WriteEntityField(void* entity_system, void* base_class,
+    const KeelCs2EntityIdentity* entity, const KeelCs2SchemaField* field,
     const void* value, std::uint32_t value_size, void* notify)
 {
     BuiltinType expected{};
-    if (!entity_system || !schema_system || !module || !*module || !entity || !field || !field->declaring_class ||
+    if (!entity_system || !base_class || !entity || !field || !field->declaring_class ||
         !value || !notify || !PublicBuiltin(field->value_type, expected) ||
         field->value_type == KEELS2_SCHEMA_ENTITY_HANDLE || field->value_size != expected.size ||
         field->value_alignment != expected.alignment || value_size != expected.size || field->offset < 0 || value_size > 12)
@@ -839,16 +855,15 @@ extern "C" KeelResult KeelCs2_WriteEntityField(void* entity_system, void* schema
             return KEEL_RESULT_INCOMPATIBLE;
         }
         if (field->value_size - 1 > UINTPTR_MAX - address) return KEEL_RESULT_INCOMPATIBLE;
-        auto* scope = reinterpret_cast<ISchemaSystemTypeScope*>(
-            static_cast<ISchemaSystem*>(schema_system)->FindTypeScopeForModule(module));
-        auto* base = scope ? scope->FindDeclaredClass("CBaseEntity").Get() : nullptr;
-        if (!ValidClass(base)) return KEEL_RESULT_INCOMPATIBLE;
+        auto* base = static_cast<CSchemaClassInfo*>(base_class);
+        if (!ValidClass(base) || !base->m_pszName || std::strcmp(base->m_pszName,"CBaseEntity") != 0)
+            return KEEL_RESULT_INCOMPATIBLE;
         path = {}; visited = 0; found = false; base_offset = 0;
         if (FindBaseOffset(dynamic_class, base, 0, path, 0, visited, found, base_offset) != HierarchyResult::found ||
             !found || base_offset != 0) return KEEL_RESULT_INCOMPATIBLE;
         void** table{};
         std::memcpy(&table, reinterpret_cast<const void*>(instance), sizeof(table));
-        if (!table || table[29] != notify) return KEEL_RESULT_INCOMPATIBLE;
+        if (!table || table[KEELS2_CS2_NETWORK_STATE_CHANGED_SLOT] != notify) return KEEL_RESULT_INCOMPATIBLE;
         if (std::memcmp(reinterpret_cast<const void*>(address), snapshot.data(), field->value_size) == 0)
             return KEEL_RESULT_OK;
         // A full dirty notification also covers scalar fields without requiring
@@ -1477,7 +1492,7 @@ void* StatAddress(void* system, const KeelCs2EntityIdentity& entity, const KeelC
     StatRequire(address % root->m_nAlignment == 0 && pointer_offset+sizeof(void*)-1 <= UINTPTR_MAX-address);
     void** table{};
     std::memcpy(&table,controller,sizeof(table));
-    StatRequire(table == bindings.controller_vtable && table[29] == bindings.notify);
+    StatRequire(table == bindings.controller_vtable && table[KEELS2_CS2_NETWORK_STATE_CHANGED_SLOT] == bindings.notify);
     void* component{};
     std::memcpy(&component,reinterpret_cast<const void*>(address+pointer_offset),sizeof(component));
     StatRequire(component != nullptr,KEEL_RESULT_NOT_READY);

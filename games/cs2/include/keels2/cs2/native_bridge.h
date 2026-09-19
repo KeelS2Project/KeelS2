@@ -14,6 +14,13 @@
 
 #include <stdint.h>
 
+/* The MSVC ABI has one destructor entry; the Itanium ABI has two. */
+#if defined(_WIN32)
+#define KEELS2_CS2_NETWORK_STATE_CHANGED_SLOT 28
+#else
+#define KEELS2_CS2_NETWORK_STATE_CHANGED_SLOT 29
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -176,8 +183,9 @@ KeelResult KeelCs2_ReadEntityField(
     const KeelCs2SchemaField* field,
     void* value,
     uint32_t value_size);
-KeelResult KeelCs2_WriteEntityField(void* entity_system, void* schema_system,
-    const char* module, const KeelCs2EntityIdentity* entity, const KeelCs2SchemaField* field,
+KeelResult KeelCs2_ResolveEntityWriteClass(void* schema_system, const char* module, void** base_class);
+KeelResult KeelCs2_WriteEntityField(void* entity_system, void* base_class,
+    const KeelCs2EntityIdentity* entity, const KeelCs2SchemaField* field,
     const void* value, uint32_t value_size, void* notify);
 KeelResult KeelCs2_CommandCaller(const void* context, int32_t* slot);
 KeelResult KeelCs2_ServerCommand(void* engine_server, const char* command);

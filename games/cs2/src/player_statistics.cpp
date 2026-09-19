@@ -7,8 +7,8 @@ KeelResult ResolvePlayerStatistics(const platform::LoadedModule& module, const s
     KeelCs2PlayerStatisticsBindings& bindings, std::string& error)
 {
     bindings = {};
-    // The existing writer resolver validates the full exact Ubuntu fingerprint
-    // and the NetworkStateChanged entry bytes. It rejects Windows/other builds.
+    // The writer resolver validates the exact platform fingerprint, notification
+    // entry bytes and platform-specific NetworkStateChanged virtual slot.
     void* notify{};
     auto result = ResolveEntityWrites(module,profile,notify,error);
     if (result != KEEL_RESULT_OK) return result;
@@ -19,7 +19,7 @@ KeelResult ResolvePlayerStatistics(const platform::LoadedModule& module, const s
         platform::FindPrimaryVtable(module,"CCSPlayerController_InGameMoneyServices",3,money,error) != platform::ModuleLookup::found ||
         platform::FindPrimaryVtable(module,"CCSPlayerController_ActionTrackingServices",3,tracking,error) != platform::ModuleLookup::found)
         return KEEL_RESULT_INCOMPATIBLE;
-    if (controller[29] != notify)
+    if (controller[KEELS2_CS2_NETWORK_STATE_CHANGED_SLOT] != notify)
     {
         error = "player statistics notification method is incompatible";
         return KEEL_RESULT_INCOMPATIBLE;
