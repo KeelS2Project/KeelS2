@@ -498,6 +498,8 @@ set_target_properties(keels2_game_cs2 PROPERTIES
 keels2_set_output(keels2_game_cs2 "bin/${KEELS2_PLATFORM_DIR}")
 keels2_enable_warnings(keels2_game_cs2)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set_property(TARGET keels2_game_cs2 APPEND PROPERTY LINK_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/games/cs2/adapter_exports.map")
     target_link_options(keels2_game_cs2 PRIVATE
         "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/games/cs2/adapter_exports.map"
         "LINKER:-z,defs"

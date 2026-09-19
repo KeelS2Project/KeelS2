@@ -13,7 +13,9 @@ EXPECTED = {
                 "KeelGameAdapter_QueryPlayers", "KeelGameAdapter_QueryPlayerInput", "KeelGameAdapter_QueryMessaging",
                 "KeelGameAdapter_QueryConVarObservers", "KeelGameAdapter_QueryPlayerManagement",
                 "KeelGameAdapter_QueryEntityWrites", "KeelGameAdapter_QueryRoundControl",
-                "KeelGameAdapter_QueryPlayerStatistics"},
+                "KeelGameAdapter_QueryPlayerStatistics", "KeelGameAdapter_QueryEntityAccess",
+                "KeelGameAdapter_QueryEntityCapture", "KeelGameAdapter_QueryEntityHookData",
+                "KeelGameAdapter_QueryEntityTools"},
     "plugin": {"KeelPlugin_Query", "KeelPlugin_Load", "KeelPlugin_Unload"},
 }
 
