@@ -220,6 +220,16 @@ bool GameAdapterModule::Load(
         }
         entity_tools_ = api;
     }
+    const auto query_construction = SymbolFunction<GameAdapterQueryEntityConstructionFn>(library_.Symbol(kGameAdapterEntityConstructionSymbol));
+    if (query_construction) {
+        GameAdapterEntityConstructionApi api{}; api.size = sizeof(api);
+        if (query_construction(kGameAdapterEntityConstructionVersion,&api) != KEEL_RESULT_OK ||
+            api.size != sizeof(api) || api.api_version != kGameAdapterEntityConstructionVersion ||
+            !api.ready || !api.create || !api.describe || !api.set || !api.teleport || !api.spawn || !api.cancel || !api.visit) {
+            error = "game adapter entity construction API is incompatible"; Reset(); return false;
+        }
+        entity_construction_ = api;
+    }
     const auto query_writes = SymbolFunction<GameAdapterQueryEntityWritesFn>(library_.Symbol(kGameAdapterEntityWritesSymbol));
     if (query_writes)
     {
@@ -338,6 +348,7 @@ void GameAdapterModule::Reset() noexcept
     player_management_ = {};
     entity_writes_ = {};
     entity_tools_ = {};
+    entity_construction_ = {};
     entity_access_ = {};
     entity_capture_ = {};
     entity_hook_data_ = {};

@@ -6,6 +6,11 @@ void* g_native_retained{};
 void* NativeFactory(const char* name, int index)
 {
     if (std::strcmp(name,"prop_dynamic") || index != -1) throw std::runtime_error("factory arguments");
+    if (g_native_mode == 8) {
+        const auto callback = g_native_create_callback;
+        if (callback) callback();
+        return EntityInstance();
+    }
     if (g_native_mode != 1) SetHandle(*Identity(),13);
     Identity()->m_pInstance = EntityInstance();
     EntityInstance()->m_pEntity = Identity();
@@ -213,5 +218,19 @@ int RunNativeConstructionChecks()
     }
     reset();
     if (KeelFixtureKeyValuesMemoryCount()) return 1231;
+    {
+        Store store(backend); std::uint64_t token{}, nested_token{}; IdentityType nested{};
+        g_native_mode = 8;
+        g_native_create_callback = [&] {
+            g_native_mode = 0; g_native_create_callback = {};
+            if (store.Create("prop_dynamic",nested_token,nested) != KEEL_RESULT_OK) throw std::runtime_error("nested factory");
+        };
+        if (store.Create("prop_dynamic",token,identity) != KEEL_RESULT_ALREADY_EXISTS || token || identity.epoch ||
+            store.Count() != 1 || g_native_removes || store.Describe(nested_token,identity) != KEEL_RESULT_OK ||
+            identity.source2_handle != nested.source2_handle || store.Cancel(nested_token) != KEEL_RESULT_OK ||
+            g_native_removes != 1) return 1232;
+    }
+    reset();
+    if (KeelFixtureKeyValuesMemoryCount()) return 1233;
     return 0;
 }

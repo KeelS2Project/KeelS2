@@ -488,6 +488,7 @@ target_include_directories(keels2_game_cs2 PRIVATE
     sdk/include
 )
 target_link_libraries(keels2_game_cs2 PRIVATE
+    keels2_cs2_constructions
     keels2_cs2_native_bridge
     keels2_platform
 )
@@ -500,6 +501,7 @@ set_target_properties(keels2_game_cs2 PROPERTIES
 keels2_set_output(keels2_game_cs2 "bin/${KEELS2_PLATFORM_DIR}")
 keels2_enable_warnings(keels2_game_cs2)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set_target_properties(keels2_game_cs2 PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "$ORIGIN")
     set_property(TARGET keels2_game_cs2 APPEND PROPERTY LINK_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/games/cs2/adapter_exports.map")
     target_link_options(keels2_game_cs2 PRIVATE
@@ -573,6 +575,14 @@ if(BUILD_TESTING)
         NAME game_adapter_loader
         COMMAND keels2_game_adapter_loader_test $<TARGET_FILE_DIR:keels2_game_synthetic>
     )
+    add_executable(keels2_construction_adapter_test tests/construction_adapter.cpp host/src/game_adapter_loader.cpp)
+    target_include_directories(keels2_construction_adapter_test PRIVATE host/src platform/include sdk/include)
+    target_link_libraries(keels2_construction_adapter_test PRIVATE keels2_platform)
+    keels2_enable_warnings(keels2_construction_adapter_test)
+    add_dependencies(keels2_construction_adapter_test keels2_game_cs2 keels2_fake_tier0)
+    add_test(NAME construction_adapter COMMAND ${CMAKE_COMMAND} -E env --unset=LD_LIBRARY_PATH
+        $<TARGET_FILE:keels2_construction_adapter_test> $<TARGET_FILE:keels2_fake_tier0>
+        $<TARGET_FILE:keels2_game_cs2> $<TARGET_FILE:keels2_cs2_keyvalues>)
 
     add_test(
         NAME export_contract

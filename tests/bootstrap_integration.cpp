@@ -2240,12 +2240,14 @@ int main(int argument_count, char** arguments)
     const char* server_name = "server.dll";
     const char* host_name = "keels2_host.dll";
     const char* adapter_name = "keels2_game_cs2.dll";
+    const char* keyvalues_name = "keels2_cs2_keyvalues.dll";
     const char* plugin_extension = ".dll";
 #else
     const char* platform = "linuxsteamrt64";
     const char* server_name = "libserver.so";
     const char* host_name = "libkeels2_host.so";
     const char* adapter_name = "libkeels2_game_cs2.so";
+    const char* keyvalues_name = "libkeels2_cs2_keyvalues.so";
     const char* plugin_extension = ".so";
 #endif
 
@@ -2548,7 +2550,8 @@ int main(int argument_count, char** arguments)
         return 6;
     }
     if (!missing_server && !unknown_build && !missing_host &&
-        (!CopyFile(host_source, host_path) || !CopyFile(adapter_source, adapter_path)))
+        (!CopyFile(host_source, host_path) || !CopyFile(adapter_source, adapter_path) ||
+            !CopyFile(host_source.parent_path()/keyvalues_name,adapter_path.parent_path()/keyvalues_name)))
     {
         return 7;
     }

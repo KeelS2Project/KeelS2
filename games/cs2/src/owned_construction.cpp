@@ -99,6 +99,14 @@ KeelResult OwnedConstructions::Create(const char* class_name, std::uint64_t& tok
         try {
             result = backend_.Create(record->class_name.c_str(),record->identity);
             record->created = result == KEEL_RESULT_OK;
+            if (record->created) for (const auto& other : records_) {
+                if (!other || other == record || !other->created || other->consumed || other->closed) continue;
+                if (other->identity.index == record->identity.index &&
+                    other->identity.source2_handle == record->identity.source2_handle &&
+                    other->identity.epoch == record->identity.epoch) {
+                    record->created = false; result = KEEL_RESULT_ALREADY_EXISTS; break;
+                }
+            }
             if (record->created && !record->closed) result = backend_.Validate(record->identity);
         } catch (...) { result = KEEL_RESULT_ENGINE_FAILURE; }
         if (result != KEEL_RESULT_OK || record->closed) {

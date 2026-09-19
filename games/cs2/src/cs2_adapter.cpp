@@ -8,6 +8,8 @@
 #include <keels2/cs2/player_statistics.h>
 #include <keels2/cs2/entity_writes.h>
 #include <keels2/cs2/entity_tools.h>
+#include <keels2/cs2/entity_construction.h>
+#include <keels2/cs2/native_construction.h>
 #include <keels2/keelhook.hpp>
 #include <keels2/platform/console.h>
 #include <keels2/platform/diagnostic_trace.h>
@@ -37,7 +39,7 @@
 namespace keels2::host
 {
 
-class Cs2Adapter final : public GameAdapter
+class Cs2Adapter final : public GameAdapter, private cs2::ConstructionEnvironment
 {
 private:
     struct InputContext
@@ -217,7 +219,7 @@ private:
 
 public:
     explicit Cs2Adapter(const GameAdapterHostApi& host)
-        : host_(host)
+        : host_(host), construction_backend_(*this), constructions_(construction_backend_)
     {
     }
 
@@ -586,6 +588,8 @@ public:
 
     void Stop() noexcept override
     {
+        construction_stopping_ = true;
+        constructions_.Reset();
         ShutdownSource2Callbacks();
         const bool trace = cvar_ || server_.instance || game_clients_.instance ||
             cvar_interface_.instance || !compatibility_profile_.empty();
@@ -657,6 +661,8 @@ public:
         player_statistics_bindings_ = {};
         entity_write_notify_ = nullptr;
         entity_tool_bindings_ = {}; entity_tool_module_ = {}; entity_tool_classes_.clear();
+        construction_bindings_ = {}; construction_epoch_ = 0;
+        construction_stopping_ = construction_map_shutdown_ = false;
         if (trace)
         {
             platform::AppendShutdownTrace("cs2 interface invalidation complete");
@@ -1881,6 +1887,70 @@ public:
         return KeelCs2_TerminateRound(system,&context,&request,&round_bindings_);
     }
 
+    cs2::OwnedConstructions& Constructions() noexcept { return constructions_; }
+    KeelResult Ready() override
+    {
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (construction_stopping_ || construction_map_shutdown_) return KEEL_RESULT_NOT_READY;
+        if (!construction_bindings_.create) {
+            if (compatibility_profile_.empty()) return KEEL_RESULT_UNSUPPORTED;
+            platform::LoadedModule module; std::string error;
+            if (platform::FindLoadedModule(server_.module_path,module,error) != platform::ModuleLookup::found)
+                return KEEL_RESULT_NOT_READY;
+            const auto result = cs2::ResolveEntityConstruction(module,compatibility_profile_,construction_bindings_,error);
+            if (result != KEEL_RESULT_OK) return result;
+        }
+        void* system{}; std::uint64_t epoch{};
+        const auto result = Current(0,system,epoch);
+        if (result != KEEL_RESULT_OK) return result;
+        if (construction_epoch_ != epoch) {
+            construction_epoch_ = epoch;
+            constructions_.Reset();
+        }
+        return KEEL_RESULT_OK;
+    }
+    KeelResult ResolveBase(void*& base) override
+    {
+        base = nullptr;
+        const auto result = Ready();
+        if (result != KEEL_RESULT_OK) return result;
+        if (!schema_system_.instance || schema_server_module_.empty()) return KEEL_RESULT_NOT_READY;
+        return KeelCs2_ResolveEntityToolBase(schema_system_.instance,schema_server_module_.c_str(),KEELS2_ENTITY_TOOL_TELEPORT,&base);
+    }
+    KeelResult Current(std::uint64_t expected, void*& system, std::uint64_t& epoch) noexcept override
+    {
+        system = nullptr; epoch = 0;
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        try {
+            std::string error;
+            std::scoped_lock lock(schema_entity_mutex_);
+            if (expected && expected != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+            const auto result = CurrentEntitySystemLocked(system,error);
+            if (result != KEEL_RESULT_OK) return result;
+            if (expected && expected != entity_epoch_) { system = nullptr; return KEEL_RESULT_NOT_FOUND; }
+            epoch = entity_epoch_; return KEEL_RESULT_OK;
+        } catch (...) { system = nullptr; return KEEL_RESULT_ENGINE_FAILURE; }
+    }
+    KeelCs2EntityConstructionBindings Bindings() const noexcept override { return construction_bindings_; }
+    KeelResult TeleportTarget(const char* name, KeelCs2EntityToolBindings& bindings, KeelCs2EntityToolClass& target) override
+    {
+        bindings = {}; target = {};
+        std::uint32_t capabilities{};
+        auto result = EntityToolCapabilities(capabilities);
+        if (result != KEEL_RESULT_OK) return result;
+        std::string error;
+        auto found = entity_tool_classes_.find(name);
+        if (found != entity_tool_classes_.end()) target = found->second;
+        else {
+            result = cs2::ResolveEntityToolClass(entity_tool_module_,name,entity_tool_bindings_,target,error);
+            if (result != KEEL_RESULT_OK) return result;
+            if (entity_tool_classes_.size() >= 128) entity_tool_classes_.clear();
+            entity_tool_classes_.emplace(name,target);
+        }
+        bindings = entity_tool_bindings_;
+        return KEEL_RESULT_OK;
+    }
+
     KeelResult EntityToolCapabilities(std::uint32_t& capabilities)
     {
         capabilities = 0;
@@ -2398,9 +2468,13 @@ private:
 
     void InvalidateEntityEpoch() noexcept
     {
-        std::scoped_lock lock(schema_entity_mutex_);
-        AdvanceEntityEpochLocked();
-        current_entity_system_ = nullptr;
+        {
+            std::scoped_lock lock(schema_entity_mutex_);
+            AdvanceEntityEpochLocked();
+            current_entity_system_ = nullptr;
+        }
+        constructions_.Reset();
+        construction_epoch_ = 0;
     }
 
     KeelResult CurrentEntitySystemLocked(void*& system, std::string& error)
@@ -3311,6 +3385,7 @@ private:
         }
         if (invalidate)
         {
+            adapter->construction_map_shutdown_ = true;
             adapter->InvalidateEntityEpoch();
         }
         return KH_ACTION_CONTINUE;
@@ -3334,6 +3409,7 @@ private:
         if (emit)
         {
             adapter->InvalidateEntityEpoch();
+            adapter->construction_map_shutdown_ = false;
             KeelSource2LevelInit payload{
                 sizeof(KeelSource2LevelInit),
                 0,
@@ -3358,6 +3434,8 @@ private:
         }
         if (emit)
         {
+            adapter->construction_map_shutdown_ = true;
+            adapter->constructions_.Reset();
             adapter->InvalidateEntityEpoch();
             KeelSource2LevelShutdown payload{sizeof(KeelSource2LevelShutdown), 0};
             static_cast<void>(adapter->EmitSource2(KEELS2_SOURCE2_LEVEL_SHUTDOWN, payload));
@@ -3990,6 +4068,12 @@ private:
     GameCommandHandle next_command_{1};
     std::unordered_map<GameCommandHandle, std::unique_ptr<CommandEntry>> commands_;
     std::vector<std::unique_ptr<CommandEntry>> retired_commands_;
+    KeelCs2EntityConstructionBindings construction_bindings_{};
+    std::uint64_t construction_epoch_{};
+    bool construction_stopping_{};
+    bool construction_map_shutdown_{};
+    cs2::NativeConstructionBackend construction_backend_;
+    cs2::OwnedConstructions constructions_;
 };
 
 namespace
@@ -4374,5 +4458,54 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityTool
         try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->ApplyEntityTool(*entity,kind,request,model); }
         catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
     };
+    return KEEL_RESULT_OK;
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityConstruction(
+    std::uint32_t version, keels2::host::GameAdapterEntityConstructionApi* api) noexcept
+{
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {};
+    if (version != keels2::host::kGameAdapterEntityConstructionVersion) return KEEL_RESULT_INCOMPATIBLE;
+    using Adapter = keels2::host::GameAdapter;
+    using Cs2 = keels2::host::Cs2Adapter;
+    using Identity = keels2::host::GameEntityIdentity;
+    *api = {sizeof(*api),version,
+        [](Adapter* adapter) noexcept -> KeelResult {
+            if (!adapter) return KEEL_RESULT_INVALID_ARGUMENT;
+            try { return static_cast<Cs2*>(adapter)->Ready(); }
+            catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        },
+        [](Adapter* adapter, const char* name, std::uint64_t* token, Identity* identity) noexcept -> KeelResult {
+            if (token) *token = 0;
+            if (identity) *identity = {};
+            if (!adapter || !name || !token || !identity) return KEEL_RESULT_INVALID_ARGUMENT;
+            return static_cast<Cs2*>(adapter)->Constructions().Create(name,*token,*identity);
+        },
+        [](Adapter* adapter, std::uint64_t token, Identity* identity) noexcept -> KeelResult {
+            if (identity) *identity = {};
+            if (!adapter || !identity) return KEEL_RESULT_INVALID_ARGUMENT;
+            return static_cast<Cs2*>(adapter)->Constructions().Describe(token,*identity);
+        },
+        [](Adapter* adapter, std::uint64_t token, const KeelEntityKeyValue* value) noexcept -> KeelResult {
+            if (!adapter || !value) return KEEL_RESULT_INVALID_ARGUMENT;
+            return static_cast<Cs2*>(adapter)->Constructions().Set(token,*value);
+        },
+        [](Adapter* adapter, std::uint64_t token, const KeelEntityTeleport* request) noexcept -> KeelResult {
+            if (!adapter || !request) return KEEL_RESULT_INVALID_ARGUMENT;
+            return static_cast<Cs2*>(adapter)->Constructions().Teleport(token,*request);
+        },
+        [](Adapter* adapter, std::uint64_t token, KeelBool* invoked) noexcept -> KeelResult {
+            if (invoked) *invoked = KEEL_FALSE;
+            if (!adapter || !invoked) return KEEL_RESULT_INVALID_ARGUMENT;
+            return static_cast<Cs2*>(adapter)->Constructions().Spawn(token,*invoked);
+        },
+        [](Adapter* adapter, std::uint64_t token) noexcept -> KeelResult {
+            return adapter ? static_cast<Cs2*>(adapter)->Constructions().Cancel(token) : KEEL_RESULT_INVALID_ARGUMENT;
+        },
+        [](Adapter* adapter, std::uint64_t token, const char* name, KeelEntityAccessCallback callback, void* data) noexcept -> KeelResult {
+            if (!adapter) return KEEL_RESULT_INVALID_ARGUMENT;
+            return static_cast<Cs2*>(adapter)->Constructions().Visit(token,name,callback,data);
+        }};
     return KEEL_RESULT_OK;
 }

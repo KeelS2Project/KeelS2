@@ -8,6 +8,7 @@
 #include <keels2/player_management.h>
 #include <keels2/entity_writes.h>
 #include <keels2/entity_tools.h>
+#include <keels2/entity_keyvalues.h>
 #include <keels2/entity_access.h>
 #include <keels2/entity_hook_data.h>
 #include <keels2/round_control.h>
@@ -296,6 +297,26 @@ struct GameAdapterEntityToolsApi
         const KeelEntityTeleport*, const char*) noexcept;
 };
 using GameAdapterQueryEntityToolsFn = KeelResult (*)(std::uint32_t, GameAdapterEntityToolsApi*) noexcept;
+
+inline constexpr const char* kGameAdapterEntityConstructionSymbol = "KeelGameAdapter_QueryEntityConstruction";
+inline constexpr std::uint32_t kGameAdapterEntityConstructionVersion = 1;
+struct GameAdapterEntityConstructionApi
+{
+    std::uint32_t size;
+    std::uint32_t api_version;
+    // Main-thread pending tokens belong to this adapter instance. The host
+    // enforces plugin ownership and retains the adapter across game callbacks.
+    KeelResult (*ready)(GameAdapter*) noexcept;
+    KeelResult (*create)(GameAdapter*, const char*, std::uint64_t*, GameEntityIdentity*) noexcept;
+    KeelResult (*describe)(GameAdapter*, std::uint64_t, GameEntityIdentity*) noexcept;
+    KeelResult (*set)(GameAdapter*, std::uint64_t, const KeelEntityKeyValue*) noexcept;
+    KeelResult (*teleport)(GameAdapter*, std::uint64_t, const KeelEntityTeleport*) noexcept;
+    // Invoked consumes the token even on failure; an invoked spawn is never retried.
+    KeelResult (*spawn)(GameAdapter*, std::uint64_t, KeelBool*) noexcept;
+    KeelResult (*cancel)(GameAdapter*, std::uint64_t) noexcept;
+    KeelResult (*visit)(GameAdapter*, std::uint64_t, const char*, KeelEntityAccessCallback, void*) noexcept;
+};
+using GameAdapterQueryEntityConstructionFn = KeelResult (*)(std::uint32_t, GameAdapterEntityConstructionApi*) noexcept;
 
 inline constexpr const char* kGameAdapterEntityWritesSymbol = "KeelGameAdapter_QueryEntityWrites";
 inline constexpr std::uint32_t kGameAdapterEntityWritesVersion = 1;

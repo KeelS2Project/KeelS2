@@ -7,6 +7,7 @@
         KeelGameAdapter_QueryPlayerManagement;
         KeelGameAdapter_QueryEntityWrites;
         KeelGameAdapter_QueryEntityTools;
+        KeelGameAdapter_QueryEntityConstruction;
         KeelGameAdapter_QueryEntityAccess;
         KeelGameAdapter_QueryEntityCapture;
         KeelGameAdapter_QueryEntityHookData;
