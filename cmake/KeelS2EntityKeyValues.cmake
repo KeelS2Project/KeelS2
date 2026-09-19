@@ -43,7 +43,7 @@ else()
         "${CMAKE_CURRENT_SOURCE_DIR}/games/cs2/keyvalues_exports.map")
 endif()
 
-add_library(keels2_cs2_constructions STATIC games/cs2/src/owned_construction.cpp games/cs2/src/native_construction.cpp)
+add_library(keels2_cs2_constructions STATIC games/cs2/src/owned_construction.cpp games/cs2/src/native_construction.cpp games/cs2/src/native_input.cpp)
 target_include_directories(keels2_cs2_constructions PUBLIC games/cs2/include sdk/include)
 target_link_libraries(keels2_cs2_constructions PUBLIC keels2_cs2_keyvalues keels2_cs2_native_bridge)
 keels2_enable_warnings(keels2_cs2_constructions)

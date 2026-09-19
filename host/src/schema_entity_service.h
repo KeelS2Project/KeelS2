@@ -34,6 +34,7 @@ public:
     const KeelPlayerManagementApi& PlayerManagementApi() const noexcept;
     const KeelEntityWritesApi& EntityWritesApi() const noexcept;
     const KeelEntityToolsApi& EntityToolsApi() const noexcept;
+    const KeelEntityInputApi& EntityInputApi() const noexcept;
     const KeelEntityConstructionApi& EntityConstructionApi() const noexcept;
     const KeelEntityAccessApi& EntityAccessApi() const noexcept;
     const KeelEntityCaptureApi& EntityCaptureApi() const noexcept;
@@ -44,6 +45,9 @@ public:
     bool Shutdown();
 
 private:
+    static KeelResult InputCapabilitiesEntry(KeelPluginHandle, std::uint32_t*, std::uint32_t*);
+    static KeelResult DispatchInputEntry(KeelPluginHandle, KeelEntityHandle, const KeelEntityInputRequest*, KeelBool*);
+    KeelResult EntityInput(KeelPluginHandle, KeelEntityHandle, const KeelEntityInputRequest*, std::uint32_t*, std::uint32_t*, KeelBool*);
     static KeelResult ReadDamageEntry(KeelPluginHandle plugin, const void* record, KeelDamageInfo* output);
     static KeelResult WriteDamageEntry(KeelPluginHandle plugin, void* record, const KeelDamageEdit* edit);
     static KeelResult WeaponMatchesEntry(KeelPluginHandle plugin, KeelEntityHandle pawn, const void* candidate, KeelBool* matches);
@@ -212,6 +216,8 @@ private:
     KeelPlayerManagementApi player_management_api_{};
     KeelEntityWritesApi entity_writes_api_{};
     KeelEntityToolsApi entity_tools_api_{};
+    KeelEntityInputApi entity_input_api_{};
+    unsigned entity_input_depth_{};
     KeelEntityConstructionApi entity_construction_api_{};
     unsigned construction_depth_{};
     unsigned entity_tools_depth_ = 0;

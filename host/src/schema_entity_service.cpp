@@ -37,6 +37,7 @@ SchemaEntityService::SchemaEntityService(Host& host, GameAdapter& adapter)
     entity_hook_data_api_ = {sizeof(KeelEntityHookDataApi), KEELS2_ENTITY_HOOK_DATA_API_VERSION, &ReadDamageEntry, &WriteDamageEntry, &WeaponMatchesEntry};
     entity_capture_api_ = {sizeof(KeelEntityCaptureApi), KEELS2_ENTITY_CAPTURE_API_VERSION, &CaptureEntityEntry};
     entity_access_api_ = {sizeof(KeelEntityAccessApi), KEELS2_ENTITY_ACCESS_API_VERSION, &VisitEntitiesEntry};
+    entity_input_api_ = {sizeof(KeelEntityInputApi),KEELS2_ENTITY_INPUT_API_VERSION,&InputCapabilitiesEntry,&DispatchInputEntry};
     entity_tools_api_ = {sizeof(KeelEntityToolsApi),KEELS2_ENTITY_TOOLS_API_VERSION,&ToolCapabilitiesEntry,&TeleportEntry,&SetModelEntry,&RemoveEntry};
     entity_construction_api_ = {sizeof(KeelEntityConstructionApi),KEELS2_ENTITY_CONSTRUCTION_API_VERSION,
         &ConstructionReadyEntry,&CreateEntityEntry,&DescribeConstructionEntry,&SetConstructionEntry,

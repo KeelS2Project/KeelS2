@@ -8,6 +8,7 @@
 #include <keels2/player_management.h>
 #include <keels2/entity_writes.h>
 #include <keels2/entity_tools.h>
+#include <keels2/entity_input.h>
 #include <keels2/entity_keyvalues.h>
 #include <keels2/entity_access.h>
 #include <keels2/entity_hook_data.h>
@@ -285,6 +286,27 @@ struct GameAdapterEntityAccessApi
         KeelEntityAccessCallback, void*) noexcept;
 };
 using GameAdapterQueryEntityAccessFn = KeelResult (*)(std::uint32_t, GameAdapterEntityAccessApi*) noexcept;
+
+struct GameEntityInputRequest
+{
+    GameEntityIdentity target{}, activator{}, caller{}, value_entity{};
+    const char* input{};
+    KeelEntityInputValue value{};
+    KeelBool queued{};
+    float delay{};
+};
+inline constexpr const char* kGameAdapterEntityInputSymbol = "KeelGameAdapter_QueryEntityInput";
+inline constexpr std::uint32_t kGameAdapterEntityInputVersion = 1;
+struct GameAdapterEntityInputApi
+{
+    std::uint32_t size;
+    std::uint32_t api_version;
+    KeelResult (*capabilities)(GameAdapter*, std::uint32_t*, std::uint32_t*) noexcept;
+    // Optional identities are all-zero; supplied identities share target epoch.
+    // Values/name are readable through this call and copied before callbacks.
+    KeelResult (*dispatch)(GameAdapter*, const GameEntityInputRequest*, KeelBool*) noexcept;
+};
+using GameAdapterQueryEntityInputFn = KeelResult (*)(std::uint32_t, GameAdapterEntityInputApi*) noexcept;
 
 inline constexpr const char* kGameAdapterEntityToolsSymbol = "KeelGameAdapter_QueryEntityTools";
 inline constexpr std::uint32_t kGameAdapterEntityToolsVersion = 1;

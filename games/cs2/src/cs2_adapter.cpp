@@ -8,6 +8,8 @@
 #include <keels2/cs2/player_statistics.h>
 #include <keels2/cs2/entity_writes.h>
 #include <keels2/cs2/entity_tools.h>
+#include <keels2/cs2/entity_input.h>
+#include <keels2/cs2/native_input.h>
 #include <keels2/cs2/entity_construction.h>
 #include <keels2/cs2/native_construction.h>
 #include <keels2/keelhook.hpp>
@@ -39,7 +41,7 @@
 namespace keels2::host
 {
 
-class Cs2Adapter final : public GameAdapter, private cs2::ConstructionEnvironment
+class Cs2Adapter final : public GameAdapter, private cs2::ConstructionEnvironment, private cs2::InputEnvironment
 {
 private:
     struct InputContext
@@ -660,6 +662,7 @@ public:
         round_bindings_ = {};
         player_statistics_bindings_ = {};
         entity_write_notify_ = nullptr;
+        entity_input_bindings_ = {};
         entity_tool_bindings_ = {}; entity_tool_module_ = {}; entity_tool_classes_.clear();
         construction_bindings_ = {}; construction_epoch_ = 0;
         construction_stopping_ = construction_map_shutdown_ = false;
@@ -1949,6 +1952,41 @@ public:
         }
         bindings = entity_tool_bindings_;
         return KEEL_RESULT_OK;
+    }
+
+    KeelResult InputCapabilities(std::uint32_t& direct, std::uint32_t& queued) override
+    {
+        direct = queued = 0;
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (construction_stopping_ || construction_map_shutdown_) return KEEL_RESULT_NOT_READY;
+        if (!entity_input_bindings_.accept) {
+            if (compatibility_profile_.empty()) return KEEL_RESULT_UNSUPPORTED;
+            platform::LoadedModule module; std::string error;
+            if (platform::FindLoadedModule(server_.module_path,module,error) != platform::ModuleLookup::found) return KEEL_RESULT_NOT_READY;
+            const auto result = cs2::ResolveEntityInput(module,compatibility_profile_,entity_input_bindings_,error);
+            if (result != KEEL_RESULT_OK) return result;
+        }
+        void* system{}; std::uint64_t epoch{};
+        const auto result = InputCurrent(0,system,epoch);
+        if (result != KEEL_RESULT_OK) return result;
+        direct = (1u << (KEELS2_INPUT_ENTITY+1))-1;
+        queued = direct & ~(1u << KEELS2_INPUT_COLOR);
+        return KEEL_RESULT_OK;
+    }
+    KeelResult InputCurrent(std::uint64_t expected, void*& system, std::uint64_t& epoch) noexcept override
+    {
+        system = nullptr; epoch = 0;
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (construction_stopping_ || construction_map_shutdown_) return KEEL_RESULT_NOT_READY;
+        return Current(expected,system,epoch);
+    }
+    KeelCs2EntityInputBindings InputBindings() const noexcept override { return entity_input_bindings_; }
+    KeelResult DispatchInput(const GameEntityInputRequest& request, KeelBool& invoked)
+    {
+        invoked = KEEL_FALSE;
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        cs2::NativeInputBackend backend(*this);
+        return backend.Dispatch(request,invoked);
     }
 
     KeelResult EntityToolCapabilities(std::uint32_t& capabilities)
@@ -4009,6 +4047,7 @@ private:
     KeelCs2PlayerStatisticsBindings player_statistics_bindings_{};
     unsigned active_stat_calls_{};
     void* entity_write_notify_{};
+    KeelCs2EntityInputBindings entity_input_bindings_{};
     KeelCs2EntityToolBindings entity_tool_bindings_{};
     platform::LoadedModule entity_tool_module_;
     std::unordered_map<std::string,KeelCs2EntityToolClass> entity_tool_classes_;
@@ -4434,6 +4473,29 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityAcce
         std::uint32_t count, KeelEntityAccessCallback callback, void* user_data) noexcept {
         if (!adapter) return KEEL_RESULT_INVALID_ARGUMENT;
         try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->VisitEntities(entities, count, callback, user_data); }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    };
+    return KEEL_RESULT_OK;
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityInput(
+    std::uint32_t version, keels2::host::GameAdapterEntityInputApi* api) noexcept
+{
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {};
+    if (version != keels2::host::kGameAdapterEntityInputVersion) return KEEL_RESULT_INCOMPATIBLE;
+    api->size = sizeof(*api); api->api_version = version;
+    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* direct, std::uint32_t* queued) noexcept {
+        if (direct) *direct = 0;
+        if (queued) *queued = 0;
+        if (!adapter || !direct || !queued) return KEEL_RESULT_INVALID_ARGUMENT;
+        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->InputCapabilities(*direct,*queued); }
+        catch (...) { *direct = *queued = 0; return KEEL_RESULT_ENGINE_FAILURE; }
+    };
+    api->dispatch = [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityInputRequest* request, KeelBool* invoked) noexcept {
+        if (invoked) *invoked = KEEL_FALSE;
+        if (!adapter || !request || !invoked) return KEEL_RESULT_INVALID_ARGUMENT;
+        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->DispatchInput(*request,*invoked); }
         catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
     };
     return KEEL_RESULT_OK;

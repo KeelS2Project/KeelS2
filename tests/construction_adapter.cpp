@@ -38,6 +38,15 @@ int main(int argc, char** argv)
         api.size = sizeof(api);
         CHECK(query(1,&api) == KEEL_RESULT_OK && api.size == sizeof(api) && api.api_version == 1 &&
             api.ready && api.create && api.describe && api.set && api.teleport && api.spawn && api.cancel && api.visit);
+        const auto query_input = Function<GameAdapterQueryEntityInputFn>(library.Symbol(kGameAdapterEntityInputSymbol));
+        CHECK(query_input);
+        GameAdapterEntityInputApi input{};
+        CHECK(query_input(1,nullptr) == KEEL_RESULT_INVALID_ARGUMENT);
+        CHECK(query_input(1,&input) == KEEL_RESULT_INVALID_ARGUMENT);
+        input.size = sizeof(input);
+        CHECK(query_input(99,&input) == KEEL_RESULT_INCOMPATIBLE && !input.size && !input.dispatch);
+        input.size = sizeof(input);
+        CHECK(query_input(1,&input) == KEEL_RESULT_OK && input.size == sizeof(input) && input.api_version == 1 && input.capabilities && input.dispatch);
         const GameAdapterHostApi host{sizeof(host),kGameAdapterAbiVersion,[]() noexcept { return 1u; },[]() noexcept {}};
 #if defined(_WIN32)
         constexpr const char* platform = "win64";
@@ -47,10 +56,20 @@ int main(int argc, char** argv)
         GameAdapterModule module;
         if (!module.Load(directory,"cs2",platform,host,error)) throw std::runtime_error(error);
         CHECK(module.EntityConstruction().api_version == 1 && module.EntityConstruction().create == api.create);
+        CHECK(module.EntityInput().dispatch == input.dispatch && module.EntityInput().api_version == 1);
         auto* adapter = module.Get();
         std::uint64_t token = 99;
         GameEntityIdentity identity{3,4,5};
         KeelBool invoked = KEEL_TRUE;
+        std::uint32_t direct = 99, queued = 99;
+        GameEntityInputRequest input_request{};
+        CHECK(input.capabilities(nullptr,&direct,&queued) == KEEL_RESULT_INVALID_ARGUMENT && !direct && !queued);
+        CHECK(input.capabilities(adapter,nullptr,&queued) == KEEL_RESULT_INVALID_ARGUMENT && !queued);
+        CHECK(input.capabilities(adapter,&direct,&queued) == KEEL_RESULT_WRONG_THREAD && !direct && !queued);
+        CHECK(input.dispatch(nullptr,&input_request,&invoked) == KEEL_RESULT_INVALID_ARGUMENT && !invoked);
+        CHECK(input.dispatch(adapter,nullptr,&invoked) == KEEL_RESULT_INVALID_ARGUMENT && !invoked);
+        CHECK(input.dispatch(adapter,&input_request,nullptr) == KEEL_RESULT_INVALID_ARGUMENT);
+        CHECK(input.dispatch(adapter,&input_request,&invoked) == KEEL_RESULT_WRONG_THREAD && !invoked);
         CHECK(api.ready(nullptr) == KEEL_RESULT_INVALID_ARGUMENT);
         CHECK(api.create(nullptr,"prop_dynamic",&token,&identity) == KEEL_RESULT_INVALID_ARGUMENT && !token && !identity.epoch);
         CHECK(api.spawn(nullptr,1,&invoked) == KEEL_RESULT_INVALID_ARGUMENT && !invoked);
@@ -68,6 +87,7 @@ int main(int argc, char** argv)
             *static_cast<bool*>(data) = true; return KEEL_RESULT_OK;
         },&visited) == KEEL_RESULT_WRONG_THREAD && !visited);
         adapter->Stop(); module.Reset();
+        CHECK(!module.EntityInput().size && !module.EntityInput().dispatch);
         CHECK(!module.EntityConstruction().size && !module.EntityConstruction().create);
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 2; }

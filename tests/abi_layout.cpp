@@ -4,6 +4,7 @@
 #include <keels2/cs2/cvar_abi.h>
 #include <keels2/entities.h>
 #include <keels2/entity_construction.h>
+#include <keels2/entity_input.h>
 #include <keels2/game_adapter.hpp>
 #include <keels2/keelhook.hpp>
 #include <keels2/lifecycle.h>
@@ -360,3 +361,8 @@ int main()
 {
     return 0;
 }
+
+static_assert(sizeof(KeelEntityInputApi) == 24);
+static_assert(sizeof(KeelEntityInputValue) == 40);
+static_assert(sizeof(KeelEntityInputRequest) == 88);
+static_assert(std::is_standard_layout_v<KeelEntityInputRequest>);

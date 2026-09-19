@@ -127,3 +127,114 @@ int RunEntityInputChecks()
     KeelFixtureKeyValuesMemoryStop(); g_input_handle.Get()->m_sTypeName.Purge(); Reset();
     return 0;
 }
+
+class NativeInputEnvironment final : public keels2::cs2::InputEnvironment
+{
+public:
+    std::uint64_t epoch{17};
+    bool stopping{}, null_system{};
+    unsigned acquisitions{};
+    std::size_t allocations_at_acquisition{};
+    KeelResult capabilities_result{KEEL_RESULT_OK};
+    std::function<void()> on_capabilities;
+    KeelResult InputCapabilities(std::uint32_t& direct, std::uint32_t& queued) override {
+        const auto callback = on_capabilities; if (callback) callback();
+        direct = 511; queued = 383; return capabilities_result;
+    }
+    KeelResult InputCurrent(std::uint64_t expected, void*& system, std::uint64_t& current) noexcept override {
+        ++acquisitions; allocations_at_acquisition = KeelFixtureKeyValuesMemoryCount();
+        system = nullptr; current = 0;
+        if (stopping) return KEEL_RESULT_NOT_READY;
+        if (epoch != expected) return KEEL_RESULT_NOT_FOUND;
+        system = null_system ? nullptr : EntitySystem(); current = epoch; return KEEL_RESULT_OK;
+    }
+    KeelCs2EntityInputBindings InputBindings() const noexcept override {
+        return {FunctionAddress(&InputEntityFixture),FunctionAddress(&QueueEntityInputFixture)};
+    }
+};
+int RunNativeInputChecks()
+{
+    InputFixture(0); KeelFixtureKeyValuesMemoryStart();
+    NativeInputEnvironment environment; keels2::cs2::NativeInputBackend backend(environment);
+    KeelCs2EntityIdentity target{}, controller{};
+    if (KeelCs2_FindEntityByIndex(EntitySystem(),kEntityIndex,&target) != KEEL_RESULT_OK ||
+        KeelCs2_FindEntityByIndex(EntitySystem(),4,&controller) != KEEL_RESULT_OK) return 1330;
+    keels2::host::GameEntityInputRequest request{};
+    request.target = {target.index,target.source2_handle,environment.epoch};
+    request.activator = {controller.index,controller.source2_handle,environment.epoch};
+    request.caller = request.target;
+    request.input = "Enable"; request.value.size = sizeof(request.value);
+    g_io_mode = 0; g_io_source = nullptr; g_io_activator = g_controller_storage.data(); g_io_caller = EntityInstance();
+    KeelBool invoked{};
+    const auto call = [&] { invoked = KEEL_TRUE; return backend.Dispatch(request,invoked); };
+    for (unsigned type = 0; type <= 8; ++type) {
+        g_io_expected = {}; g_io_expected.size = sizeof(g_io_expected); g_io_expected.type = type;
+        g_io_expected.string_value = "input value"; g_io_expected.int_value = 1; g_io_expected.float_value = -2.5f;
+        g_io_expected.vector_value[1] = 17; g_io_expected.color_value[3] = 255;
+        g_io_expected.entity_handle = controller.source2_handle;
+        request.value.type = type; request.value.string_value = g_io_expected.string_value;
+        request.value.int_value = g_io_expected.int_value; request.value.float_value = g_io_expected.float_value;
+        std::memcpy(request.value.vector_value,g_io_expected.vector_value,sizeof(request.value.vector_value));
+        std::memcpy(request.value.color_value,g_io_expected.color_value,sizeof(request.value.color_value));
+        request.value_entity = type == KEELS2_INPUT_ENTITY ? request.activator : keels2::host::GameEntityIdentity{};
+        request.queued = KEEL_FALSE; request.delay = 0;
+        if (call() != KEEL_RESULT_OK || !invoked || !g_io_arguments || KeelFixtureKeyValuesMemoryCount()) return 1331;
+        request.queued = KEEL_TRUE; request.delay = 1.25f; const auto before = g_io_calls;
+        const auto result = call();
+        if (type == KEELS2_INPUT_COLOR) {
+            if (result != KEEL_RESULT_UNSUPPORTED || invoked || g_io_calls != before) return 1332;
+        } else {
+            if (result != KEEL_RESULT_OK || !invoked || !g_io_arguments || !g_io_copy ||
+                KeelFixtureVariantInspect(g_io_copy,&g_io_expected)) return 1333;
+            KeelFixtureVariantRelease(g_io_copy); g_io_copy = nullptr;
+        }
+        if (KeelFixtureKeyValuesMemoryCount()) return 1334;
+    }
+    request.queued = KEEL_FALSE; request.delay = 0; request.value_entity = {};
+    char name[] = "Enable", text[] = "copied";
+    request.input = name; request.value.type = KEELS2_INPUT_STRING; request.value.string_value = text;
+    g_io_expected.type = KEELS2_INPUT_STRING; g_io_expected.string_value = "copied";
+    environment.on_capabilities = [&] {
+        name[0] = text[0] = 'X'; request.target = {}; request.value.type = KEELS2_INPUT_VOID;
+    };
+    if (call() != KEEL_RESULT_OK || !invoked || !g_io_arguments || environment.allocations_at_acquisition != 2 ||
+        KeelFixtureKeyValuesMemoryCount()) return 1335;
+    environment.on_capabilities = {};
+    request.target = {target.index,target.source2_handle,environment.epoch}; request.input = "Enable";
+    request.value.type = KEELS2_INPUT_STRING; request.value.string_value = "copied";
+    const auto reject = [&](KeelResult expected) {
+        const auto before = g_io_calls;
+        return call() == expected && !invoked && g_io_calls == before && !KeelFixtureKeyValuesMemoryCount();
+    };
+    for (int after : {0,1}) for (bool throws : {false,true}) {
+        KeelFixtureKeyValuesMemoryFailAfter(after,throws);
+        const auto before = environment.acquisitions;
+        const bool valid = reject(KEEL_RESULT_ENGINE_FAILURE);
+        KeelFixtureKeyValuesMemoryFailAfter(-1,false);
+        if (!valid || before != environment.acquisitions) return 1336;
+    }
+    environment.on_capabilities = [&] { ++environment.epoch; };
+    if (!reject(KEEL_RESULT_NOT_FOUND)) return 1337;
+    environment.on_capabilities = {}; --environment.epoch;
+    environment.on_capabilities = [&] { environment.stopping = true; };
+    if (!reject(KEEL_RESULT_NOT_READY)) return 1338;
+    environment.on_capabilities = {}; environment.stopping = false;
+    environment.null_system = true;
+    if (!reject(KEEL_RESULT_NOT_FOUND)) return 1339;
+    environment.null_system = false; environment.capabilities_result = KEEL_RESULT_UNSUPPORTED;
+    if (!reject(KEEL_RESULT_UNSUPPORTED)) return 1340;
+    environment.capabilities_result = KEEL_RESULT_OK;
+    ++request.activator.epoch;
+    if (!reject(KEEL_RESULT_NOT_FOUND)) return 1341;
+    --request.activator.epoch; request.value_entity.index = 4;
+    if (!reject(KEEL_RESULT_INVALID_ARGUMENT)) return 1342;
+    request.value_entity = {};
+    environment.on_capabilities = [&] { Identity()->m_flags = EF_MARKED_FOR_DELETE; };
+    if (!reject(KEEL_RESULT_NOT_FOUND)) return 1343;
+    environment.on_capabilities = {}; Identity()->m_flags = static_cast<EntityFlags_t>(0);
+    g_io_mode = 2;
+    if (call() != KEEL_RESULT_ENGINE_FAILURE || !invoked || !g_io_arguments || KeelFixtureKeyValuesMemoryCount()) return 1344;
+    g_io_mode = 0;
+    KeelFixtureKeyValuesMemoryStop(); g_input_handle.Get()->m_sTypeName.Purge(); Reset();
+    return 0;
+}
