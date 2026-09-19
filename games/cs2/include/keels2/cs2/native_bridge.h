@@ -6,6 +6,7 @@
 #include <keels2/player_actions.h>
 #include <keels2/player_management.h>
 #include <keels2/entity_writes.h>
+#include <keels2/entity_tools.h>
 #include <keels2/entity_hook_data.h>
 #include <keels2/round_control.h>
 #include <keels2/player_statistics.h>
@@ -26,6 +27,25 @@ extern "C" {
 #endif
 
 typedef void (*KeelCs2GameEventCallback)(void* event, const char* name, void* user_data);
+
+typedef struct KeelCs2EntityToolBindings
+{
+    void* set_model;
+    void* remove;
+    uint32_t teleport_slot;
+    uint32_t reserved;
+} KeelCs2EntityToolBindings;
+typedef struct KeelCs2EntityToolClass
+{
+    void** vtable;
+    void* teleport;
+} KeelCs2EntityToolClass;
+typedef struct KeelCs2EntityToolContext
+{
+    void* class_info;
+    void* base_class;
+    char class_name[256];
+} KeelCs2EntityToolContext;
 
 typedef struct KeelCs2SchemaField
 {
@@ -183,6 +203,12 @@ KeelResult KeelCs2_ReadEntityField(
     const KeelCs2SchemaField* field,
     void* value,
     uint32_t value_size);
+KeelResult KeelCs2_ResolveEntityToolBase(void* schema_system, const char* module, uint32_t kind, void** output);
+KeelResult KeelCs2_PrepareEntityTool(void* system, const KeelCs2EntityIdentity* entity, void* base,
+    KeelCs2EntityToolContext* context);
+KeelResult KeelCs2_ApplyEntityTool(void* system, const KeelCs2EntityIdentity* entity,
+    const KeelCs2EntityToolContext* context, const KeelCs2EntityToolBindings* bindings,
+    const KeelCs2EntityToolClass* target, uint32_t kind, const KeelEntityTeleport* request, const char* model);
 KeelResult KeelCs2_ResolveEntityWriteClass(void* schema_system, const char* module, void** base_class);
 KeelResult KeelCs2_WriteEntityField(void* entity_system, void* base_class,
     const KeelCs2EntityIdentity* entity, const KeelCs2SchemaField* field,

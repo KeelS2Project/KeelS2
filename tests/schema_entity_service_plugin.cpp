@@ -1,5 +1,6 @@
 #include <keels2/player_management.h>
 #include <keels2/entity_writes.h>
+#include <keels2/entity_tools.h>
 #include <keels2/entity_access.h>
 #include <keels2/entity_hook_data.h>
 #include "entity_hook_data_fixture.h"
@@ -355,6 +356,15 @@ private:
         }
         if (g_api->query_service(g_owner, KEELS2_ENTITY_WRITES_SERVICE_NAME, 1, &raw) != KEEL_RESULT_OK || !raw)
         { LogError("entity write wrong-thread service lookup failed"); return; }
+        const void* tools_raw{};
+        if (g_api->query_service(g_owner,KEELS2_ENTITY_TOOLS_SERVICE_NAME,1,&tools_raw) != KEEL_RESULT_OK || !tools_raw)
+        { LogError("entity tools wrong-thread lookup failed"); return; }
+        const auto* tools = static_cast<const KeelEntityToolsApi*>(tools_raw);
+        KeelEntityTeleport teleport{sizeof(teleport),1,{1,2,3},{},{}};
+        if (tools->capabilities(g_owner,&capabilities) != KEEL_RESULT_WRONG_THREAD || capabilities ||
+            tools->teleport(g_owner,1,&teleport) != KEEL_RESULT_WRONG_THREAD ||
+            tools->set_model(g_owner,1,"models/test.vmdl") != KEEL_RESULT_WRONG_THREAD || tools->remove(g_owner,1) != KEEL_RESULT_WRONG_THREAD)
+        { LogError("entity tools wrong-thread rejection failed"); return; }
         const auto* writes = static_cast<const KeelEntityWritesApi*>(raw);
         const std::int32_t value = 1;
         capabilities = UINT32_MAX;
@@ -492,6 +502,26 @@ private:
         termination.reserved = 1; valid = valid && round->terminate(g_owner,&termination) == KEEL_RESULT_INVALID_ARGUMENT;
         termination.reserved = 0; termination.delay = -1; valid = valid && round->terminate(g_owner,&termination) == KEEL_RESULT_INVALID_ARGUMENT;
         termination.delay = 1; --termination.size; valid = valid && round->terminate(g_owner,&termination) == KEEL_RESULT_INVALID_ARGUMENT;
+        const void* tools_raw{};
+        if (g_api->query_service(g_owner,KEELS2_ENTITY_TOOLS_SERVICE_NAME,2,&tools_raw) != KEEL_RESULT_INCOMPATIBLE ||
+            g_api->query_service(g_owner,KEELS2_ENTITY_TOOLS_SERVICE_NAME,1,&tools_raw) != KEEL_RESULT_OK || !tools_raw) return false;
+        const auto* tools = static_cast<const KeelEntityToolsApi*>(tools_raw);
+        KeelEntityTeleport teleport{sizeof(teleport),1,{1,2,3},{},{}};
+        if (tools->size != sizeof(*tools) || tools->api_version != 1 || !tools->capabilities || !tools->teleport || !tools->set_model || !tools->remove ||
+            tools->capabilities(g_owner,&capabilities) != KEEL_RESULT_UNSUPPORTED || capabilities ||
+            tools->capabilities(g_owner+10000,&capabilities) != KEEL_RESULT_NOT_READY || capabilities ||
+            tools->capabilities(g_owner,nullptr) != KEEL_RESULT_INVALID_ARGUMENT ||
+            tools->teleport(g_owner,entity,&teleport) != KEEL_RESULT_UNSUPPORTED ||
+            tools->set_model(g_owner,entity,"models/test.vmdl") != KEEL_RESULT_UNSUPPORTED ||
+            tools->remove(g_owner,entity) != KEEL_RESULT_UNSUPPORTED ||
+            tools->remove(g_owner+10000,entity) != KEEL_RESULT_NOT_READY ||
+            tools->remove(g_owner,UINT64_MAX) != KEEL_RESULT_NOT_FOUND || tools->remove(g_owner,0) != KEEL_RESULT_INVALID_ARGUMENT ||
+            tools->teleport(g_owner,UINT64_MAX,&teleport) != KEEL_RESULT_NOT_FOUND ||
+            tools->set_model(g_owner,UINT64_MAX,"models/test.vmdl") != KEEL_RESULT_NOT_FOUND ||
+            tools->set_model(g_owner,1,"") != KEEL_RESULT_INVALID_ARGUMENT ||
+            tools->set_model(g_owner,1,"bad\nasset") != KEEL_RESULT_INVALID_ARGUMENT) return false;
+        teleport.flags = 0;
+        if (tools->teleport(g_owner,1,&teleport) != KEEL_RESULT_INVALID_ARGUMENT) return false;
         const void* writes_raw{};
         valid = valid && g_api->query_service(g_owner, KEELS2_ENTITY_WRITES_SERVICE_NAME, 2, &writes_raw) == KEEL_RESULT_INCOMPATIBLE &&
             g_api->query_service(g_owner, KEELS2_ENTITY_WRITES_SERVICE_NAME, 1, &writes_raw) == KEEL_RESULT_OK;

@@ -82,6 +82,9 @@ int main(int argument_count, char** arguments)
     if (module.EntityWriteCapabilities(capabilities) != KEEL_RESULT_UNSUPPORTED || capabilities ||
         module.WriteEntityField(entity,field,&value,sizeof(value)) != KEEL_RESULT_UNSUPPORTED) return 13;
     capabilities = UINT32_MAX;
+    if (module.EntityToolCapabilities(capabilities) != KEEL_RESULT_UNSUPPORTED || capabilities ||
+        module.ApplyEntityTool(entity,KEELS2_ENTITY_TOOL_REMOVE,nullptr,nullptr) != KEEL_RESULT_UNSUPPORTED) return 19;
+    capabilities = UINT32_MAX;
     const KeelRoundTermination round{sizeof(round),8,1,0,0};
     if (module.RoundCapabilities(capabilities) != KEEL_RESULT_UNSUPPORTED || capabilities ||
         module.TerminateRound(round) != KEEL_RESULT_UNSUPPORTED) return 14;

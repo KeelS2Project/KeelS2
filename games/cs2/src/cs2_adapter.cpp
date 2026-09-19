@@ -7,6 +7,7 @@
 #include <keels2/cs2/round_control.h>
 #include <keels2/cs2/player_statistics.h>
 #include <keels2/cs2/entity_writes.h>
+#include <keels2/cs2/entity_tools.h>
 #include <keels2/keelhook.hpp>
 #include <keels2/platform/console.h>
 #include <keels2/platform/diagnostic_trace.h>
@@ -655,6 +656,7 @@ public:
         round_bindings_ = {};
         player_statistics_bindings_ = {};
         entity_write_notify_ = nullptr;
+        entity_tool_bindings_ = {}; entity_tool_module_ = {}; entity_tool_classes_.clear();
         if (trace)
         {
             platform::AppendShutdownTrace("cs2 interface invalidation complete");
@@ -1877,6 +1879,65 @@ public:
         }
         // No schema registry mutex held while game callbacks can run.
         return KeelCs2_TerminateRound(system,&context,&request,&round_bindings_);
+    }
+
+    KeelResult EntityToolCapabilities(std::uint32_t& capabilities)
+    {
+        capabilities = 0;
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        if (!entity_tool_bindings_.remove) {
+            if (compatibility_profile_.empty()) return KEEL_RESULT_UNSUPPORTED;
+            platform::LoadedModule module; std::string error;
+            if (platform::FindLoadedModule(server_.module_path,module,error) != platform::ModuleLookup::found) return KEEL_RESULT_NOT_READY;
+            KeelCs2EntityToolBindings bindings{};
+            const auto result = cs2::ResolveEntityTools(module,compatibility_profile_,bindings,error);
+            if (result != KEEL_RESULT_OK) return result;
+            entity_tool_module_ = std::move(module); entity_tool_bindings_ = bindings;
+        }
+        capabilities = KEELS2_ENTITY_TOOL_TELEPORT | KEELS2_ENTITY_TOOL_SET_MODEL | KEELS2_ENTITY_TOOL_REMOVE;
+        return KEEL_RESULT_OK;
+    }
+    KeelResult ApplyEntityTool(const GameEntityIdentity& entity, std::uint32_t kind,
+        const KeelEntityTeleport* request, const char* model)
+    {
+        if (!OnMainThread()) return KEEL_RESULT_WRONG_THREAD;
+        std::uint32_t capabilities{};
+        auto result = EntityToolCapabilities(capabilities);
+        if (result != KEEL_RESULT_OK) return result;
+        if (!(capabilities & kind)) return KEEL_RESULT_UNSUPPORTED;
+        if (!schema_system_.instance || schema_server_module_.empty()) return KEEL_RESULT_NOT_READY;
+        void* base{};
+        result = KeelCs2_ResolveEntityToolBase(schema_system_.instance,schema_server_module_.c_str(),kind,&base);
+        if (result != KEEL_RESULT_OK) return result;
+        void* system{}; std::string error;
+        {
+            std::scoped_lock lock(schema_entity_mutex_);
+            result = CurrentEntitySystemLocked(system,error);
+            if (result != KEEL_RESULT_OK) return result;
+            if (!entity.epoch || entity.epoch != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+        }
+        const KeelCs2EntityIdentity native{entity.index,entity.source2_handle};
+        KeelCs2EntityToolContext context{};
+        result = KeelCs2_PrepareEntityTool(system,&native,base,&context);
+        if (result != KEEL_RESULT_OK) return result;
+        auto found = entity_tool_classes_.find(context.class_name);
+        KeelCs2EntityToolClass target{};
+        if (found != entity_tool_classes_.end()) target = found->second;
+        else {
+            result = cs2::ResolveEntityToolClass(entity_tool_module_,context.class_name,entity_tool_bindings_,target,error);
+            if (result != KEEL_RESULT_OK) return result;
+            if (entity_tool_classes_.size() >= 128) entity_tool_classes_.clear();
+            entity_tool_classes_.emplace(context.class_name,target);
+        }
+        // Snapshot the binding, too: nested game calls may invalidate caches.
+        const auto bindings = entity_tool_bindings_;
+        {
+            std::scoped_lock lock(schema_entity_mutex_);
+            void* current{}; result = CurrentEntitySystemLocked(current,error);
+            if (result != KEEL_RESULT_OK) return result;
+            if (current != system || entity.epoch != entity_epoch_) return KEEL_RESULT_NOT_FOUND;
+        }
+        return KeelCs2_ApplyEntityTool(system,&native,&context,&bindings,&target,kind,request,model);
     }
 
     KeelResult EntityWriteCapabilities(std::uint32_t& capabilities)
@@ -3870,6 +3931,9 @@ private:
     KeelCs2PlayerStatisticsBindings player_statistics_bindings_{};
     unsigned active_stat_calls_{};
     void* entity_write_notify_{};
+    KeelCs2EntityToolBindings entity_tool_bindings_{};
+    platform::LoadedModule entity_tool_module_;
+    std::unordered_map<std::string,KeelCs2EntityToolClass> entity_tool_classes_;
     std::string schema_server_module_;
     std::string entity_system_module_;
     std::filesystem::path entity_system_module_path_;
@@ -4286,6 +4350,28 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityAcce
         std::uint32_t count, KeelEntityAccessCallback callback, void* user_data) noexcept {
         if (!adapter) return KEEL_RESULT_INVALID_ARGUMENT;
         try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->VisitEntities(entities, count, callback, user_data); }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    };
+    return KEEL_RESULT_OK;
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityTools(
+    std::uint32_t version, keels2::host::GameAdapterEntityToolsApi* api) noexcept
+{
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {};
+    if (version != keels2::host::kGameAdapterEntityToolsVersion) return KEEL_RESULT_INCOMPATIBLE;
+    api->size = sizeof(*api); api->api_version = version;
+    api->capabilities = [](keels2::host::GameAdapter* adapter, std::uint32_t* flags) noexcept {
+        if (flags) *flags = 0;
+        if (!adapter || !flags) return KEEL_RESULT_INVALID_ARGUMENT;
+        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->EntityToolCapabilities(*flags); }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    };
+    api->apply = [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* entity,
+        std::uint32_t kind, const KeelEntityTeleport* request, const char* model) noexcept {
+        if (!adapter || !entity) return KEEL_RESULT_INVALID_ARGUMENT;
+        try { return static_cast<keels2::host::Cs2Adapter*>(adapter)->ApplyEntityTool(*entity,kind,request,model); }
         catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
     };
     return KEEL_RESULT_OK;

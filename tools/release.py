@@ -319,6 +319,7 @@ def sdk_entries() -> tuple[str, ...]:
         "KeelS2/SDK/include/keels2/entities.h",
         "KeelS2/SDK/include/keels2/entities.hpp",
         "KeelS2/SDK/include/keels2/entity_writes.h",
+        "KeelS2/SDK/include/keels2/entity_tools.h",
         "KeelS2/SDK/include/keels2/entity_access.h",
         "KeelS2/SDK/include/keels2/entity_hook_data.h",
         "KeelS2/SDK/include/keels2/factories.h",

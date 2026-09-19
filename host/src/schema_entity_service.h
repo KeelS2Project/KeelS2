@@ -31,6 +31,7 @@ public:
     const KeelPlayerActionsApi& PlayerActionsApi() const noexcept;
     const KeelPlayerManagementApi& PlayerManagementApi() const noexcept;
     const KeelEntityWritesApi& EntityWritesApi() const noexcept;
+    const KeelEntityToolsApi& EntityToolsApi() const noexcept;
     const KeelEntityAccessApi& EntityAccessApi() const noexcept;
     const KeelEntityCaptureApi& EntityCaptureApi() const noexcept;
     const KeelEntityHookDataApi& EntityHookDataApi() const noexcept;
@@ -60,6 +61,12 @@ private:
     static KeelResult TerminateRoundEntry(KeelPluginHandle plugin, const KeelRoundTermination* request);
     KeelResult RoundCapabilities(KeelPluginHandle plugin, std::uint32_t* capabilities);
     KeelResult TerminateRound(KeelPluginHandle plugin, const KeelRoundTermination* request);
+    static KeelResult ToolCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* flags);
+    static KeelResult TeleportEntry(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelEntityTeleport* request);
+    static KeelResult SetModelEntry(KeelPluginHandle plugin, KeelEntityHandle entity, const char* model);
+    static KeelResult RemoveEntry(KeelPluginHandle plugin, KeelEntityHandle entity);
+    KeelResult EntityTool(KeelPluginHandle plugin, KeelEntityHandle entity, std::uint32_t kind,
+        const KeelEntityTeleport* request, const char* model, std::uint32_t* capabilities);
     static KeelResult WriteCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* capabilities);
     static KeelResult WriteFieldEntry(KeelPluginHandle plugin, KeelEntityHandle entity, KeelSchemaFieldHandle field, const void* value, std::uint32_t size);
     KeelResult WriteCapabilities(KeelPluginHandle plugin, std::uint32_t* capabilities);
@@ -172,6 +179,8 @@ private:
     KeelPlayerActionsApi player_actions_api_{};
     KeelPlayerManagementApi player_management_api_{};
     KeelEntityWritesApi entity_writes_api_{};
+    KeelEntityToolsApi entity_tools_api_{};
+    unsigned entity_tools_depth_ = 0;
     KeelEntityAccessApi entity_access_api_{};
     KeelEntityCaptureApi entity_capture_api_{};
     KeelEntityHookDataApi entity_hook_data_api_{};

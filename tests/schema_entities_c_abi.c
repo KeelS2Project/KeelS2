@@ -1,4 +1,5 @@
 #include <keels2/entities.h>
+#include <keels2/entity_tools.h>
 #include <keels2/entity_access.h>
 #include <keels2/entity_hook_data.h>
 #include <keels2/schema.h>
@@ -44,6 +45,11 @@ _Static_assert(sizeof(KeelDamageEdit) == 40, "damage edit ABI");
 _Static_assert(sizeof(KeelEntityHookDataApi) == 32, "entity hook data table ABI");
 _Static_assert(offsetof(KeelDamageInfo, force) == 32, "damage force ABI");
 _Static_assert(offsetof(KeelEntityHookDataApi, weapon_matches) == 24, "weapon match ABI");
+
+_Static_assert(sizeof(KeelEntityTeleport) == 44, "teleport ABI");
+_Static_assert(offsetof(KeelEntityTeleport, velocity) == 32, "teleport velocity ABI");
+_Static_assert(sizeof(KeelEntityToolsApi) == 40, "entity tools API ABI");
+_Static_assert(offsetof(KeelEntityToolsApi, remove) == 32, "entity remove ABI");
 
 int main(void)
 {

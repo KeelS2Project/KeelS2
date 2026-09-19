@@ -57,6 +57,7 @@ std::array<std::byte, sizeof(CSchemaType_Builtin)> g_int32_type_storage{};
 SchemaClassFieldData_t g_base_fields[3]{};
 CSchemaClassInfo g_damage_class{};
 CSchemaClassInfo g_base_class{};
+CSchemaClassInfo g_tool_model{};
 SchemaBaseClassInfoData_t g_derived_bases[1]{};
 CSchemaClassInfo g_derived_class{};
 std::uint32_t g_schema_lookup_count{};
@@ -115,6 +116,7 @@ CSchemaClassInfo* DeclaredClass(const char* name)
         }
         return &g_base_class;
     }
+    if (name && std::strcmp(name,"CBaseModelEntity") == 0) return &g_tool_model;
     if (name && std::strcmp(name, "CCSPlayerPawn") == 0)
     {
         return &g_derived_class;
@@ -255,7 +257,7 @@ void SetHealth(int32 health)
 
 void Reset()
 {
-    g_schema_lookup_count = 0;
+    g_schema_lookup_count = 0; g_tool_model = {};
     g_input_read_callback = nullptr; g_write_schema_callback = nullptr;
     g_hook_schema_callback = nullptr; g_hook_component = g_hook_component_base = {};
     g_input_pawn_class = g_movement_class = g_buttons_class = g_controller_base = g_controller_class = {};
@@ -454,6 +456,7 @@ constexpr std::size_t kNotifySlot = 28;
 #else
 constexpr std::size_t kNotifySlot = 29;
 #endif
+#include "entity_tools_fixture.h"
 int RunHookDataChecks()
 {
     Reset(); HookDataFixture(); SetGameEntitySystem(true);
@@ -1731,7 +1734,7 @@ int main()
 {
     for (const auto check : {RunHandleChecks, RunPlayerInputChecks, RunEntityWriteChecks,
                             RunPlayerStatChecks, RunRoundChecks, RunPlayerManagementChecks,
-                            RunPlayerActionChecks, RunNativeBridgeChecks, RunHookDataChecks})
+                            RunPlayerActionChecks, RunNativeBridgeChecks, RunHookDataChecks, RunEntityToolChecks})
         if (const int result = check()) {
             std::cerr << "schema/entity native bridge check " << result << " failed\n";
             return result;

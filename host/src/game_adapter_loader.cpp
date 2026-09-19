@@ -211,6 +211,15 @@ bool GameAdapterModule::Load(
         }
         entity_access_ = access;
     }
+    const auto query_tools = SymbolFunction<GameAdapterQueryEntityToolsFn>(library_.Symbol(kGameAdapterEntityToolsSymbol));
+    if (query_tools) {
+        GameAdapterEntityToolsApi api{}; api.size = sizeof(api); api.api_version = kGameAdapterEntityToolsVersion;
+        if (query_tools(kGameAdapterEntityToolsVersion,&api) != KEEL_RESULT_OK || api.size != sizeof(api) ||
+            api.api_version != kGameAdapterEntityToolsVersion || !api.capabilities || !api.apply) {
+            error = "game adapter entity tools API is incompatible"; Reset(); return false;
+        }
+        entity_tools_ = api;
+    }
     const auto query_writes = SymbolFunction<GameAdapterQueryEntityWritesFn>(library_.Symbol(kGameAdapterEntityWritesSymbol));
     if (query_writes)
     {
@@ -328,6 +337,7 @@ void GameAdapterModule::Reset() noexcept
     players_ = {};
     player_management_ = {};
     entity_writes_ = {};
+    entity_tools_ = {};
     entity_access_ = {};
     entity_capture_ = {};
     entity_hook_data_ = {};
@@ -425,6 +435,16 @@ KeelResult GameAdapterModule::VisitEntities(const GameEntityAccessRequest* entit
         ? entity_access_.visit(adapter_, entities, count, callback, user_data) : KEEL_RESULT_UNSUPPORTED;
 }
 
+KeelResult GameAdapterModule::EntityToolCapabilities(std::uint32_t& flags) const noexcept
+{
+    flags = 0;
+    return adapter_ && entity_tools_.capabilities ? entity_tools_.capabilities(adapter_,&flags) : KEEL_RESULT_UNSUPPORTED;
+}
+KeelResult GameAdapterModule::ApplyEntityTool(const GameEntityIdentity& entity, std::uint32_t kind,
+    const KeelEntityTeleport* request, const char* model) const noexcept
+{
+    return adapter_ && entity_tools_.apply ? entity_tools_.apply(adapter_,&entity,kind,request,model) : KEEL_RESULT_UNSUPPORTED;
+}
 KeelResult GameAdapterModule::EntityWriteCapabilities(std::uint32_t& capabilities) const noexcept
 {
     capabilities = 0;

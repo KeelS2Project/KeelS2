@@ -37,6 +37,7 @@ SchemaEntityService::SchemaEntityService(Host& host, GameAdapter& adapter)
     entity_hook_data_api_ = {sizeof(KeelEntityHookDataApi), KEELS2_ENTITY_HOOK_DATA_API_VERSION, &ReadDamageEntry, &WriteDamageEntry, &WeaponMatchesEntry};
     entity_capture_api_ = {sizeof(KeelEntityCaptureApi), KEELS2_ENTITY_CAPTURE_API_VERSION, &CaptureEntityEntry};
     entity_access_api_ = {sizeof(KeelEntityAccessApi), KEELS2_ENTITY_ACCESS_API_VERSION, &VisitEntitiesEntry};
+    entity_tools_api_ = {sizeof(KeelEntityToolsApi),KEELS2_ENTITY_TOOLS_API_VERSION,&ToolCapabilitiesEntry,&TeleportEntry,&SetModelEntry,&RemoveEntry};
     entity_writes_api_ = {sizeof(KeelEntityWritesApi), KEELS2_ENTITY_WRITES_API_VERSION, &WriteCapabilitiesEntry, &WriteFieldEntry};
     round_control_api_ = {sizeof(KeelRoundControlApi), KEELS2_ROUND_CONTROL_API_VERSION, &RoundCapabilitiesEntry, &TerminateRoundEntry};
     player_statistics_api_ = {sizeof(KeelPlayerStatisticsApi), KEELS2_PLAYER_STATISTICS_API_VERSION,
@@ -502,6 +503,82 @@ KeelResult SchemaEntityService::TerminateRound(KeelPluginHandle plugin, const Ke
     ++owner->active_native_operations;
     struct Hold { std::uint32_t& count; ~Hold() { --count; } } hold{owner->active_native_operations};
     return host_.adapter_module_ ? host_.adapter_module_->TerminateRound(request) : KEEL_RESULT_UNSUPPORTED;
+}
+
+const KeelEntityToolsApi& SchemaEntityService::EntityToolsApi() const noexcept { return entity_tools_api_; }
+KeelResult SchemaEntityService::ToolCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* flags)
+{
+    if (!flags) return KEEL_RESULT_INVALID_ARGUMENT;
+    *flags = 0;
+    try {
+        auto* service = active_.load(std::memory_order_acquire);
+        return service ? service->EntityTool(plugin,0,0,nullptr,nullptr,flags) : KEEL_RESULT_NOT_READY;
+    } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+KeelResult SchemaEntityService::TeleportEntry(KeelPluginHandle plugin, KeelEntityHandle entity, const KeelEntityTeleport* request)
+{
+    if (!entity || !request || request->size != sizeof(*request) || !request->flags || (request->flags & ~7u)) return KEEL_RESULT_INVALID_ARGUMENT;
+    const auto copy = *request;
+    const float* vectors[]{copy.position,copy.angles,copy.velocity};
+    for (unsigned i = 0; i < 3; ++i) if (copy.flags & (1u<<i))
+        for (unsigned j = 0; j < 3; ++j) if (!std::isfinite(vectors[i][j])) return KEEL_RESULT_INVALID_ARGUMENT;
+    try {
+        auto* service = active_.load(std::memory_order_acquire);
+        return service ? service->EntityTool(plugin,entity,KEELS2_ENTITY_TOOL_TELEPORT,&copy,nullptr,nullptr) : KEEL_RESULT_NOT_READY;
+    } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+KeelResult SchemaEntityService::SetModelEntry(KeelPluginHandle plugin, KeelEntityHandle entity, const char* model)
+{
+    if (!entity || !model || !*model) return KEEL_RESULT_INVALID_ARGUMENT;
+    std::array<char,KEELS2_ENTITY_MODEL_MAX_BYTES+1> copy{};
+    std::size_t length{};
+    while (length < copy.size() && model[length]) {
+        const auto c = static_cast<unsigned char>(model[length]);
+        if (c < 32 || c == 127) return KEEL_RESULT_INVALID_ARGUMENT;
+        copy[length++] = static_cast<char>(c);
+    }
+    if (length == copy.size()) return KEEL_RESULT_INVALID_ARGUMENT;
+    try {
+        auto* service = active_.load(std::memory_order_acquire);
+        return service ? service->EntityTool(plugin,entity,KEELS2_ENTITY_TOOL_SET_MODEL,nullptr,copy.data(),nullptr) : KEEL_RESULT_NOT_READY;
+    } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+KeelResult SchemaEntityService::RemoveEntry(KeelPluginHandle plugin, KeelEntityHandle entity)
+{
+    if (!entity) return KEEL_RESULT_INVALID_ARGUMENT;
+    try {
+        auto* service = active_.load(std::memory_order_acquire);
+        return service ? service->EntityTool(plugin,entity,KEELS2_ENTITY_TOOL_REMOVE,nullptr,nullptr,nullptr) : KEEL_RESULT_NOT_READY;
+    } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+KeelResult SchemaEntityService::EntityTool(KeelPluginHandle plugin, KeelEntityHandle entity, std::uint32_t kind,
+    const KeelEntityTeleport* request, const char* model, std::uint32_t* capabilities)
+{
+    std::scoped_lock state_lock(host_.state_mutex_);
+    if (!PluginReady(plugin)) return KEEL_RESULT_NOT_READY;
+    if (!adapter_.IsGameThread()) return KEEL_RESULT_WRONG_THREAD;
+    auto* owner = host_.PluginByHandle(plugin);
+    if (!owner || owner->cleanup_pending || owner->transitioning || owner->active_native_operations == UINT32_MAX || entity_tools_depth_ >= 8)
+        return KEEL_RESULT_BUSY;
+    ++owner->active_native_operations; ++entity_tools_depth_;
+    struct Hold { std::uint32_t& active; unsigned& depth; ~Hold() { --active; --depth; } } hold{owner->active_native_operations,entity_tools_depth_};
+    if (!kind) {
+        std::uint32_t supported{};
+        const auto result = host_.adapter_module_ ? host_.adapter_module_->EntityToolCapabilities(supported) : KEEL_RESULT_UNSUPPORTED;
+        if (result == KEEL_RESULT_OK) *capabilities = supported;
+        return result;
+    }
+    GameEntityIdentity identity{};
+    {
+        std::scoped_lock lock(registry_mutex_);
+        const auto found = entities_.find(entity);
+        if (found == entities_.end() || found->second.owner != plugin) return KEEL_RESULT_NOT_FOUND;
+        identity = found->second.entity;
+    }
+    std::string error;
+    const auto valid = adapter_.ValidateEntity(identity,error);
+    if (valid != KEEL_RESULT_OK) return valid;
+    return host_.adapter_module_ ? host_.adapter_module_->ApplyEntityTool(identity,kind,request,model) : KEEL_RESULT_UNSUPPORTED;
 }
 
 KeelResult SchemaEntityService::WriteCapabilitiesEntry(KeelPluginHandle plugin, std::uint32_t* capabilities)

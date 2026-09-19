@@ -1792,3 +1792,105 @@ extern "C" KeelResult KeelCs2_WeaponMatches(void* system, const KeelCs2EntityIde
     catch (const StatFailure& failure) { return failure.result; }
     catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
 }
+
+extern "C" KeelResult KeelCs2_ResolveEntityToolBase(void* system, const char* module, std::uint32_t kind, void** output)
+{
+    if (output) *output = nullptr;
+    if (!system || !module || !*module || !output ||
+        (kind != KEELS2_ENTITY_TOOL_TELEPORT && kind != KEELS2_ENTITY_TOOL_SET_MODEL && kind != KEELS2_ENTITY_TOOL_REMOVE))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    try {
+        auto* scope = reinterpret_cast<ISchemaSystemTypeScope*>(static_cast<ISchemaSystem*>(system)->FindTypeScopeForModule(module));
+        if (!scope) return KEEL_RESULT_NOT_READY;
+        *output = StatClass(scope,kind == KEELS2_ENTITY_TOOL_SET_MODEL ? "CBaseModelEntity" : "CBaseEntity");
+        return KEEL_RESULT_OK;
+    } catch (const StatFailure& failure) { return failure.result; }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+extern "C" KeelResult KeelCs2_PrepareEntityTool(void* system, const KeelCs2EntityIdentity* entity, void* base,
+    KeelCs2EntityToolContext* context)
+{
+    if (context) *context = {};
+    if (!system || !entity || !base || !context) return KEEL_RESULT_INVALID_ARGUMENT;
+    try {
+        auto* identity = IdentityByHandle(static_cast<CEntitySystem*>(system),entity->source2_handle);
+        if (!identity || identity->GetEntityIndex().Get() != entity->index) return KEEL_RESULT_NOT_FOUND;
+        auto* type = identity->m_pClass->GetSchemaBinding();
+        auto* required = static_cast<CSchemaClassInfo*>(base);
+        StatRequire(ValidClass(type) && ValidClass(required) && type->m_pszName && required->m_pszName);
+        StatRequire(std::strcmp(required->m_pszName,"CBaseEntity") == 0 || std::strcmp(required->m_pszName,"CBaseModelEntity") == 0);
+        StatRequire(StatBase(type,required) == 0);
+        const auto instance = reinterpret_cast<std::uintptr_t>(identity->m_pInstance);
+        StatRequire(instance % type->m_nAlignment == 0 && static_cast<std::uint32_t>(type->m_nSize) >= sizeof(void*) &&
+            sizeof(void*)-1 <= UINTPTR_MAX-instance);
+        std::size_t length{};
+        while (length < sizeof(context->class_name) && type->m_pszName[length]) ++length;
+        StatRequire(length && length < sizeof(context->class_name));
+        context->class_info = type; context->base_class = base;
+        std::memcpy(context->class_name,type->m_pszName,length+1);
+        return KEEL_RESULT_OK;
+    } catch (const StatFailure& failure) { return failure.result; }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+extern "C" KeelResult KeelCs2_ApplyEntityTool(void* system, const KeelCs2EntityIdentity* entity,
+    const KeelCs2EntityToolContext* context, const KeelCs2EntityToolBindings* bindings,
+    const KeelCs2EntityToolClass* target, std::uint32_t kind, const KeelEntityTeleport* request, const char* model)
+{
+#if defined(_WIN32)
+    constexpr std::uint32_t slot = 163;
+#else
+    constexpr std::uint32_t slot = 162;
+#endif
+    if (!system || !entity || !context || !bindings || !target || !target->vtable || !target->teleport ||
+        !bindings->set_model || !bindings->remove || bindings->teleport_slot != slot || bindings->reserved)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    KeelEntityTeleport copy{};
+    std::array<char,KEELS2_ENTITY_MODEL_MAX_BYTES+1> asset{};
+    if (kind == KEELS2_ENTITY_TOOL_TELEPORT) {
+        if (!request || model || request->size != sizeof(*request) || !request->flags || (request->flags & ~7u))
+            return KEEL_RESULT_INVALID_ARGUMENT;
+        copy = *request;
+        const float* vectors[]{copy.position,copy.angles,copy.velocity};
+        for (unsigned i = 0; i < 3; ++i) if (copy.flags & (1u<<i))
+            for (unsigned j = 0; j < 3; ++j) if (!std::isfinite(vectors[i][j])) return KEEL_RESULT_INVALID_ARGUMENT;
+    } else if (kind == KEELS2_ENTITY_TOOL_SET_MODEL) {
+        if (request || !model || !*model) return KEEL_RESULT_INVALID_ARGUMENT;
+        std::size_t length{};
+        while (length < asset.size() && model[length]) {
+            const auto c = static_cast<unsigned char>(model[length]);
+            if (c < 32 || c == 127) return KEEL_RESULT_INVALID_ARGUMENT;
+            asset[length++] = static_cast<char>(c);
+        }
+        if (length == asset.size()) return KEEL_RESULT_INVALID_ARGUMENT;
+    } else if (kind != KEELS2_ENTITY_TOOL_REMOVE || request || model) return KEEL_RESULT_INVALID_ARGUMENT;
+    try {
+        KeelCs2EntityToolContext current{};
+        const auto result = KeelCs2_PrepareEntityTool(system,entity,context->base_class,&current);
+        if (result != KEEL_RESULT_OK) return result;
+        if (current.class_info != context->class_info || std::memcmp(current.class_name,context->class_name,sizeof(current.class_name)))
+            return KEEL_RESULT_INCOMPATIBLE;
+        const auto* base = static_cast<CSchemaClassInfo*>(current.base_class);
+        if (std::strcmp(base->m_pszName,kind == KEELS2_ENTITY_TOOL_SET_MODEL ? "CBaseModelEntity" : "CBaseEntity"))
+            return KEEL_RESULT_INCOMPATIBLE;
+        auto* identity = IdentityByHandle(static_cast<CEntitySystem*>(system),entity->source2_handle);
+        if (!identity || identity->GetEntityIndex().Get() != entity->index) return KEEL_RESULT_NOT_FOUND;
+        auto* instance = identity->m_pInstance;
+        void** table{}; std::memcpy(&table,instance,sizeof(table));
+        if (table != target->vtable || table[slot] != target->teleport) return KEEL_RESULT_INCOMPATIBLE;
+        // All validation is finished; callbacks may delete this entity. Do not
+        // access its identity, class, instance or vtable after invoking the game.
+        if (kind == KEELS2_ENTITY_TOOL_TELEPORT) {
+            Vector position(copy.position[0],copy.position[1],copy.position[2]);
+            QAngle angles(copy.angles[0],copy.angles[1],copy.angles[2]);
+            Vector velocity(copy.velocity[0],copy.velocity[1],copy.velocity[2]);
+            NativeActionFunction<void (*)(void*,const Vector*,const QAngle*,const Vector*)>(target->teleport)(instance,
+                copy.flags & KEELS2_TELEPORT_POSITION ? &position : nullptr,
+                copy.flags & KEELS2_TELEPORT_ANGLES ? &angles : nullptr,
+                copy.flags & KEELS2_TELEPORT_VELOCITY ? &velocity : nullptr);
+        } else if (kind == KEELS2_ENTITY_TOOL_SET_MODEL)
+            static_cast<void>(NativeActionFunction<void* (*)(void*,const char*)>(bindings->set_model)(instance,asset.data()));
+        else NativeActionFunction<void (*)(void*)>(bindings->remove)(instance);
+        return KEEL_RESULT_OK;
+    } catch (const StatFailure& failure) { return failure.result; }
+    catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
