@@ -1451,6 +1451,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(keels2_schema_entity_native_bridge PRIVATE
         keels2_cs2_native_bridge
+        keels2_cs2_constructions keels2_keyvalues_fixture
         keels2_fake_tier0
         KeelS2::SourceSDKHeaders
     )
@@ -1459,6 +1460,10 @@ if(BUILD_TESTING)
     endif()
     keels2_enable_warnings(keels2_schema_entity_native_bridge)
     add_test(NAME schema_entity_native_bridge COMMAND keels2_schema_entity_native_bridge)
+    if(WIN32)
+        set_property(TEST schema_entity_native_bridge APPEND PROPERTY ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:keels2_cs2_keyvalues>")
+    endif()
 
     add_executable(keels2_player_action_profile
         tests/player_action_profile.cpp

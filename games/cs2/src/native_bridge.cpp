@@ -1812,7 +1812,8 @@ CEntityIdentity* CreatedIdentity(CEntitySystem* system, const KeelCs2EntityIdent
         !identity->m_pInstance || !identity->m_pClass ||
         reinterpret_cast<std::uintptr_t>(identity->m_pInstance) % alignof(CEntityInstance) ||
         (static_cast<std::uint32_t>(identity->m_flags) & rejected) ||
-        (require_pre_spawn && !(identity->m_flags & EF_IS_PRE_SPAWN)) ||
+        (require_pre_spawn && (!(identity->m_flags & EF_IS_PRE_SPAWN) ||
+            (identity->m_flags & (EF_SPAWN_IN_PROGRESS | EF_IS_ANONYMOUS_ALLOCATION)))) ||
         identity->m_pInstance->m_pEntity != identity) return nullptr;
     return identity;
 }
@@ -1838,6 +1839,8 @@ KeelResult DispatchCreatedEntity(void* system, const KeelCs2EntityIdentity* enti
         auto* identity = CreatedIdentity(static_cast<CEntitySystem*>(system),*entity,spawn);
         const auto result = spawn ? CheckCreatedClass(identity,base) : identity ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
         if (result != KEEL_RESULT_OK) return result;
+        if (!spawn && (identity->m_flags & EF_SPAWN_IN_PROGRESS)) return KEEL_RESULT_BUSY;
+        if (!spawn && (identity->m_flags & EF_IS_ANONYMOUS_ALLOCATION)) return KEEL_RESULT_INCOMPATIBLE;
         auto* instance = identity->m_pInstance;
         *invoked = KEEL_TRUE;
         if (spawn) NativeActionFunction<void (*)(void*,const void*)>(bindings->spawn)(instance,key_values);
@@ -1899,6 +1902,38 @@ extern "C" KeelResult KeelCs2_ValidateCreatedEntity(void* system, const KeelCs2E
     try { return CheckCreatedClass(CreatedIdentity(static_cast<CEntitySystem*>(system),*entity,require_pre_spawn != KEEL_FALSE),base); }
     catch (const StatFailure& failure) { return failure.result; }
     catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+}
+extern "C" KeelResult KeelCs2_SnapshotEntityHandles(void* system, uint32_t* handles, uint32_t count)
+{
+    static_assert(KEELS2_CS2_ENTITY_CAPACITY == MAX_TOTAL_ENTITIES);
+    if (!system || !handles || count != KEELS2_CS2_ENTITY_CAPACITY) return KEEL_RESULT_INVALID_ARGUMENT;
+    auto* registry = static_cast<CEntitySystem*>(system);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        const auto* chunk = registry->m_EntityList.m_pIdentityChunks[index / MAX_ENTITIES_IN_LIST];
+        const auto* identity = chunk ? &chunk[index % MAX_ENTITIES_IN_LIST] : nullptr;
+        handles[index] = identity && identity->m_pInstance ?
+            static_cast<std::uint32_t>(identity->GetRefEHandle().ToInt()) : INVALID_EHANDLE_INDEX;
+    }
+    return KEEL_RESULT_OK;
+}
+extern "C" KeelResult KeelCs2_ValidatePendingEntity(void* system, const KeelCs2EntityIdentity* entity)
+{
+    if (!system || !entity) return KEEL_RESULT_INVALID_ARGUMENT;
+    return CreatedIdentity(static_cast<CEntitySystem*>(system),*entity,true) ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
+}
+extern "C" KeelResult KeelCs2_FinishCreatedSpawn(void* system, const KeelCs2EntityIdentity* entity,
+    const KeelCs2EntityConstructionBindings* bindings)
+{
+    if (!system || !entity || !bindings || !bindings->create || !bindings->spawn || !bindings->remove)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    auto* identity = CreatedIdentity(static_cast<CEntitySystem*>(system),*entity,false);
+    if (!identity) return KEEL_RESULT_NOT_FOUND;
+    if (identity->m_flags & EF_SPAWN_IN_PROGRESS) return KEEL_RESULT_BUSY;
+    if (!(identity->m_flags & EF_IS_PRE_SPAWN)) return KEEL_RESULT_OK;
+    if (identity->m_flags & EF_IS_ANONYMOUS_ALLOCATION) return KEEL_RESULT_INCOMPATIBLE;
+    KeelBool invoked{};
+    const auto result = KeelCs2_RemoveCreatedEntity(system,entity,bindings,&invoked);
+    return result == KEEL_RESULT_OK ? KEEL_RESULT_ENGINE_FAILURE : result;
 }
 extern "C" KeelResult KeelCs2_SpawnCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
     void* base, const KeelCs2EntityConstructionBindings* bindings, const void* key_values, KeelBool* invoked)

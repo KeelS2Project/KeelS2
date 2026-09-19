@@ -214,6 +214,13 @@ KeelResult KeelCs2_CreateEntity(const KeelCs2EntityConstructionBindings* binding
     const char* class_name, void** instance);
 KeelResult KeelCs2_CaptureCreatedEntity(void* system, const void* instance,
     KeelCs2EntityIdentity* output);
+#define KEELS2_CS2_ENTITY_CAPACITY 32768u
+KeelResult KeelCs2_SnapshotEntityHandles(void* system, uint32_t* handles, uint32_t count);
+KeelResult KeelCs2_ValidatePendingEntity(void* system, const KeelCs2EntityIdentity* entity);
+/* Reacquire the current epoch/system first. Cancel a still-pending spawn that
+ * did not enter engine spawning. Never remove a live or spawning entity. */
+KeelResult KeelCs2_FinishCreatedSpawn(void* system, const KeelCs2EntityIdentity* entity,
+    const KeelCs2EntityConstructionBindings* bindings);
 KeelResult KeelCs2_ValidateCreatedEntity(void* system, const KeelCs2EntityIdentity* entity,
     void* base_class, KeelBool require_pre_spawn);
 /* Invoked becomes true immediately before entering the engine and remains
