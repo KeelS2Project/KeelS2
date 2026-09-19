@@ -1136,6 +1136,7 @@ template <typename Value>
 using SchemaField = schema::Field<Value>;
 
 using Entity = entities::Entity;
+using EntityInputValue = entities::InputValue;
 
 class Plugin
 {
@@ -2185,6 +2186,14 @@ protected:
         const auto result = ConnectEntities(service);
         if (result != KEEL_RESULT_OK) { static_cast<void>(output.Reset()); return status_.Set(result); }
         return status_.Set(service.FindSource2(static_cast<uint32>(handle.ToInt()), output));
+    }
+
+    bool EntityInputCapabilities(std::uint32_t& direct, std::uint32_t& queued) noexcept
+    {
+        direct = queued = 0;
+        entities::Service service;
+        const auto result = ConnectEntities(service);
+        return status_.Set(result == KEEL_RESULT_OK ? service.InputCapabilities(direct,queued) : result);
     }
 
     bool EntityConstructionAvailable() noexcept

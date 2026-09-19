@@ -15,6 +15,7 @@ using ::DependencyRequirement;
 using keels2::ConVar;
 using Action = kh::Action;
 using keels2::Entity;
+using keels2::EntityInputValue;
 using keels2::SchemaField;
 using keels2::PlayerInfo;
 using keels2::PlayerInput;

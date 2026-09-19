@@ -39,6 +39,17 @@ private:
             return;
         }
         LogMessage("Spawned entity {}", prop.Index());
+        std::uint32_t direct{}, queued{};
+        if (EntityInputCapabilities(direct,queued) && (direct & (1u << KEELS2_INPUT_VOID)))
+        {
+            bool input_invoked{};
+            if (!prop.AcceptInput("Enable",input_invoked))
+                LogWarning("Enable input failed: {} (engine entered: {})",prop.LastError(),input_invoked);
+            // Typed payloads use EntityInputValue, for example a copied string.
+            // QueueInput values survive this wrapper; Reset does not cancel them.
+            if (queued & (1u << KEELS2_INPUT_STRING))
+                static_cast<void>(prop.QueueInput("SetAnimation",1.0f,input_invoked,EntityInputValue("idle")));
+        }
     }
 };
 }

@@ -3,6 +3,7 @@
 
 #include <keels2/entities.h>
 #include <keels2/entity_construction.h>
+#include <keels2/detail/entity_input_copy.hpp>
 #include <keels2/detail/authoring_status.hpp>
 #include <keels2/player_actions.h>
 #include <keels2/plugin.hpp>
@@ -17,6 +18,7 @@
 
 namespace keels2::entities
 {
+class InputValue;
 class Entity final
 {
     struct Value
@@ -214,8 +216,36 @@ public:
         const auto query = Tools(held, tools);
         return status.Set(query == KEEL_RESULT_OK ? tools->teleport(held.value.context->plugin, held.value.handle, &request) : query);
     }
+    // Inputs require live entities. Invoked reports engine entry, including
+    // failures; success does not establish that the input name exists.
+    bool AcceptInput(const char* name, bool& invoked, const InputValue& value,
+        const Entity* activator = nullptr, const Entity* caller = nullptr) const noexcept;
+    bool AcceptInput(const char* name, bool& invoked,
+        const Entity* activator = nullptr, const Entity* caller = nullptr) const noexcept;
+    // The engine owns queued copies; Reset/plugin unload does not cancel them.
+    // Delay must be finite/nonnegative. Current profiles refuse queued colors.
+    bool QueueInput(const char* name, float delay, bool& invoked, const InputValue& value,
+        const Entity* activator = nullptr, const Entity* caller = nullptr) const noexcept;
+    bool QueueInput(const char* name, float delay, bool& invoked,
+        const Entity* activator = nullptr, const Entity* caller = nullptr) const noexcept;
 private:
     friend class Service;
+    friend class InputValue;
+    bool SendInput(const char*, bool&, const InputValue&, const Entity*, const Entity*, bool, float) const noexcept;
+    static KeelResult InputApi(const std::shared_ptr<keels2::detail::ContextState>& context, KeelEntityInputApi& api)
+    {
+        api = {};
+        if (!context || !context->accepting_resources.load(std::memory_order_acquire) || !context->api || !context->api->query_service)
+            return KEEL_RESULT_NOT_READY;
+        const void* raw{};
+        const auto result = context->api->query_service(context->plugin,KEELS2_ENTITY_INPUT_SERVICE_NAME,KEELS2_ENTITY_INPUT_API_VERSION,&raw);
+        if (result != KEEL_RESULT_OK) return result;
+        if (!context->accepting_resources.load(std::memory_order_acquire)) return KEEL_RESULT_NOT_READY;
+        const auto* table = static_cast<const KeelEntityInputApi*>(raw);
+        if (!table || table->size != sizeof(*table) || table->api_version != KEELS2_ENTITY_INPUT_API_VERSION ||
+            !table->capabilities || !table->dispatch) return KEEL_RESULT_INCOMPATIBLE;
+        api = *table; return KEEL_RESULT_OK;
+    }
     static bool Identity(const KeelEntityInfo& left, const KeelEntityInfo& right) noexcept
     {
         return right.size == sizeof(right) && !right.reserved && right.index == left.index &&
@@ -318,6 +348,121 @@ private:
     mutable keels2::detail::AuthoringStatus empty_status_;
 };
 
+// Owns selected numeric/string data. Entity payloads retain the wrapper's
+// identity/generation snapshot, so Reset/destruction makes them stale instead
+// of retaining a dangling Entity pointer. Copies and moves are independent of
+// the source value's storage. Strings are bounded to 4095 bytes; construction
+// may allocate, as with std::string. Invalid text is refused when dispatched.
+class InputValue final
+{
+public:
+    InputValue() noexcept { value_.size = sizeof(value_); value_.type = KEELS2_INPUT_VOID; }
+    explicit InputValue(const char* text) : InputValue()
+    {
+        value_.type = KEELS2_INPUT_STRING;
+        valid_ = Entity::Text(text,KEELS2_INPUT_MAX_STRING,true,text_);
+    }
+    explicit InputValue(bool value) noexcept : InputValue() { value_.type = KEELS2_INPUT_BOOL; value_.int_value = value ? 1 : 0; }
+    explicit InputValue(std::int32_t value) noexcept : InputValue() { value_.type = KEELS2_INPUT_INT32; value_.int_value = value; }
+    explicit InputValue(float value) noexcept : InputValue() { value_.type = KEELS2_INPUT_FLOAT; value_.float_value = value; }
+    explicit InputValue(const Vector& value) noexcept : InputValue()
+    {
+        value_.type = KEELS2_INPUT_VECTOR;
+        value_.vector_value[0] = value.x; value_.vector_value[1] = value.y; value_.vector_value[2] = value.z;
+    }
+    explicit InputValue(const QAngle& value) noexcept : InputValue()
+    {
+        value_.type = KEELS2_INPUT_ANGLES;
+        value_.vector_value[0] = value.x; value_.vector_value[1] = value.y; value_.vector_value[2] = value.z;
+    }
+    explicit InputValue(const Color& value) noexcept : InputValue()
+    {
+        value_.type = KEELS2_INPUT_COLOR;
+        for (int i = 0; i < 4; ++i) value_.color_value[i] = value[i];
+    }
+    explicit InputValue(const Entity& entity) noexcept : InputValue()
+    {
+        value_.type = KEELS2_INPUT_ENTITY; entity_ = entity.Capture();
+    }
+private:
+    friend class Entity;
+    KeelEntityInputValue value_{};
+    std::string text_;
+    Entity::Snapshot entity_;
+    bool valid_{true};
+};
+inline bool Entity::SendInput(const char* name, bool& invoked, const InputValue& input,
+    const Entity* activator, const Entity* caller, bool queued, float delay) const noexcept
+{
+    invoked = false;
+    const auto held = Capture(); auto& status = Status();
+    const auto finish = [&](KeelResult result) {
+        // A callback may have installed a replacement entity in this wrapper.
+        // Preserve the replacement's status and never touch the wrapper itself.
+        if (!held.state || held.state->generation == held.generation) status.Set(result);
+        return result == KEEL_RESULT_OK;
+    };
+    KeelBool called{};
+    try
+    {
+        if (!held.Current()) return finish(KEEL_RESULT_NOT_READY);
+        if (!input.valid_) return finish(KEEL_RESULT_INVALID_ARGUMENT);
+        const bool entity_value = input.value_.type == KEELS2_INPUT_ENTITY;
+        const std::array<Snapshot,4> participants{held,activator ? activator->Capture() : Snapshot{},
+            caller ? caller->Capture() : Snapshot{},entity_value ? input.entity_ : Snapshot{}};
+        const bool supplied[]{true,activator != nullptr,caller != nullptr,entity_value};
+        auto value = input.value_;
+        value.string_value = value.type == KEELS2_INPUT_STRING ? input.text_.c_str() : nullptr;
+        keels2::detail::EntityInputCopy copy;
+        const auto copied = copy.Assign(name,value,queued ? KEEL_TRUE : KEEL_FALSE,delay);
+        if (copied != KEEL_RESULT_OK) return finish(copied);
+        // All user-owned wrapper/value storage has been captured. No source
+        // Entity or InputValue is read after entering the first host callback.
+        for (std::size_t i = 0; i < participants.size(); ++i) if (supplied[i]) {
+            if (!participants[i].Current()) return finish(KEEL_RESULT_NOT_READY);
+            if (participants[i].value.context != held.value.context) return finish(KEEL_RESULT_INVALID_ARGUMENT);
+        }
+        for (std::size_t i = 0; i < participants.size(); ++i) if (supplied[i]) {
+            bool pending{};
+            const auto result = Describe(participants[i],&pending);
+            if (result != KEEL_RESULT_OK) return finish(result);
+            if (pending) return finish(KEEL_RESULT_NOT_READY);
+        }
+        KeelEntityInputApi api{};
+        const auto query = InputApi(held.value.context,api);
+        if (query != KEEL_RESULT_OK) return finish(query);
+        for (std::size_t i = 0; i < participants.size(); ++i)
+            if (supplied[i] && !participants[i].Current()) return finish(KEEL_RESULT_NOT_READY);
+        KeelEntityInputRequest request{}; request.size = sizeof(request);
+        request.input = copy.name.data(); request.value = copy.value;
+        request.activator = participants[1].value.handle; request.caller = participants[2].value.handle;
+        request.value_entity = participants[3].value.handle;
+        request.queued = queued ? KEEL_TRUE : KEEL_FALSE; request.delay = delay;
+        const auto result = api.dispatch(held.value.context->plugin,held.value.handle,&request,&called);
+        invoked = called != KEEL_FALSE;
+        return finish(called <= KEEL_TRUE ? result : KEEL_RESULT_INCOMPATIBLE);
+    }
+    catch (...) { invoked = called != KEEL_FALSE; return finish(KEEL_RESULT_ENGINE_FAILURE); }
+}
+inline bool Entity::AcceptInput(const char* name, bool& invoked, const InputValue& value,
+    const Entity* activator, const Entity* caller) const noexcept
+{
+    return SendInput(name,invoked,value,activator,caller,false,0);
+}
+inline bool Entity::AcceptInput(const char* name, bool& invoked, const Entity* activator, const Entity* caller) const noexcept
+{
+    return SendInput(name,invoked,InputValue{},activator,caller,false,0);
+}
+inline bool Entity::QueueInput(const char* name, float delay, bool& invoked, const InputValue& value,
+    const Entity* activator, const Entity* caller) const noexcept
+{
+    return SendInput(name,invoked,value,activator,caller,true,delay);
+}
+inline bool Entity::QueueInput(const char* name, float delay, bool& invoked, const Entity* activator, const Entity* caller) const noexcept
+{
+    return SendInput(name,invoked,InputValue{},activator,caller,true,delay);
+}
+
 class Service final
 {
 public:
@@ -366,6 +511,23 @@ public:
             const auto query = Construction(context, construction);
             return query == KEEL_RESULT_OK ? construction->create(context->plugin, name.c_str(), &handle) : query;
         });
+    }
+    KeelResult InputCapabilities(std::uint32_t& direct, std::uint32_t& queued) const noexcept
+    {
+        direct = queued = 0;
+        const auto context = context_;
+        try {
+            if (!*this) return KEEL_RESULT_NOT_READY;
+            KeelEntityInputApi api{};
+            const auto query = Entity::InputApi(context,api);
+            if (query != KEEL_RESULT_OK) return query;
+            std::uint32_t a{}, b{};
+            const auto result = api.capabilities(context->plugin,&a,&b);
+            if (result != KEEL_RESULT_OK) return result;
+            if (!context->accepting_resources.load(std::memory_order_acquire)) return KEEL_RESULT_NOT_READY;
+            if ((a | b) & ~((1u << (KEELS2_INPUT_ENTITY+1))-1)) return KEEL_RESULT_INCOMPATIBLE;
+            direct = a; queued = b; return KEEL_RESULT_OK;
+        } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
     }
     KeelResult ConstructionReady() const noexcept
     {
