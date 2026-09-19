@@ -346,6 +346,8 @@ set_target_properties(keels2_cs2_compatibility PROPERTIES
 )
 keels2_enable_warnings(keels2_cs2_compatibility)
 
+include(cmake/KeelS2EntityKeyValues.cmake)
+
 add_library(keels2_cs2_native_bridge STATIC
     games/cs2/src/native_bridge.cpp
     games/cs2/src/native_players.cpp
@@ -579,6 +581,7 @@ if(BUILD_TESTING)
             "bootstrap=$<TARGET_FILE:keels2_bootstrap>"
             "host=$<TARGET_FILE:keels2_host>"
             "adapter=$<TARGET_FILE:keels2_game_cs2>"
+            "keyvalues=$<TARGET_FILE:keels2_cs2_keyvalues>"
             "plugin=$<TARGET_FILE:keels2_abi_v4_fixture_plugin>"
     )
 
@@ -713,7 +716,7 @@ if(BUILD_TESTING)
         )
     endif()
 
-    add_library(keels2_fake_tier0 SHARED tests/fake_tier0.cpp)
+    add_library(keels2_fake_tier0 SHARED tests/fake_tier0.cpp tests/keyvalues_memory_fixture.cpp)
     set_target_properties(keels2_fake_tier0 PROPERTIES
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN YES

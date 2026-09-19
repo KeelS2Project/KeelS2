@@ -47,6 +47,21 @@ function(keels2_provide_source_sdk)
         "public/eiface.h|96eb1b99fb6e0639536cbb2485930e301b37d85b490906037550868183358db6"
         "public/playerslot.h|866edce8a35340e78b58c68d07c671c27ecdd77752e6a73ef4ded8e0c394d825"
         "common/network_connection.proto|5ad59894e7024061f8eb53c53e75039975e432122d0cd363734f64e9ba7bc7cc"
+        "public/entity2/entitykeyvalues.h|d373a9f973c861f608a0615233c80ca1009fda09653e912bb8fb654a8955ea1c"
+        "entity2/entitykeyvalues.cpp|30c57ceaf83b379ad529371968bbf3e71cd4b56bae99a5275de8834c036500ca"
+        "public/tier1/keyvalues3.h|5e64744fc1049f34f20ea80c3aa446218c8ba78bb56b656c1d80aa6e1971e9e0"
+        "tier1/keyvalues3.cpp|1c4e7be1d7bb866d14e607da6ffa0b4bbdbe0e6ff05022c84911764c9b14bbd7"
+        "public/entity2/entitysystem.h|51ecf67a063c59f516c7990ec83cba19aecbe7843ecb14d06ca6b5ba86bbfa16"
+        "entity2/entitysystem.cpp|22d6c3a29b6cfe44f5b84707f2d959cee91fafaa1b5946c49252812f8d148bd3"
+        "public/entity2/entityidentity.h|0c1e03865fd1ba0761c531ec35b9ea2597d70db3677357d983b684ed6478b0f4"
+        "entity2/entityidentity.cpp|2bd3a6d9f01475f60b975d0a6877b848ef16b2b3b16bd680ff44f04dd553925a"
+        "public/tier0/memalloc.h|474059cdab8eda458f0535f3999df52ee569b10ed876e082c7f892e879e3c13f"
+        "public/tier0/memdbgon.h|ddf055fe62362c513dc9ad86bb074c3ca91fe0b9c80fd670ba9a64d2cdb593ce"
+        "public/tier0/threadtools.h|ab2a337fc02a5787386c5845a217c317dc7023aa77bfa6af9f435cf7816dcba4"
+        "public/tier1/utlsymbollarge.h|884e7e515d5153352264427637b6f2160ae9d3f678167f98aab4904dad121c3a"
+        "public/tier1/utlhashtable.h|cb750708ddb43621f3d43d94d6fc47a8918427c79d9b4e46cf0e3300e601ccd9"
+        "public/tier1/memblockallocator.h|0c3682cd75fa11ef127efc12406cb99d6a10f52e6ca976304d0c812e33280e06"
+        "public/tier1/utlbuffer.h|23325eea4837b53badf00ff357442e48c552819fc13f9d7bc24941fd74fe2dba"
     )
     foreach(_keels2_source_sdk_check IN LISTS _keels2_source_sdk_checks)
         string(REPLACE "|" ";" _keels2_source_sdk_check_parts "${_keels2_source_sdk_check}")

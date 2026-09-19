@@ -1,0 +1,4 @@
+{
+    global: KeelCs2KeyValues_Build; KeelCs2KeyValues_Release;
+    local: *;
+};

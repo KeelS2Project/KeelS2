@@ -13,6 +13,12 @@ at configure time and validates it by SHA-256. The upstream files retain their
 Valve copyright notices. The source archive is not copied into the KeelS2
 repository or installed SDK header tree.
 
+The CS2 entity keyvalue helper compiles private copies of five SDK source files
+with fixes for unaligned symbol hashes, detached hash-table allocation ownership,
+memory-block page bounds, keyvalue-table reallocation, and Windows allocator
+selection. These copies preserve the original copyright notices and object
+layouts; the shared SDK source remains unchanged.
+
 ## SafetyHook
 
 Revision: `f44cc070a8340f2f26649553c49533475417304d`

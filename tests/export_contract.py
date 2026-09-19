@@ -16,6 +16,7 @@ EXPECTED = {
                 "KeelGameAdapter_QueryPlayerStatistics", "KeelGameAdapter_QueryEntityAccess",
                 "KeelGameAdapter_QueryEntityCapture", "KeelGameAdapter_QueryEntityHookData",
                 "KeelGameAdapter_QueryEntityTools"},
+    "keyvalues": {"KeelCs2KeyValues_Build", "KeelCs2KeyValues_Release"},
     "plugin": {"KeelPlugin_Query", "KeelPlugin_Load", "KeelPlugin_Unload"},
 }
 

@@ -68,6 +68,7 @@ public:
         BF_NONE = 0
     };
 
+    KEELS2_FAKE_TIER0_EXPORT CUtlBuffer(int grow_size, int initial_size, BufferFlags_t flags);
     KEELS2_FAKE_TIER0_EXPORT CUtlBuffer(
         const void* buffer,
         int size,
@@ -77,11 +78,22 @@ public:
         char* token,
         int maximum_length,
         bool parse_comments = true);
+protected:
+    KEELS2_FAKE_TIER0_EXPORT void AddNullTermination();
+private:
+    struct Memory { unsigned count{}, allocated{}; void* pointer{}; } memory_;
+    int get_{}, put_{};
+    unsigned char error_{}, flags_{}, reserved_{};
+    int tabs_{}, max_put_{}, offset_{};
+    using Overflow = bool (CUtlBuffer::*)(int);
+    Overflow get_overflow_{}, put_overflow_{};
+    unsigned byteswap_{};
+
 };
 
 class IMemAlloc;
 
-KEELS2_FAKE_TIER0_EXPORT IMemAlloc* g_pMemAlloc{};
+extern "C" { KEELS2_FAKE_TIER0_EXPORT IMemAlloc* g_pMemAlloc{}; }
 
 const char* CBufferString::Insert(
     int index,
@@ -261,6 +273,17 @@ bool CUtlString::operator==(const CUtlString& other) const
     return std::strcmp(left, right) == 0;
 }
 
+CUtlBuffer::CUtlBuffer(int, int size, BufferFlags_t flags)
+{
+    if (size) std::abort();
+    flags_ = static_cast<unsigned char>(flags);
+}
+void CUtlBuffer::AddNullTermination()
+{
+    if (memory_.pointer || memory_.count || put_) std::abort();
+    max_put_ = 0;
+}
+
 CUtlBuffer::CUtlBuffer(const void* buffer, int size, BufferFlags_t flags)
 {
     static_cast<void>(buffer);
@@ -293,6 +316,9 @@ extern "C" KEELS2_FAKE_TIER0_EXPORT void Plat_ExitProcess(int code)
     std::exit(code);
 }
 
+bool KeyValuesFixtureMemoryActive();
+void* KeyValuesFixtureVectorAlloc(void*, bool, std::size_t);
+
 extern "C" KEELS2_FAKE_TIER0_EXPORT void* UtlVectorMemory_Alloc(
     void* memory,
     bool reallocate,
@@ -300,6 +326,8 @@ extern "C" KEELS2_FAKE_TIER0_EXPORT void* UtlVectorMemory_Alloc(
     int old_size)
 {
     static_cast<void>(old_size);
+    if (KeyValuesFixtureMemoryActive()) return KeyValuesFixtureVectorAlloc(memory,reallocate,
+        new_size > 0 ? static_cast<std::size_t>(new_size) : 0);
     if (new_size <= 0)
     {
         if (reallocate)
