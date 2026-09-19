@@ -321,6 +321,8 @@ struct GameAdapterEntityOutputsApi
     // Defer attaches internal cleanup to the current host-owned hook frame.
     // It runs after all post callbacks, before the target becomes inactive.
     KeelResult (*start)(GameAdapter*, const KeelHookApi*, GameHookDefer, GameEntityOutputCallback, void*) noexcept;
+    // Host must obtain OK from stop before destroying the adapter or callback
+    // context; BUSY retains pending invocation cleanup and permits retry.
     KeelResult (*stop)(GameAdapter*) noexcept;
 };
 using GameAdapterQueryEntityOutputsFn = KeelResult (*)(std::uint32_t, GameAdapterEntityOutputsApi*) noexcept;

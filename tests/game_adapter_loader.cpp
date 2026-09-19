@@ -55,6 +55,7 @@ int main(int argument_count, char** arguments)
     }
     if (module.EntityConstruction().size || module.EntityConstruction().ready) return 20;
     if (module.EntityInput().size || module.EntityInput().dispatch) return 21;
+    if (module.EntityOutputs().size || module.EntityOutputs().start) return 22;
     KeelHostCompatibilityInfo compatibility{};
     const keels2::host::GameEntityIdentity entity{};
     const KeelPlayerAction action{sizeof(KeelPlayerAction), KEELS2_PLAYER_ACTION_KILL, {}, 0};

@@ -67,6 +67,7 @@ KeelHookAction NativeOutputHooks::Entry(KeelHookFrame* frame, void* data)
 }
 KeelHookAction NativeOutputHooks::Dispatch(KeelHookFrame& frame)
 {
+    if (!environment_.OutputOnThread()) return KH_ACTION_CONTINUE;
     if (!callback_ || frame.target != target_ || frame.argument_count != 7 || !frame.arguments) return KH_ACTION_CONTINUE;
     if (frame.phase == KH_PHASE_POST) {
         const auto found = std::find_if(pending_.begin(),pending_.end(),[&](const auto& value) { return value.owner && value.frame == &frame; });

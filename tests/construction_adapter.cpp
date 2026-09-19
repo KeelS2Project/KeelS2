@@ -47,6 +47,15 @@ int main(int argc, char** argv)
         CHECK(query_input(99,&input) == KEEL_RESULT_INCOMPATIBLE && !input.size && !input.dispatch);
         input.size = sizeof(input);
         CHECK(query_input(1,&input) == KEEL_RESULT_OK && input.size == sizeof(input) && input.api_version == 1 && input.capabilities && input.dispatch);
+        const auto query_outputs = Function<GameAdapterQueryEntityOutputsFn>(library.Symbol(kGameAdapterEntityOutputsSymbol));
+        CHECK(query_outputs);
+        GameAdapterEntityOutputsApi outputs{};
+        CHECK(query_outputs(1,nullptr) == KEEL_RESULT_INVALID_ARGUMENT);
+        CHECK(query_outputs(1,&outputs) == KEEL_RESULT_INVALID_ARGUMENT);
+        outputs.size = sizeof(outputs);
+        CHECK(query_outputs(99,&outputs) == KEEL_RESULT_INCOMPATIBLE && !outputs.size && !outputs.start);
+        outputs.size = sizeof(outputs);
+        CHECK(query_outputs(1,&outputs) == KEEL_RESULT_OK && outputs.api_version == 1 && outputs.start && outputs.stop);
         const GameAdapterHostApi host{sizeof(host),kGameAdapterAbiVersion,[]() noexcept { return 1u; },[]() noexcept {}};
 #if defined(_WIN32)
         constexpr const char* platform = "win64";
@@ -57,7 +66,18 @@ int main(int argc, char** argv)
         if (!module.Load(directory,"cs2",platform,host,error)) throw std::runtime_error(error);
         CHECK(module.EntityConstruction().api_version == 1 && module.EntityConstruction().create == api.create);
         CHECK(module.EntityInput().dispatch == input.dispatch && module.EntityInput().api_version == 1);
+        CHECK(module.EntityOutputs().start == outputs.start && module.EntityOutputs().api_version == 1);
         auto* adapter = module.Get();
+        KeelHookApi hooks{};
+        const auto defer = +[](KeelHookFrame*,void (*)(void*),void*) noexcept -> KeelResult { return KEEL_RESULT_OK; };
+        const auto callback = +[](const KeelEntityOutputEvent*,std::uint64_t,void*) -> std::uint32_t { return KEELS2_OUTPUT_CONTINUE; };
+        CHECK(outputs.start(nullptr,&hooks,defer,callback,nullptr) == KEEL_RESULT_INVALID_ARGUMENT);
+        CHECK(outputs.start(adapter,nullptr,defer,callback,nullptr) == KEEL_RESULT_INVALID_ARGUMENT);
+        CHECK(outputs.start(adapter,&hooks,nullptr,callback,nullptr) == KEEL_RESULT_INVALID_ARGUMENT);
+        CHECK(outputs.start(adapter,&hooks,defer,nullptr,nullptr) == KEEL_RESULT_INVALID_ARGUMENT);
+        CHECK(outputs.start(adapter,&hooks,defer,callback,nullptr) == KEEL_RESULT_WRONG_THREAD);
+        CHECK(outputs.stop(nullptr) == KEEL_RESULT_INVALID_ARGUMENT);
+        CHECK(outputs.stop(adapter) == KEEL_RESULT_OK);
         std::uint64_t token = 99;
         GameEntityIdentity identity{3,4,5};
         KeelBool invoked = KEEL_TRUE;
@@ -87,6 +107,7 @@ int main(int argc, char** argv)
             *static_cast<bool*>(data) = true; return KEEL_RESULT_OK;
         },&visited) == KEEL_RESULT_WRONG_THREAD && !visited);
         adapter->Stop(); module.Reset();
+        CHECK(!module.EntityOutputs().size && !module.EntityOutputs().start);
         CHECK(!module.EntityInput().size && !module.EntityInput().dispatch);
         CHECK(!module.EntityConstruction().size && !module.EntityConstruction().create);
         return 0;

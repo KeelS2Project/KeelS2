@@ -38,6 +38,7 @@ public:
     KeelResult EntityToolCapabilities(std::uint32_t& flags) const noexcept;
     KeelResult ApplyEntityTool(const GameEntityIdentity& entity, std::uint32_t kind,
         const KeelEntityTeleport* request, const char* model) const noexcept;
+    const GameAdapterEntityOutputsApi& EntityOutputs() const noexcept { return entity_outputs_; }
     const GameAdapterEntityInputApi& EntityInput() const noexcept { return entity_input_; }
     const GameAdapterEntityConstructionApi& EntityConstruction() const noexcept { return entity_construction_; }
     KeelResult EntityWriteCapabilities(std::uint32_t& capabilities) const noexcept;
@@ -67,6 +68,7 @@ private:
     GameAdapterPlayerManagementApi player_management_{};
     GameAdapterEntityWritesApi entity_writes_{};
     GameAdapterEntityInputApi entity_input_{};
+    GameAdapterEntityOutputsApi entity_outputs_{};
     GameAdapterEntityToolsApi entity_tools_{};
     GameAdapterEntityConstructionApi entity_construction_{};
     GameAdapterEntityAccessApi entity_access_{};

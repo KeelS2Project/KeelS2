@@ -1234,6 +1234,13 @@ KeelResult Host::QueryService(
         *service = &schema_entities_->EntityConstructionApi();
         return KEEL_RESULT_OK;
     }
+    if (std::strcmp(name, KEELS2_ENTITY_OUTPUTS_SERVICE_NAME) == 0)
+    {
+        if (version != KEELS2_ENTITY_OUTPUTS_API_VERSION) return KEEL_RESULT_INCOMPATIBLE;
+        if (!schema_entities_) schema_entities_ = std::make_unique<SchemaEntityService>(*this, *adapter_);
+        *service = &schema_entities_->EntityOutputsApi();
+        return KEEL_RESULT_OK;
+    }
     if (std::strcmp(name, KEELS2_ENTITY_INPUT_SERVICE_NAME) == 0)
     {
         if (version != KEELS2_ENTITY_INPUT_API_VERSION) return KEEL_RESULT_INCOMPATIBLE;

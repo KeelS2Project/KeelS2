@@ -15,7 +15,7 @@ EXPECTED = {
                 "KeelGameAdapter_QueryEntityWrites", "KeelGameAdapter_QueryRoundControl",
                 "KeelGameAdapter_QueryPlayerStatistics", "KeelGameAdapter_QueryEntityAccess",
                 "KeelGameAdapter_QueryEntityCapture", "KeelGameAdapter_QueryEntityHookData",
-                "KeelGameAdapter_QueryEntityTools", "KeelGameAdapter_QueryEntityConstruction", "KeelGameAdapter_QueryEntityInput"},
+                "KeelGameAdapter_QueryEntityTools", "KeelGameAdapter_QueryEntityConstruction", "KeelGameAdapter_QueryEntityInput", "KeelGameAdapter_QueryEntityOutputs"},
     "keyvalues": {"KeelCs2KeyValues_Build", "KeelCs2KeyValues_Release", "KeelCs2Variant_Build", "KeelCs2Variant_Release", "KeelCs2Variant_Read"},
     "plugin": {"KeelPlugin_Query", "KeelPlugin_Load", "KeelPlugin_Unload"},
 }

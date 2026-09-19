@@ -8,6 +8,7 @@ class OutputEnvironment
 {
 public:
     virtual ~OutputEnvironment() = default;
+    virtual bool OutputOnThread() const noexcept = 0;
     virtual KeelResult OutputCurrent(std::uint64_t expected, void*& system, std::uint64_t& epoch) noexcept = 0;
 };
 class NativeOutputHooks final

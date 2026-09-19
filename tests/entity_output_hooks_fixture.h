@@ -4,6 +4,7 @@ struct OutputHookProbe final : keels2::cs2::OutputEnvironment {
     keels2::cs2::NativeOutputHooks hooks{*this};
     KeelHookApi api{};
     KeelHookCallbackSpec installed{};
+    const std::thread::id thread{std::this_thread::get_id()};
     std::uint64_t epoch{1};
     KeelResult readiness{KEEL_RESULT_OK}, defer_result{KEEL_RESULT_OK}, add_result{KEEL_RESULT_OK},
         remove_result{KEEL_RESULT_OK}, release_result{KEEL_RESULT_OK};
@@ -21,6 +22,7 @@ struct OutputHookProbe final : keels2::cs2::OutputEnvironment {
         api.remove_callback = &Remove; api.release_target = &Release;
     }
     void Require(bool valid) { failed |= !valid; }
+    bool OutputOnThread() const noexcept override { return std::this_thread::get_id() == thread; }
     KeelResult OutputCurrent(std::uint64_t expected, void*& system, std::uint64_t& current) noexcept override {
         system = EntitySystem(); current = epoch;
         return readiness != KEEL_RESULT_OK ? readiness : expected && expected != epoch ? KEEL_RESULT_NOT_FOUND : KEEL_RESULT_OK;
@@ -115,6 +117,8 @@ int RunOutputHookChecks()
     if (p.pre != 1 || p.post != 1 || p.completed != 1 || p.original != 1 || !p.tokens.empty() ||
         p.observed.flags != KEELS2_OUTPUT_ORIGINAL_CALLED || p.observed.value_status != KEEL_RESULT_OK ||
         std::strcmp(p.observed.value.string_value,"copied output")) return 1502;
+    reset(); p.before = [&] { std::thread worker([&] { p.Fire(); }); worker.join(); }; p.Fire();
+    if (p.pre != 1 || p.post != 1 || p.completed != 1 || p.original != 2 || !p.tokens.empty()) return 1520;
     reset(); p.block = true; p.Fire();
     if (p.pre != 1 || p.post != 1 || p.completed != 1 || p.original || p.observed.flags) return 1503;
     reset(); p.throwing = true; p.Fire();

@@ -8,6 +8,7 @@
         KeelGameAdapter_QueryEntityWrites;
         KeelGameAdapter_QueryEntityTools;
         KeelGameAdapter_QueryEntityInput;
+        KeelGameAdapter_QueryEntityOutputs;
         KeelGameAdapter_QueryEntityConstruction;
         KeelGameAdapter_QueryEntityAccess;
         KeelGameAdapter_QueryEntityCapture;

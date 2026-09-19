@@ -14,6 +14,7 @@
 #include <string>
 #include <unordered_map>
 #include <thread>
+#include <vector>
 
 namespace keels2::host
 {
@@ -34,6 +35,7 @@ public:
     const KeelPlayerManagementApi& PlayerManagementApi() const noexcept;
     const KeelEntityWritesApi& EntityWritesApi() const noexcept;
     const KeelEntityToolsApi& EntityToolsApi() const noexcept;
+    const KeelEntityOutputsApi& EntityOutputsApi() const noexcept;
     const KeelEntityInputApi& EntityInputApi() const noexcept;
     const KeelEntityConstructionApi& EntityConstructionApi() const noexcept;
     const KeelEntityAccessApi& EntityAccessApi() const noexcept;
@@ -45,6 +47,7 @@ public:
     bool Shutdown();
 
 private:
+    friend struct SchemaEntityServiceTest;
     static KeelResult InputCapabilitiesEntry(KeelPluginHandle, std::uint32_t*, std::uint32_t*);
     static KeelResult DispatchInputEntry(KeelPluginHandle, KeelEntityHandle, const KeelEntityInputRequest*, KeelBool*);
     KeelResult EntityInput(KeelPluginHandle, KeelEntityHandle, const KeelEntityInputRequest*, std::uint32_t*, std::uint32_t*, KeelBool*);
@@ -106,6 +109,30 @@ private:
         bool construction_owner{};
     };
     using Construction = EntityRecord::Construction;
+    struct OutputRecord
+    {
+        KeelPluginHandle owner{};
+        KeelEntityOutputHandle handle{};
+        std::uint32_t phases{};
+        std::int32_t priority{};
+        GameEntityIdentity entity{};
+        std::weak_ptr<Construction> construction;
+        std::string class_name, output_name;
+        KeelEntityOutputCallback callback{};
+        void* user_data{};
+        bool enabled{true};
+    };
+    struct OutputInvocation { std::vector<std::shared_ptr<OutputRecord>> callbacks; };
+    static KeelResult OutputsReadyEntry(KeelPluginHandle);
+    static KeelResult SubscribeOutputEntry(KeelPluginHandle, const KeelEntityOutputSpec*, KeelEntityOutputHandle*);
+    static KeelResult UnsubscribeOutputEntry(KeelPluginHandle, KeelEntityOutputHandle);
+    static std::uint32_t DispatchOutputsEntry(const KeelEntityOutputEvent*, std::uint64_t, void*);
+    KeelResult ConfigureOutputs(KeelPluginHandle, const KeelEntityOutputSpec*, KeelEntityOutputHandle*);
+    KeelResult ValidateOutputIdentity(const GameEntityIdentity&, const std::weak_ptr<Construction>&);
+    void PruneOutputs(std::uint64_t epoch = 0);
+    void ReleaseOutputs(KeelPluginHandle);
+    bool StopOutputs();
+    std::uint32_t DispatchOutputs(const KeelEntityOutputEvent*, std::uint64_t);
     class ConstructionOperation;
     static bool EntityAccessible(const EntityRecord& record, KeelPluginHandle plugin) noexcept;
     static KeelResult ConstructionReadyEntry(KeelPluginHandle);
@@ -217,6 +244,12 @@ private:
     KeelEntityWritesApi entity_writes_api_{};
     KeelEntityToolsApi entity_tools_api_{};
     KeelEntityInputApi entity_input_api_{};
+    KeelEntityOutputsApi entity_outputs_api_{};
+    std::unordered_map<KeelEntityOutputHandle,std::shared_ptr<OutputRecord>> outputs_;
+    std::unordered_map<std::uint64_t,std::shared_ptr<OutputInvocation>> output_invocations_;
+    KeelEntityOutputHandle next_output_{1};
+    unsigned output_depth_{};
+    bool outputs_started_{}, outputs_retained_{}, outputs_starting_{}, outputs_stopping_{};
     unsigned entity_input_depth_{};
     KeelEntityConstructionApi entity_construction_api_{};
     unsigned construction_depth_{};

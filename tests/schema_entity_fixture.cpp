@@ -41,6 +41,7 @@ KEELS2_CS2_KEYVALUES_EXPORT void KeelFixtureVariantRelease(void*);
 #include <stdexcept>
 #include <vector>
 #include <functional>
+#include <thread>
 
 #if defined(_WIN32)
 #define KEELS2_SCHEMA_FIXTURE_EXPORT __declspec(dllexport)

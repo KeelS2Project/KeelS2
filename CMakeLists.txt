@@ -421,6 +421,7 @@ add_library(keels2_host SHARED
     host/src/schema_entity_service.cpp
     host/src/entity_construction_service.cpp
     host/src/entity_input_service.cpp
+    host/src/entity_outputs_service.cpp
     host/src/service_name_validation.cpp
     host/src/source2_callbacks_service.cpp
     host/src/source2_runtime_service.cpp
@@ -572,6 +573,16 @@ if(BUILD_TESTING)
     keels2_enable_warnings(keels2_keelhook_completion)
     add_test(NAME keelhook_completion COMMAND keels2_keelhook_completion)
     set_tests_properties(keelhook_completion PROPERTIES TIMEOUT 30)
+
+    add_executable(keels2_entity_outputs_service_test
+        tests/entity_outputs_service.cpp ${KEELS2_HOST_SOURCE_CONTRACT})
+    target_compile_definitions(keels2_entity_outputs_service_test PRIVATE KEELS2_HOST_VERSION="${PROJECT_VERSION}")
+    target_include_directories(keels2_entity_outputs_service_test PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/generated" bootstrap/include host/src platform/include sdk/include)
+    target_link_libraries(keels2_entity_outputs_service_test PRIVATE ${KEELS2_HOST_LINK_CONTRACT})
+    keels2_enable_warnings(keels2_entity_outputs_service_test)
+    add_test(NAME entity_outputs_service COMMAND keels2_entity_outputs_service_test)
+    set_tests_properties(entity_outputs_service PROPERTIES TIMEOUT 30)
 
     add_executable(keels2_entity_input_service_test
         tests/entity_input_service.cpp ${KEELS2_HOST_SOURCE_CONTRACT})

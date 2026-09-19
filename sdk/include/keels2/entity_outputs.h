@@ -14,6 +14,8 @@ extern "C" {
 #define KEELS2_OUTPUT_CONTINUE 0u
 #define KEELS2_OUTPUT_BLOCK 1u
 #define KEELS2_OUTPUT_MAX_DEPTH 8u
+#define KEELS2_OUTPUT_MAX_SUBSCRIPTIONS 64u
+#define KEELS2_OUTPUT_MAX_HOST_SUBSCRIPTIONS 256u
 
 typedef uint64_t KeelEntityOutputHandle;
 typedef struct KeelEntityOutputValue
@@ -70,7 +72,12 @@ typedef struct KeelEntityOutputSpec
  * Closing that entity handle does not unsubscribe. BLOCK is valid only in PRE.
  * POST reports whether the original ran, including blocked outputs. Callbacks
  * receive copied PRE values even if the original changes or destroys them.
- * Registrations are removed on plugin cleanup; entity filters expire with maps. */
+ * PRE callbacks run by descending priority, then registration order; POST
+ * reverses the captured order. Registrations added during PRE begin with the
+ * next invocation. Closed or paused registrations are skipped. Exceptions and
+ * invalid actions remove the offending registration and block in PRE only.
+ * Registrations are removed on plugin cleanup; entity filters expire with maps.
+ * Exhausting callback recursion blocks that nested output before user callbacks. */
 typedef struct KeelEntityOutputsApi
 {
     uint32_t size;
